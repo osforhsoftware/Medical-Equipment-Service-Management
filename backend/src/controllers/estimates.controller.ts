@@ -1,0 +1,42 @@
+import { type Request, type Response, type NextFunction } from "express";
+import { estimatesService } from "@/services/estimates.service";
+import { success } from "@/utils/response";
+
+export class EstimatesController {
+  async getAll(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await estimatesService.getAll(req.tenantId!);
+      res.json(success("Estimates fetched successfully", data));
+    } catch (err) { next(err); }
+  }
+
+  async getById(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await estimatesService.getById(req.params.id, req.tenantId!);
+      res.json(success("Estimate fetched successfully", data));
+    } catch (err) { next(err); }
+  }
+
+  async create(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await estimatesService.create(req.tenantId!, req.body);
+      res.status(201).json(success("Estimate created successfully", data));
+    } catch (err) { next(err); }
+  }
+
+  async update(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await estimatesService.update(req.params.id, req.tenantId!, req.body);
+      res.json(success("Estimate updated successfully", data));
+    } catch (err) { next(err); }
+  }
+
+  async delete(req: Request, res: Response, next: NextFunction) {
+    try {
+      await estimatesService.delete(req.params.id, req.tenantId!);
+      res.status(204).send();
+    } catch (err) { next(err); }
+  }
+}
+
+export const estimatesController = new EstimatesController();

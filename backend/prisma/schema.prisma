@@ -1,0 +1,645 @@
+// ============================================================
+// MESMS — Prisma Schema
+// Database: PostgreSQL (Local)
+// ORM: Prisma v5
+// Multi-tenant SaaS-ready
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Tenant ────────────────────────────────────────────────────────────────────
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users            User[]
+  branches         Branch[]
+  customers        Customer[]
+  equipment        Equipment[]
+  serviceRequests  ServiceRequest[]
+  estimates        Estimate[]
+  serviceJobs      ServiceJob[]
+  inventoryItems   InventoryItem[]
+  suppliers        Supplier[]
+  purchaseOrders   PurchaseOrder[]
+  stockTransfers   StockTransfer[]
+  amcContracts     AmcContract[]
+  invoices         Invoice[]
+  notifications    Notification[]
+  auditLogs        AuditLog[]
+  settings         TenantSettings?
+
+  @@map("tenants")
+}
+
+model TenantSettings {
+  id                    String   @id @default(cuid())
+  tenantId              String   @unique @map("tenant_id")
+  supportEmail          String   @default("support@mesms.io") @map("support_email")
+  defaultTaxRate        Decimal  @default(8) @map("default_tax_rate") @db.Decimal(5, 2)
+  amcRenewalReminders   Boolean  @default(true) @map("amc_renewal_reminders")
+  lowStockAlerts        Boolean  @default(true) @map("low_stock_alerts")
+  autoReserveOnApproval Boolean  @default(true) @map("auto_reserve_on_approval")
+  autoGenerateReport    Boolean  @default(true) @map("auto_generate_report")
+  rbacMatrix            Json     @default("{}") @map("rbac_matrix")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_settings")
+}
+
+// ── User ──────────────────────────────────────────────────────────────────────
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String   @map("tenant_id")
+  name         String
+  username     String
+  email        String
+  passwordHash String   @map("password_hash")
+  role         UserRole
+  phone        String?
+  isActive     Boolean  @default(true) @map("is_active")
+  branchId     String?  @map("branch_id")
+  avatarColor  String   @default("205 90% 42%") @map("avatar_color")
+  customerId   String?  @map("customer_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, email])
+  @@unique([tenantId, username])
+  @@index([tenantId])
+  @@index([email])
+  @@index([username])
+  @@map("users")
+}
+
+enum UserRole {
+  admin
+  coordinator
+  inspector
+  estimator
+  engineer
+  inventory
+  billing
+  customer
+}
+
+// ── Branch ────────────────────────────────────────────────────────────────────
+model Branch {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  city      String
+  phone     String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("branches")
+}
+
+// ── Customer ──────────────────────────────────────────────────────────────────
+model Customer {
+  id             String         @id @default(cuid())
+  tenantId       String         @map("tenant_id")
+  name           String
+  type           CustomerType
+  contactPerson  String         @map("contact_person")
+  email          String
+  phone          String
+  city           String
+  branchId       String         @map("branch_id")
+  equipmentCount Int            @default(0) @map("equipment_count")
+  activeJobs     Int            @default(0) @map("active_jobs")
+  status         EntityStatus   @default(active)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  equipment       Equipment[]
+  serviceRequests ServiceRequest[]
+
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("customers")
+}
+
+enum CustomerType {
+  Hospital
+  Clinic
+  DiagnosticLab @map("Diagnostic Lab")
+  Research
+  Dental
+}
+
+enum EntityStatus {
+  active
+  inactive
+}
+
+// ── Equipment ─────────────────────────────────────────────────────────────────
+model Equipment {
+  id              String       @id @default(cuid())
+  tenantId        String       @map("tenant_id")
+  assetTag        String       @map("asset_tag")
+  name            String
+  model           String
+  manufacturer    String
+  category        String
+  serialNumber    String       @map("serial_number")
+  customerId      String       @map("customer_id")
+  customerName    String       @map("customer_name")
+  branchId        String       @map("branch_id")
+  location        String
+  installDate     DateTime     @map("install_date")
+  warrantyEnd     DateTime     @map("warranty_end")
+  amcStatus       AmcStatus    @default(none) @map("amc_status")
+  condition       Condition    @default(operational)
+  lastServiceDate DateTime?    @map("last_service_date")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer        Customer        @relation(fields: [customerId], references: [id])
+  serviceRequests ServiceRequest[]
+
+  @@unique([tenantId, assetTag])
+  @@index([tenantId])
+  @@index([customerId])
+  @@map("equipment")
+}
+
+enum AmcStatus {
+  active
+  expiring
+  expired
+  none
+}
+
+enum Condition {
+  operational
+  needsService @map("needs-service")
+  down
+}
+
+// ── ServiceRequest ────────────────────────────────────────────────────────────
+model ServiceRequest {
+  id            String          @id @default(cuid())
+  tenantId      String          @map("tenant_id")
+  reference     String
+  customerId    String          @map("customer_id")
+  customerName  String          @map("customer_name")
+  equipmentId   String?         @map("equipment_id")
+  equipmentName String?         @map("equipment_name")
+  branchId      String          @map("branch_id")
+  type          ServiceType
+  priority      Priority
+  status        ServiceStatus   @default(new)
+  description   String          @default("")
+  createdBy     String          @map("created_by")
+  assignedTo    String?         @map("assigned_to")
+  assignedName  String?         @map("assigned_name")
+  slaDue        DateTime        @map("sla_due")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  tenant            Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer          Customer                  @relation(fields: [customerId], references: [id])
+  equipment         Equipment?                @relation(fields: [equipmentId], references: [id])
+  timelineEvents    TimelineEvent[]
+  equipmentItems    ServiceRequestEquipment[]
+  inspectionReport  InspectionReport?
+
+  @@unique([tenantId, reference])
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([status])
+  @@index([assignedTo])
+  @@map("service_requests")
+}
+
+// ── ServiceRequestEquipment ───────────────────────────────────────────────────
+model ServiceRequestEquipment {
+  id               String         @id @default(cuid())
+  serviceRequestId String         @map("service_request_id")
+  equipmentId      String         @map("equipment_id")
+  equipmentName    String         @map("equipment_name")
+  assetTag         String         @default("") @map("asset_tag")
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+
+  @@index([serviceRequestId])
+  @@map("service_request_equipment")
+}
+
+// ── InspectionReport ──────────────────────────────────────────────────────────
+model InspectionReport {
+  id               String         @id @default(cuid())
+  serviceRequestId String         @unique @map("service_request_id")
+  findings         String
+  recommendation   String
+  severity         String
+  reportedBy       String         @map("reported_by")
+  reportedAt       DateTime       @default(now()) @map("reported_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+
+  @@index([serviceRequestId])
+  @@map("inspection_reports")
+}
+
+model TimelineEvent {
+  id        String         @id @default(cuid())
+  requestId String         @map("request_id")
+  at        DateTime       @default(now())
+  actor     String
+  action    String
+  note      String?
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+
+  request ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@map("timeline_events")
+}
+
+enum ServiceType {
+  Repair
+  Maintenance
+  Calibration
+  Inspection
+  Installation
+}
+
+enum Priority {
+  low
+  medium
+  high
+  critical
+}
+
+enum ServiceStatus {
+  new
+  inspection
+  estimate
+  approval
+  inProgress  @map("in-progress")
+  completed
+  invoiced
+}
+
+// ── Estimate ──────────────────────────────────────────────────────────────────
+model Estimate {
+  id            String         @id @default(cuid())
+  tenantId      String         @map("tenant_id")
+  reference     String
+  requestRef    String         @map("request_ref")
+  customerName  String         @map("customer_name")
+  equipmentName String         @map("equipment_name")
+  laborCost     Decimal        @default(0) @map("labor_cost") @db.Decimal(12, 2)
+  partsCost     Decimal        @default(0) @map("parts_cost") @db.Decimal(12, 2)
+  total         Decimal        @default(0) @db.Decimal(12, 2)
+  status        EstimateStatus @default(draft)
+  validUntil    DateTime       @map("valid_until")
+  revision      Int            @default(1)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, reference])
+  @@index([tenantId])
+  @@map("estimates")
+}
+
+enum EstimateStatus {
+  draft
+  sent
+  approved
+  rejected
+  revision
+}
+
+// ── ServiceJob ────────────────────────────────────────────────────────────────
+model ServiceJob {
+  id            String     @id @default(cuid())
+  tenantId      String     @map("tenant_id")
+  reference     String
+  requestRef    String     @map("request_ref")
+  customerName  String     @map("customer_name")
+  equipmentName String     @map("equipment_name")
+  engineer      String
+  engineerId    String?    @map("engineer_id")
+  type          ServiceType
+  status        JobStatus  @default(scheduled)
+  scheduledFor  DateTime   @map("scheduled_for")
+  progress      Int        @default(0)
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  photos          JobPhoto[]
+  partsRequests   JobPartsRequest[]
+  signature       JobSignature?
+  stockDeductions JobStockDeduction[]
+  activities      JobActivity[]
+
+  @@unique([tenantId, reference])
+  @@index([tenantId])
+  @@index([engineerId])
+  @@map("service_jobs")
+}
+
+model JobPhoto {
+  id         String   @id @default(cuid())
+  jobId      String   @map("job_id")
+  filename   String
+  mimeType   String   @map("mime_type")
+  dataUrl    String   @map("data_url") @db.Text
+  uploadedBy String   @map("uploaded_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  job ServiceJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_photos")
+}
+
+model JobPartsRequest {
+  id          String   @id @default(cuid())
+  jobId       String   @map("job_id")
+  notes       String
+  status      String   @default("pending")
+  requestedBy String   @map("requested_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  job ServiceJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_parts_requests")
+}
+
+model JobSignature {
+  id            String   @id @default(cuid())
+  jobId         String   @unique @map("job_id")
+  customerName  String   @map("customer_name")
+  signatureData String?  @map("signature_data") @db.Text
+  capturedBy    String   @map("captured_by")
+  capturedAt    DateTime @default(now()) @map("captured_at")
+
+  job ServiceJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@map("job_signatures")
+}
+
+model JobStockDeduction {
+  id              String   @id @default(cuid())
+  jobId           String   @map("job_id")
+  inventoryItemId String   @map("inventory_item_id")
+  itemName        String   @map("item_name")
+  sku             String
+  quantity        Int
+  deductedBy      String   @map("deducted_by")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  job ServiceJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_stock_deductions")
+}
+
+model JobActivity {
+  id        String   @id @default(cuid())
+  jobId     String   @map("job_id")
+  actor     String
+  action    String
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  job ServiceJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_activities")
+}
+
+enum JobStatus {
+  scheduled
+  inProgress    @map("in-progress")
+  partsPending  @map("parts-pending")
+  review
+  completed
+}
+
+// ── InventoryItem ─────────────────────────────────────────────────────────────
+model InventoryItem {
+  id           String  @id @default(cuid())
+  tenantId     String  @map("tenant_id")
+  sku          String
+  name         String
+  category     String
+  branchId     String  @map("branch_id")
+  inStock      Int     @default(0) @map("in_stock")
+  reserved     Int     @default(0)
+  reorderLevel Int     @default(0) @map("reorder_level")
+  unitCost     Decimal @default(0) @map("unit_cost") @db.Decimal(12, 2)
+  supplier     String
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("inventory_items")
+}
+
+// ── Supplier ──────────────────────────────────────────────────────────────────
+model Supplier {
+  id         String  @id @default(cuid())
+  tenantId   String  @map("tenant_id")
+  name       String
+  contact    String
+  email      String
+  phone      String
+  category   String
+  rating     Decimal @default(0) @db.Decimal(3, 1)
+  openOrders Int     @default(0) @map("open_orders")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("suppliers")
+}
+
+// ── PurchaseOrder ─────────────────────────────────────────────────────────────
+model PurchaseOrder {
+  id           String              @id @default(cuid())
+  tenantId     String              @map("tenant_id")
+  reference    String
+  supplier     String
+  items        Int                 @default(0)
+  total        Decimal             @default(0) @db.Decimal(12, 2)
+  status       PurchaseOrderStatus @default(draft)
+  expectedDate DateTime            @map("expected_date")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, reference])
+  @@index([tenantId])
+  @@map("purchase_orders")
+}
+
+enum PurchaseOrderStatus {
+  draft
+  sent
+  received
+  partial
+  cancelled
+}
+
+// ── StockTransfer ─────────────────────────────────────────────────────────────
+model StockTransfer {
+  id         String               @id @default(cuid())
+  tenantId   String               @map("tenant_id")
+  reference  String
+  fromBranch String               @map("from_branch")
+  toBranch   String               @map("to_branch")
+  items      Int                  @default(0)
+  status     StockTransferStatus  @default(pending)
+  createdAt  DateTime             @default(now()) @map("created_at")
+  updatedAt  DateTime             @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, reference])
+  @@index([tenantId])
+  @@map("stock_transfers")
+}
+
+enum StockTransferStatus {
+  pending
+  inTransit  @map("in-transit")
+  received
+}
+
+// ── AmcContract ───────────────────────────────────────────────────────────────
+model AmcContract {
+  id             String      @id @default(cuid())
+  tenantId       String      @map("tenant_id")
+  reference      String
+  customerName   String      @map("customer_name")
+  equipmentCount Int         @default(0) @map("equipment_count")
+  startDate      DateTime    @map("start_date")
+  endDate        DateTime    @map("end_date")
+  value          Decimal     @default(0) @db.Decimal(12, 2)
+  visitsPerYear  Int         @default(0) @map("visits_per_year")
+  visitsDone     Int         @default(0) @map("visits_done")
+  status         AmcStatus   @default(active)
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, reference])
+  @@index([tenantId])
+  @@map("amc_contracts")
+}
+
+// ── Invoice ───────────────────────────────────────────────────────────────────
+model Invoice {
+  id           String        @id @default(cuid())
+  tenantId     String        @map("tenant_id")
+  reference    String
+  customerName String        @map("customer_name")
+  jobRef       String        @map("job_ref")
+  amount       Decimal       @default(0) @db.Decimal(12, 2)
+  tax          Decimal       @default(0) @db.Decimal(12, 2)
+  total        Decimal       @default(0) @db.Decimal(12, 2)
+  status       InvoiceStatus @default(draft)
+  issuedAt     DateTime      @default(now()) @map("issued_at")
+  dueAt        DateTime      @map("due_at")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, reference])
+  @@index([tenantId])
+  @@map("invoices")
+}
+
+enum InvoiceStatus {
+  draft
+  sent
+  paid
+  overdue
+}
+
+// ── Notification ──────────────────────────────────────────────────────────────
+model Notification {
+  id       String           @id @default(cuid())
+  tenantId String           @map("tenant_id")
+  type     NotificationType
+  title    String
+  body     String
+  read     Boolean          @default(false)
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, read])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  amc
+  stock
+  approval
+  job
+  system
+}
+
+// ── AuditLog ──────────────────────────────────────────────────────────────────
+model AuditLog {
+  id       String   @id @default(cuid())
+  tenantId String   @map("tenant_id")
+  actor    String
+  role     String
+  action   String
+  entity   String
+  ip       String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}

@@ -1,0 +1,28 @@
+import dotenv from "dotenv";
+import { z } from "zod";
+import path from "path";
+
+// Load .env from backend root
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+
+const envSchema = z.object({
+  DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+  JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
+  JWT_EXPIRES_IN: z.string().default("8h"),
+  PORT: z.string().default("4000").transform(Number),
+  BACKEND_URL: z.string().default("http://localhost:4000"),
+  FRONTEND_URL: z.string().default("http://localhost:8080"),
+  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  CORS_ORIGIN: z.string().default("http://localhost:8080"),
+  DEFAULT_TENANT_ID: z.string().default("tenant_medtech_01"),
+});
+
+const parsed = envSchema.safeParse(process.env);
+
+if (!parsed.success) {
+  console.error("❌  Invalid environment variables:");
+  parsed.error.errors.forEach((e) => console.error(`   ${e.path.join(".")}: ${e.message}`));
+  process.exit(1);
+}
+
+export const env = parsed.data;

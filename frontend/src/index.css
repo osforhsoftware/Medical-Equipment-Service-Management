@@ -1,0 +1,135 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* MESMS design system — clean medical-technology SaaS.
+   All colors MUST be HSL. */
+
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 215 30% 17%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 30% 17%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 30% 17%;
+
+    /* Medical blue */
+    --primary: 205 90% 42%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 195 92% 55%;
+
+    /* Teal accent */
+    --secondary: 185 60% 94%;
+    --secondary-foreground: 188 70% 24%;
+
+    --muted: 210 30% 95%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 174 62% 47%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 62% 40%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 30 50% 15%;
+
+    --info: 205 90% 42%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 214 28% 89%;
+    --input: 214 28% 89%;
+    --ring: 205 90% 42%;
+
+    --radius: 0.75rem;
+
+    --gradient-primary: linear-gradient(135deg, hsl(205 90% 42%), hsl(190 90% 50%));
+    --gradient-accent: linear-gradient(135deg, hsl(174 62% 47%), hsl(195 92% 55%));
+    --gradient-surface: linear-gradient(180deg, hsl(0 0% 100%), hsl(210 40% 98%));
+
+    --shadow-sm: 0 1px 2px hsl(215 30% 17% / 0.05);
+    --shadow-md: 0 4px 16px -4px hsl(205 60% 30% / 0.12);
+    --shadow-lg: 0 18px 40px -12px hsl(205 60% 30% / 0.22);
+    --shadow-glow: 0 0 32px hsl(195 92% 55% / 0.35);
+
+    --sidebar-background: 213 38% 14%;
+    --sidebar-foreground: 210 30% 80%;
+    --sidebar-primary: 195 92% 55%;
+    --sidebar-primary-foreground: 213 38% 12%;
+    --sidebar-accent: 213 34% 20%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 213 30% 22%;
+    --sidebar-ring: 195 92% 55%;
+  }
+
+  .dark {
+    --background: 215 32% 10%;
+    --foreground: 210 30% 92%;
+    --card: 215 30% 13%;
+    --card-foreground: 210 30% 92%;
+    --popover: 215 30% 13%;
+    --popover-foreground: 210 30% 92%;
+    --primary: 195 92% 55%;
+    --primary-foreground: 215 32% 10%;
+    --primary-glow: 195 92% 55%;
+    --secondary: 213 30% 20%;
+    --secondary-foreground: 195 60% 80%;
+    --muted: 213 28% 18%;
+    --muted-foreground: 215 16% 62%;
+    --accent: 174 62% 47%;
+    --accent-foreground: 215 32% 10%;
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 55% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 90% 55%;
+    --warning-foreground: 30 50% 12%;
+    --info: 195 92% 55%;
+    --info-foreground: 215 32% 10%;
+    --border: 213 28% 22%;
+    --input: 213 28% 22%;
+    --ring: 195 92% 55%;
+    --sidebar-background: 215 36% 8%;
+    --sidebar-foreground: 210 30% 80%;
+    --sidebar-primary: 195 92% 55%;
+    --sidebar-primary-foreground: 215 36% 8%;
+    --sidebar-accent: 213 30% 16%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 213 28% 18%;
+    --sidebar-ring: 195 92% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Inter", system-ui, sans-serif;
+  }
+  h1, h2, h3, h4, h5, .font-display {
+    font-family: "Sora", "Inter", sans-serif;
+  }
+}
+
+@layer utilities {
+  .bg-gradient-primary { background-image: var(--gradient-primary); }
+  .bg-gradient-accent { background-image: var(--gradient-accent); }
+  .bg-gradient-surface { background-image: var(--gradient-surface); }
+  .shadow-card { box-shadow: var(--shadow-md); }
+  .shadow-elevated { box-shadow: var(--shadow-lg); }
+  .shadow-glow { box-shadow: var(--shadow-glow); }
+  .text-gradient {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+}
