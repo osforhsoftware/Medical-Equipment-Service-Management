@@ -1,6 +1,5 @@
 import { estimatesRepository } from "@/repositories/estimates.repository";
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
-import { notificationsService } from "@/services/notifications.service";
 import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
 
@@ -31,6 +30,9 @@ export class EstimatesService {
     const total = (Number(data.laborCost) || 0) + (Number(data.partsCost) || 0);
 
     const estimate = await estimatesRepository.create(tenantId, {
+      serviceRequestId: sr.id,
+      customerId: sr.customerId,
+      equipmentId: sr.equipmentId,
       reference,
       requestRef: sr.reference,
       customerName: sr.customerName,
@@ -38,7 +40,7 @@ export class EstimatesService {
       laborCost: data.laborCost,
       partsCost: data.partsCost,
       total,
-      status: (data.status ?? "draft") as never,
+      status: "draft",
       validUntil: new Date(data.validUntil),
     });
 
@@ -51,6 +53,16 @@ export class EstimatesService {
 
   async update(id: string, tenantId: string, data: Record<string, unknown>) {
     const existing = await this.getById(id, tenantId);
+    if (data.status && data.status !== existing.status) {
+      const maySend = ["draft", "revision"].includes(existing.status) && data.status === "sent";
+      if (!maySend) {
+        throw new AppError("Use the estimate decision endpoint for approval, rejection, or revision", 409);
+      }
+      data.sentAt = new Date();
+    }
+    if (["approved", "rejected"].includes(existing.status) && (data.laborCost != null || data.partsCost != null)) {
+      throw new AppError("Decided estimates are immutable", 409);
+    }
     if (data.laborCost != null || data.partsCost != null) {
       data.total =
         (Number(data.laborCost ?? existing.laborCost) || 0) +
@@ -59,16 +71,7 @@ export class EstimatesService {
     if (data.validUntil) {
       data.validUntil = new Date(data.validUntil as string);
     }
-    const updated = await estimatesRepository.update(id, tenantId, data);
-    if (data.status === "approved" && existing.status !== "approved") {
-      await notificationsService.notifyEstimateApproved(
-        tenantId,
-        existing.reference,
-        existing.customerName,
-        Number(updated.total),
-      );
-    }
-    return updated;
+    return estimatesRepository.update(id, tenantId, data);
   }
 
   async delete(id: string, tenantId: string) {

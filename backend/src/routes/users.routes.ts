@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { usersController } from "@/controllers/users.controller";
-import { authenticate, requireRole } from "@/middleware/auth";
+import { authenticate, requireRole, requireStaff } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
 import { validate } from "@/middleware/validate";
 import { createUserSchema, updateUserSchema } from "@/schemas/users.schema";
@@ -8,6 +8,7 @@ import { createUserSchema, updateUserSchema } from "@/schemas/users.schema";
 const router = Router();
 
 router.use(authenticate, resolveTenant);
+router.use(requireStaff);
 
 // Read endpoints — accessible to all authenticated staff (for assignment dropdowns)
 router.get("/", usersController.list);

@@ -9,13 +9,23 @@ import { failure } from "@/utils/response";
 export const validate =
   (schema: ZodSchema) =>
   (req: Request, res: Response, next: NextFunction): void => {
-    const result = schema.safeParse(req.body);
+    let result = schema.safeParse(req.body);
+    let enveloped = false;
+    // Supports schemas that explicitly separate body validation while remaining
+    // backward-compatible with the existing direct-body schemas.
+    if (!result.success) {
+      const envelopeResult = schema.safeParse({ body: req.body });
+      if (envelopeResult.success) {
+        result = envelopeResult;
+        enveloped = true;
+      }
+    }
     if (!result.success) {
       const errors = result.error.errors.map((e) => `${e.path.join(".")}: ${e.message}`);
       res.status(422).json({ ...failure("Validation failed"), errors });
       return;
     }
-    req.body = result.data;
+    req.body = enveloped ? (result.data as { body: unknown }).body : result.data;
     next();
   };
 

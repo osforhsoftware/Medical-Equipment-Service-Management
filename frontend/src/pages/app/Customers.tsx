@@ -217,7 +217,7 @@ export default function Customers() {
           <Button
             onClick={openCreate}
             disabled={branches.length === 0}
-            className="bg-gradient-primary text-primary-foreground hover:opacity-90"
+            variant="brand"
           >
             <Plus className="mr-1 h-4 w-4" /> Add Customer
           </Button>

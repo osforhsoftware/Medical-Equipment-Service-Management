@@ -29,7 +29,7 @@ export class JobsController {
 
   async create(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await jobsService.create(req.tenantId!, req.body);
+      const data = await jobsService.create(req.tenantId!, req.body, req.user!.userId);
       res.status(201).json(success("Job created successfully", data));
     } catch (err) { next(err); }
   }
@@ -109,7 +109,12 @@ export class JobsController {
 
   async getActivities(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await jobsService.getActivities(req.params.id, req.tenantId!);
+      const data = await jobsService.getActivities(
+        req.params.id,
+        req.tenantId!,
+        req.user!.userId,
+        req.user!.role,
+      );
       res.json(success("Job activities fetched", data));
     } catch (err) { next(err); }
   }

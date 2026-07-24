@@ -3,25 +3,40 @@ import { notificationsRepository } from "@/repositories/notifications.repository
 import type { NotificationType } from "@prisma/client";
 
 export class NotificationsService {
-  async getAll(tenantId: string) {
+  private async rolesFor(tenantId: string, userId: string, primaryRole: string) {
+    const assignments = await prisma.userRoleAssignment.findMany({
+      where: { tenantId, userId },
+      select: { role: { select: { key: true } } },
+    });
+    return [...new Set([primaryRole, ...assignments.map((assignment) => assignment.role.key)])];
+  }
+
+  async getAll(tenantId: string, userId: string, primaryRole: string) {
     await this.syncOperationalAlerts(tenantId);
-    return notificationsRepository.findAll(tenantId);
+    return notificationsRepository.findAll(tenantId, userId, await this.rolesFor(tenantId, userId, primaryRole));
   }
 
-  unreadCount(tenantId: string) {
-    return notificationsRepository.unreadCount(tenantId);
+  async unreadCount(tenantId: string, userId: string, primaryRole: string) {
+    await this.syncOperationalAlerts(tenantId);
+    return notificationsRepository.unreadCount(tenantId, userId, await this.rolesFor(tenantId, userId, primaryRole));
   }
 
-  create(tenantId: string, data: { type: NotificationType; title: string; body: string }) {
+  create(tenantId: string, data: {
+    type: NotificationType;
+    title: string;
+    body: string;
+    recipientUserId?: string | null;
+    recipientRole?: string | null;
+  }) {
     return notificationsRepository.create(tenantId, data);
   }
 
-  markRead(id: string, tenantId: string) {
-    return notificationsRepository.markRead(id, tenantId);
+  async markRead(id: string, tenantId: string, userId: string, primaryRole: string) {
+    return notificationsRepository.markRead(id, tenantId, userId, await this.rolesFor(tenantId, userId, primaryRole));
   }
 
-  markAllRead(tenantId: string) {
-    return notificationsRepository.markAllRead(tenantId);
+  async markAllRead(tenantId: string, userId: string, primaryRole: string) {
+    return notificationsRepository.markAllRead(tenantId, userId, await this.rolesFor(tenantId, userId, primaryRole));
   }
 
   private async ensureUnreadNotification(
@@ -29,12 +44,13 @@ export class NotificationsService {
     type: NotificationType,
     title: string,
     body: string,
+    recipientRole?: string,
   ) {
     const existing = await prisma.notification.findFirst({
-      where: { tenantId, type, title, read: false },
+      where: { tenantId, type, title, recipientRole: recipientRole ?? null },
     });
     if (!existing) {
-      await notificationsRepository.create(tenantId, { type, title, body });
+      await notificationsRepository.create(tenantId, { type, title, body, recipientRole });
     }
   }
 
@@ -50,6 +66,7 @@ export class NotificationsService {
         "stock",
         `Low stock: ${item.name}`,
         `${item.name} below reorder level (${item.inStock}/${item.reorderLevel}).`,
+        "inventory",
       );
     }
 
@@ -71,6 +88,7 @@ export class NotificationsService {
         "amc",
         `AMC expiring: ${amc.reference}`,
         `${amc.reference} (${amc.customerName}) expires in ${days} days.`,
+        "coordinator",
       );
     }
   }
@@ -85,6 +103,7 @@ export class NotificationsService {
       type: "approval",
       title: "Estimate approved",
       body: `${customerName} approved ${reference} (₹${Number(total).toLocaleString("en-IN")}).`,
+      recipientRole: "billing",
     });
   }
 
@@ -94,14 +113,22 @@ export class NotificationsService {
       type: "job",
       title: "Job updated",
       body: `${reference} moved to ${label}.`,
+      recipientRole: "coordinator",
     });
   }
 
-  async notifyAssignment(tenantId: string, reference: string, staffName: string, equipmentName: string) {
+  async notifyAssignment(
+    tenantId: string,
+    reference: string,
+    staffId: string,
+    staffName: string,
+    equipmentName: string,
+  ) {
     await notificationsRepository.create(tenantId, {
       type: "job",
       title: "Work assigned",
       body: `${reference} (${equipmentName}) has been assigned to ${staffName}.`,
+      recipientUserId: staffId,
     });
   }
 
@@ -111,6 +138,7 @@ export class NotificationsService {
       type: "system",
       title: "Workflow updated",
       body: `${reference} moved to ${label} by ${actorName}.`,
+      recipientRole: status === "estimate" ? "estimator" : status === "completed" ? "billing" : "coordinator",
     });
   }
 }

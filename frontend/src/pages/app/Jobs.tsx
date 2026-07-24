@@ -30,11 +30,12 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { SignaturePad } from "@/components/shared/SignaturePad";
 import { useAuth } from "@/context/AuthContext";
 import { ApiError } from "@/lib/api";
 import { useBranch } from "@/context/BranchContext";
 import { api, type BackendInventoryItem, type BackendServiceJob, type BackendServiceRequest, type BackendUser, type JobPhotoInput } from "@/lib/api";
-import { formatDate, formatDateTime, formatJobStatus, todayInputValue } from "@/lib/format";
+import { defaultDatePlusDays, formatDate, formatDateTime, formatJobStatus, todayInputValue } from "@/lib/format";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
 import { toast } from "@/hooks/use-toast";
@@ -84,6 +85,7 @@ export default function Jobs() {
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [partsNote, setPartsNote] = useState("");
   const [customerName, setCustomerName] = useState("");
+  const [signatureData, setSignatureData] = useState<string | null>(null);
   const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
   const [stockItemId, setStockItemId] = useState("");
   const [stockQty, setStockQty] = useState(1);
@@ -151,13 +153,14 @@ export default function Jobs() {
     if (dialogOpen) void loadAssignableStaff();
   }, [dialogOpen, loadAssignableStaff]);
 
+  const selectedId = selected?.id;
   useEffect(() => {
-    if (!selected) {
+    if (!selectedId) {
       setActivities([]);
       return;
     }
-    void api.getJobActivities(selected.id).then(setActivities).catch(() => setActivities([]));
-  }, [selected?.id]);
+    void api.getJobActivities(selectedId).then(setActivities).catch(() => setActivities([]));
+  }, [selectedId]);
 
   const openScheduleDialog = () => {
     const defaultEngineerId = assignableStaff.find((s) => s.id === user?.id)?.id ?? "";
@@ -267,16 +270,20 @@ export default function Jobs() {
   };
 
   const handleCaptureSignature = async () => {
-    if (!selected || !customerName.trim()) {
-      toast({ title: "Signature required", description: "Enter the customer name for sign-off.", variant: "destructive" });
+    if (!selected || !customerName.trim() || !signatureData) {
+      toast({ title: "Signature required", description: "Enter the customer name and draw the signature.", variant: "destructive" });
       return;
     }
     setActionSaving(true);
     try {
-      const result = await api.captureJobSignature(selected.id, { customerName: customerName.trim() });
+      const result = await api.captureJobSignature(selected.id, {
+        customerName: customerName.trim(),
+        signatureData,
+      });
       setSelected(result.job);
       toast({ title: "Signature captured", description: `Signed by ${customerName.trim()}` });
       setCustomerName("");
+      setSignatureData(null);
       setSignatureOpen(false);
       await loadJobs();
       const acts = await api.getJobActivities(selected.id);
@@ -295,7 +302,7 @@ export default function Jobs() {
     setStockQty(1);
     try {
       const items = await api.listInventory(branchId);
-      setInventory(items.filter((i) => i.inStock > 0));
+      setInventory(items);
     } catch {
       setInventory([]);
     }
@@ -331,6 +338,33 @@ export default function Jobs() {
     }
   };
 
+  const handleShortagePurchase = async () => {
+    const item = inventory.find((candidate) => candidate.id === stockItemId);
+    if (!item || stockQty <= item.inStock) return;
+    setActionSaving(true);
+    try {
+      await api.createItemizedPurchaseOrder({
+        supplier: item.supplier,
+        branchId: branchId === "all" ? item.branchId : branchId,
+        expectedDate: defaultDatePlusDays(7),
+        lines: [{
+          inventoryItemId: item.id,
+          sku: item.sku,
+          description: `${item.name} — shortage for ${selected?.reference ?? "service job"}`,
+          quantityOrdered: stockQty - item.inStock,
+          unitCost: Number(item.unitCost),
+          taxRate: 0,
+        }],
+      });
+      setStockOpen(false);
+      toast({ title: "Purchase order created", description: `Shortage of ${stockQty - item.inStock} × ${item.name} sent to purchasing.` });
+    } catch (error) {
+      toast({ title: "Purchase action failed", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" });
+    } finally {
+      setActionSaving(false);
+    }
+  };
+
   const selectedApiStatus = selected ? toApiJobStatus(formatJobStatus(selected.status)) : "";
 
   return (
@@ -341,7 +375,7 @@ export default function Jobs() {
           description={isEngineer ? "Your assigned jobs — update status and complete field actions." : "Track repair, maintenance and calibration jobs."}
           actions={
             canCreate ? (
-              <Button onClick={openScheduleDialog} className="bg-gradient-primary text-primary-foreground hover:opacity-90">
+              <Button onClick={openScheduleDialog} variant="brand">
                 <Plus className="mr-1 h-4 w-4" /> Schedule Job
               </Button>
             ) : undefined
@@ -357,14 +391,14 @@ export default function Jobs() {
             {columns.map((col) => {
               const items = jobs.filter((j) => formatJobStatus(j.status) === col.status);
               return (
-                <div key={col.status} className="flex flex-col rounded-xl bg-muted/40 p-3">
+                <div key={col.status} className="flex flex-col rounded-2xl border border-border/70 bg-card/55 p-3 shadow-sm backdrop-blur">
                   <div className="mb-3 flex items-center justify-between px-1">
                     <span className="text-sm font-semibold">{col.label}</span>
-                    <span className="rounded-full bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">{items.length}</span>
+                    <span className="rounded-full border border-primary/10 bg-secondary px-2.5 py-0.5 text-xs font-semibold text-primary">{items.length}</span>
                   </div>
                   <div className="space-y-2">
                     {items.map((j) => (
-                      <Card key={j.id} onClick={() => setSelected(j)} className="cursor-pointer space-y-2 p-3 transition-shadow hover:shadow-elevated">
+                      <Card key={j.id} onClick={() => setSelected(j)} className="cursor-pointer space-y-2 p-3 hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-elevated">
                         <div className="flex items-center justify-between">
                           <span className="font-mono text-xs text-muted-foreground">{j.reference}</span>
                           <StatusBadge status={formatJobStatus(j.status)} />
@@ -583,13 +617,11 @@ export default function Jobs() {
                 onChange={(e) => setCustomerName(e.target.value)}
               />
             </div>
-            <div className="rounded-lg border border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-              Customer signature captured on device
-            </div>
+            <SignaturePad onChange={setSignatureData} />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setSignatureOpen(false); setCustomerName(""); }}>Cancel</Button>
-            <Button onClick={handleCaptureSignature} disabled={actionSaving || !customerName.trim()}>
+            <Button variant="outline" onClick={() => { setSignatureOpen(false); setCustomerName(""); setSignatureData(null); }}>Cancel</Button>
+            <Button onClick={handleCaptureSignature} disabled={actionSaving || !customerName.trim() || !signatureData}>
               {actionSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm Sign-off"}
             </Button>
           </DialogFooter>
@@ -628,9 +660,15 @@ export default function Jobs() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setStockOpen(false)}>Cancel</Button>
-            <Button onClick={handleDeductStock} disabled={actionSaving || !stockItemId}>
-              {actionSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Deduct & Update"}
-            </Button>
+            {stockItemId && stockQty > (inventory.find((item) => item.id === stockItemId)?.inStock ?? 0) ? (
+              <Button onClick={handleShortagePurchase} disabled={actionSaving}>
+                {actionSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Create PO for shortage
+              </Button>
+            ) : (
+              <Button onClick={handleDeductStock} disabled={actionSaving || !stockItemId}>
+                {actionSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Deduct & Update"}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

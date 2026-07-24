@@ -38,7 +38,7 @@ export function setStoredUser<T>(user: T | null) {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: HeadersInit = {
-    "Content-Type": "application/json",
+    ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
     ...(options.headers ?? {}),
   };
 
@@ -237,7 +237,7 @@ export interface CreateServiceRequestInput {
   type: string;
   priority: string;
   description: string;
-  assignedTo: string;
+  assignedTo?: string;
   assignedName?: string;
   slaDue?: string;
 }
@@ -309,17 +309,46 @@ export interface BackendAmcContract {
 export interface BackendInvoice {
   id: string;
   tenantId: string;
+  customerId?: string | null;
+  serviceRequestId?: string | null;
+  estimateId?: string | null;
+  jobId?: string | null;
   reference: string;
   customerName: string;
   jobRef: string;
   amount: string | number;
   tax: string | number;
   total: string | number;
+  paidTotal?: string | number;
+  balanceDue?: string | number;
+  currency?: string;
   status: string;
   issuedAt: string;
   dueAt: string;
+  lineItems?: BackendInvoiceLine[];
+  payments?: BackendInvoicePayment[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BackendInvoiceLine {
+  id: string;
+  type: string;
+  description: string;
+  quantity: string | number;
+  unitPrice: string | number;
+  taxRate: string | number;
+  discount: string | number;
+  lineTotal: string | number;
+}
+
+export interface BackendInvoicePayment {
+  id: string;
+  amount: string | number;
+  method: string;
+  reference?: string | null;
+  note?: string | null;
+  paidAt: string;
 }
 
 export interface BackendAuditLog {
@@ -337,18 +366,79 @@ export interface BackendAuditLog {
 export interface BackendEstimate {
   id: string;
   tenantId: string;
+  serviceRequestId?: string | null;
+  customerId?: string | null;
+  equipmentId?: string | null;
   reference: string;
   requestRef: string;
   customerName: string;
   equipmentName: string;
   laborCost: string | number;
   partsCost: string | number;
+  subtotal?: string | number;
+  discount?: string | number;
+  tax?: string | number;
   total: string | number;
   status: string;
   validUntil: string;
   revision: number;
+  terms?: string | null;
+  notes?: string | null;
+  sentAt?: string | null;
+  approvedAt?: string | null;
+  lineItems?: BackendEstimateLine[];
+  revisions?: BackendEstimateRevision[];
+  decisions?: BackendEstimateDecision[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BackendEstimateLine {
+  id: string;
+  estimateId: string;
+  type: string;
+  description: string;
+  catalogItemId?: string | null;
+  inventoryItemId?: string | null;
+  partNumber?: string | null;
+  quantity: string | number;
+  unitPrice: string | number;
+  taxRate: string | number;
+  discount: string | number;
+  lineTotal: string | number;
+}
+
+export interface EstimateLineInput {
+  type: "labor" | "part" | "transport" | "testing" | "calibration" | "service" | "other";
+  description: string;
+  catalogItemId?: string | null;
+  inventoryItemId?: string | null;
+  partNumber?: string | null;
+  quantity: number;
+  unitPrice: number;
+  taxRate: number;
+  discount: number;
+}
+
+export interface BackendEstimateRevision {
+  id: string;
+  revision: number;
+  subtotal: string | number;
+  discount: string | number;
+  tax: string | number;
+  total: string | number;
+  status: string;
+  terms?: string | null;
+  notes?: string | null;
+  createdAt: string;
+}
+
+export interface BackendEstimateDecision {
+  id: string;
+  decision: string;
+  note?: string | null;
+  actorRole: string;
+  createdAt: string;
 }
 
 export interface CreateEstimateInput {
@@ -369,6 +459,10 @@ export interface UpdateEstimateInput {
 export interface BackendServiceJob {
   id: string;
   tenantId: string;
+  serviceRequestId?: string | null;
+  estimateId?: string | null;
+  customerId?: string | null;
+  equipmentId?: string | null;
   reference: string;
   requestRef: string;
   customerName: string;
@@ -379,8 +473,43 @@ export interface BackendServiceJob {
   status: string;
   scheduledFor: string;
   progress: number;
+  assignments?: BackendJobAssignment[];
+  workLogs?: BackendJobWorkLog[];
+  extras?: BackendJobExtra[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BackendJobAssignment {
+  id: string;
+  userId: string;
+  role: string;
+  isLead: boolean;
+  assignedAt: string;
+  user?: Pick<BackendUser, "id" | "name" | "role">;
+}
+
+export interface BackendJobWorkLog {
+  id: string;
+  userId: string;
+  startedAt: string;
+  endedAt?: string | null;
+  minutes: number;
+  workPerformed: string;
+  testingResult?: string | null;
+  calibrationResult?: string | null;
+  createdAt: string;
+}
+
+export interface BackendJobExtra {
+  id: string;
+  description: string;
+  reason: string;
+  quantity: string | number;
+  unitPrice: string | number;
+  taxRate: string | number;
+  status: string;
+  createdAt: string;
 }
 
 export interface CreateJobInput {
@@ -444,14 +573,38 @@ export interface CreateInventoryInput {
 export interface BackendPurchaseOrder {
   id: string;
   tenantId: string;
+  supplierId?: string | null;
+  branchId?: string | null;
   reference: string;
   supplier: string;
   items: number;
   total: string | number;
   status: string;
   expectedDate: string;
+  lineItems?: BackendPurchaseOrderLine[];
+  receipts?: BackendPurchaseReceipt[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BackendPurchaseOrderLine {
+  id: string;
+  inventoryItemId?: string | null;
+  sku: string;
+  description: string;
+  quantityOrdered: number;
+  quantityReceived: number;
+  unitCost: string | number;
+  taxRate: string | number;
+  lineTotal: string | number;
+}
+
+export interface BackendPurchaseReceipt {
+  id: string;
+  reference: string;
+  receivedBy: string;
+  receivedAt: string;
+  notes?: string | null;
 }
 
 export interface CreatePurchaseOrderInput {
@@ -468,10 +621,19 @@ export interface BackendStockTransfer {
   reference: string;
   fromBranch: string;
   toBranch: string;
+  fromBranchId?: string | null;
+  toBranchId?: string | null;
   items: number;
   status: string;
   createdAt: string;
   updatedAt: string;
+  lineItems?: Array<{
+    id: string;
+    sku: string;
+    description: string;
+    quantity: number;
+    quantityReceived?: number;
+  }>;
 }
 
 export interface CreateStockTransferInput {
@@ -481,10 +643,17 @@ export interface CreateStockTransferInput {
   status?: string;
 }
 
+export interface CreateDomainStockTransferInput {
+  fromBranchId: string;
+  toBranchId: string;
+  lines: Array<{ inventoryItemId: string; quantity: number }>;
+}
+
 export interface BackendSettings {
   tenantId: string;
   companyName: string;
   supportEmail: string;
+  logoUrl?: string | null;
   defaultTaxRate: number;
   amcRenewalReminders: boolean;
   lowStockAlerts: boolean;
@@ -496,6 +665,7 @@ export interface BackendSettings {
 export interface UpdateSettingsInput {
   companyName?: string;
   supportEmail?: string;
+  logoUrl?: string | null;
   defaultTaxRate?: number;
   amcRenewalReminders?: boolean;
   lowStockAlerts?: boolean;
@@ -531,7 +701,32 @@ export interface DashboardTrend {
   up: boolean;
 }
 
+export interface DashboardQueueItem {
+  id: string;
+  kind: "request" | "job" | "estimate" | "invoice" | "purchaseOrder" | "transfer" | "parts";
+  reference: string;
+  title: string;
+  subtitle: string;
+  status: string;
+  priority?: string;
+  dueAt?: string | null;
+  progress?: number;
+  href: string;
+}
+
+export interface DashboardScheduleItem {
+  id: string;
+  reference: string;
+  title: string;
+  subtitle: string;
+  status: string;
+  scheduledFor: string;
+  progress: number;
+  href: string;
+}
+
 export interface DashboardData {
+  role: string;
   stats: {
     openRequests: number;
     activeJobs: number;
@@ -539,7 +734,34 @@ export interface DashboardData {
     revenueMtd: number;
     revenueMtdLabel: string;
     expiringAmc: number;
+    unassignedRequests: number;
+    pendingEstimates: number;
+    pendingInvoices: number;
+    overdueInvoices: number;
+    openPurchaseOrders: number;
+    pendingTransfers: number;
+    pendingPartsRequests: number;
+    unreadNotifications: number;
   };
+  personal: {
+    assignedOpen: number;
+    dueToday: number;
+    overdue: number;
+    inProgress: number;
+    completedThisMonth: number;
+    pendingApprovals: number;
+  };
+  roleQueues: {
+    newAssigned: number;
+    inspection: number;
+    estimatePending: number;
+    waitingApproval: number;
+    servicePending: number;
+    completed: number;
+  };
+  myQueue: DashboardQueueItem[];
+  todaySchedule: DashboardScheduleItem[];
+  upcomingJobs: DashboardScheduleItem[];
   trends: {
     openRequests?: DashboardTrend;
     activeJobs?: DashboardTrend;
@@ -555,9 +777,18 @@ export interface DashboardData {
     engineer: string;
     status: string;
     progress: number;
+    scheduledFor?: string;
   }[];
   recentActivity: { id: string; action: string; actor: string; at: string }[];
   lowStock: { id: string; name: string; inStock: number; reorderLevel: number }[];
+  visibility: {
+    showFinance: boolean;
+    showCompanyOps: boolean;
+    showInventoryAlerts: boolean;
+    showCharts: boolean;
+    showSchedule: boolean;
+    canUpdateJobStatus: boolean;
+  };
 }
 
 export interface BackendNotification {
@@ -569,6 +800,113 @@ export interface BackendNotification {
   read: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BackendStoredFile {
+  id: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+}
+
+export interface BackendCatalogItem {
+  id: string;
+  branchId?: string | null;
+  code: string;
+  name: string;
+  description?: string | null;
+  category: string;
+  unit: string;
+  unitPrice: string | number;
+  taxRate: string | number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CatalogItemInput = Omit<BackendCatalogItem, "id" | "createdAt" | "updatedAt">;
+
+export interface BackendEquipmentHistory {
+  equipment: BackendEquipment;
+  requests: BackendServiceRequest[];
+  jobs: BackendServiceJob[];
+  invoices: BackendInvoice[];
+  scans: { id: string; source: string; scannedAt: string }[];
+}
+
+export interface BackendOfficeAsset {
+  id: string;
+  branchId?: string | null;
+  assetTag: string;
+  name: string;
+  category: string;
+  serialNumber?: string | null;
+  purchaseDate?: string | null;
+  purchaseCost: string | number;
+  status: string;
+  assignedTo?: string | null;
+  notes?: string | null;
+  createdAt: string;
+}
+
+export interface OfficeAssetInput {
+  branchId?: string | null;
+  assetTag: string;
+  name: string;
+  category: string;
+  serialNumber?: string | null;
+  purchaseDate?: string | null;
+  purchaseCost: number;
+  assignedTo?: string | null;
+  notes?: string | null;
+}
+
+export interface BackendExpense {
+  id: string;
+  branchId?: string | null;
+  projectRef?: string | null;
+  jobId?: string | null;
+  category: string;
+  description: string;
+  amount: string | number;
+  incurredAt: string;
+  vendor?: string | null;
+  createdAt: string;
+}
+
+export interface BackendReferral {
+  id: string;
+  customerId?: string | null;
+  referrerName: string;
+  referrerType: string;
+  source?: string | null;
+  status: string;
+  commissions?: BackendCommission[];
+  createdAt: string;
+}
+
+export interface BackendCommission {
+  id: string;
+  referralId?: string | null;
+  invoiceId?: string | null;
+  payeeName: string;
+  basisAmount: string | number;
+  rate: string | number;
+  amount: string | number;
+  status: string;
+  paidAt?: string | null;
+  createdAt: string;
+}
+
+export interface BackendDomainRole {
+  id: string;
+  key: string;
+  name: string;
+  description?: string | null;
+  permissions: Record<string, unknown>;
+  isSystem: boolean;
+  assignments?: { id: string; userId: string; branchId?: string | null }[];
 }
 
 function queryString(params: Record<string, string | undefined>) {
@@ -593,6 +931,14 @@ export const api = {
     }),
 
   me: () => request<BackendUser>("/api/auth/me"),
+
+  uploadFile: (file: File) => {
+    const data = new FormData();
+    data.append("file", file);
+    return request<BackendStoredFile>("/api/files", { method: "POST", body: data });
+  },
+
+  fileDownloadUrl: (id: string) => `${API_BASE}/api/files/${id}/download`,
 
   listUsers: (params?: { role?: string; isActive?: boolean }) =>
     request<BackendUser[]>(`/api/users${queryString({ role: params?.role, isActive: params?.isActive?.toString() })}`),
@@ -629,6 +975,9 @@ export const api = {
     request<BackendEquipment[]>(
       `/api/equipment${queryString({ branchId: params?.branchId, customerId: params?.customerId })}`,
     ),
+
+  getEquipmentByTag: (assetTag: string) =>
+    request<BackendEquipment>(`/api/equipment/by-tag/${encodeURIComponent(assetTag)}`),
 
   createEquipment: (data: CreateEquipmentInput) =>
     request<BackendEquipment>("/api/equipment", {
@@ -677,7 +1026,27 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  addInspectionRecommendation: (
+    reportId: string,
+    data: { title: string; description: string; priority: "low" | "medium" | "high" | "critical" },
+  ) =>
+    request<{ id: string }>(`/api/domain/inspection-reports/${reportId}/recommendations`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  attachInspectionFile: (
+    reportId: string,
+    data: { fileId: string; caption?: string; kind: "evidence" | "image" | "video" | "report" | "signature" },
+  ) =>
+    request<{ id: string }>(`/api/domain/inspection-reports/${reportId}/attachments`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   listEstimates: () => request<BackendEstimate[]>("/api/estimates"),
+
+  getEstimate: (id: string) => request<BackendEstimate>(`/api/estimates/${id}`),
 
   createEstimate: (data: CreateEstimateInput) =>
     request<BackendEstimate>("/api/estimates", {
@@ -693,6 +1062,8 @@ export const api = {
 
   listJobs: (status?: string) =>
     request<BackendServiceJob[]>(`/api/jobs${queryString({ status })}`),
+
+  getJob: (id: string) => request<BackendServiceJob>(`/api/jobs/${id}`),
 
   createJob: (data: CreateJobInput) =>
     request<BackendServiceJob>("/api/jobs", {
@@ -751,6 +1122,9 @@ export const api = {
   listPurchaseOrders: (status?: string) =>
     request<BackendPurchaseOrder[]>(`/api/purchase-orders${queryString({ status })}`),
 
+  getPurchaseOrder: (id: string) =>
+    request<BackendPurchaseOrder>(`/api/purchase-orders/${id}`),
+
   createPurchaseOrder: (data: CreatePurchaseOrderInput) =>
     request<BackendPurchaseOrder>("/api/purchase-orders", {
       method: "POST",
@@ -763,6 +1137,27 @@ export const api = {
     request<BackendStockTransfer>("/api/stock-transfers", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  listDomainStockTransfers: () =>
+    request<BackendStockTransfer[]>("/api/domain/stock-transfers"),
+
+  createDomainStockTransfer: (data: CreateDomainStockTransferInput) =>
+    request<BackendStockTransfer>("/api/domain/stock-transfers", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  dispatchStockTransfer: (id: string) =>
+    request<BackendStockTransfer>(`/api/domain/stock-transfers/${id}/dispatch`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  receiveStockTransfer: (id: string) =>
+    request<BackendStockTransfer>(`/api/domain/stock-transfers/${id}/receive`, {
+      method: "POST",
+      body: JSON.stringify({}),
     }),
 
   getSettings: () => request<BackendSettings>("/api/settings"),
@@ -832,6 +1227,162 @@ export const api = {
 
   createInvoice: (data: Record<string, unknown>) =>
     request<BackendInvoice>("/api/billing", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getInvoice: (id: string) => request<BackendInvoice>(`/api/billing/${id}`),
+
+  updateInvoice: (id: string, data: Record<string, unknown>) =>
+    request<BackendInvoice>(`/api/billing/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  listServiceCatalog: () =>
+    request<BackendCatalogItem[]>("/api/domain/service-catalog"),
+
+  createServiceCatalogItem: (data: CatalogItemInput) =>
+    request<BackendCatalogItem>("/api/domain/service-catalog", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateServiceCatalogItem: (id: string, data: CatalogItemInput) =>
+    request<BackendCatalogItem>(`/api/domain/service-catalog/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  archiveServiceCatalogItem: (id: string) =>
+    request<void>(`/api/domain/service-catalog/${id}`, { method: "DELETE" }),
+
+  createEstimateRevision: (
+    id: string,
+    data: { lines: EstimateLineInput[]; discount: number; terms?: string | null; notes?: string | null },
+  ) =>
+    request<BackendEstimate>(`/api/domain/estimates/${id}/revisions`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  decideEstimate: (id: string, decision: "approved" | "rejected" | "revision", note?: string) =>
+    request<BackendEstimate>(`/api/domain/estimates/${id}/decisions`, {
+      method: "POST",
+      body: JSON.stringify({ decision, note }),
+    }),
+
+  assignJobStaff: (id: string, data: { userId: string; role: string; isLead: boolean }) =>
+    request<BackendJobAssignment>(`/api/domain/jobs/${id}/assignments`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  addJobWorkLog: (
+    id: string,
+    data: { startedAt: string; endedAt?: string | null; workPerformed: string; testingResult?: string | null; calibrationResult?: string | null },
+  ) =>
+    request<BackendJobWorkLog>(`/api/domain/jobs/${id}/work-logs`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  addJobExtra: (
+    id: string,
+    data: { inventoryItemId?: string | null; description: string; reason: string; quantity: number; unitPrice: number; taxRate: number },
+  ) =>
+    request<BackendJobExtra>(`/api/domain/jobs/${id}/extras`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  approveJobExtra: (id: string) =>
+    request<BackendJobExtra>(`/api/domain/job-extras/${id}/approve`, { method: "POST" }),
+
+  createItemizedPurchaseOrder: (data: {
+    supplierId?: string | null;
+    supplier: string;
+    branchId?: string | null;
+    expectedDate: string;
+    lines: { inventoryItemId?: string | null; sku: string; description: string; quantityOrdered: number; unitCost: number; taxRate: number }[];
+  }) =>
+    request<BackendPurchaseOrder>("/api/domain/purchase-orders", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  receivePurchaseOrder: (
+    id: string,
+    data: { reference: string; notes?: string; lines: { purchaseOrderLineId: string; quantity: number }[] },
+  ) =>
+    request<BackendPurchaseReceipt>(`/api/domain/purchase-orders/${id}/receipts`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  createInvoiceFromJob: (jobId: string, dueAt: string, currency = "INR") =>
+    request<BackendInvoice>("/api/domain/invoices/from-job", {
+      method: "POST",
+      body: JSON.stringify({ jobId, dueAt, currency }),
+    }),
+
+  recordInvoicePayment: (
+    id: string,
+    data: { amount: number; method: string; reference?: string; note?: string; paidAt?: string },
+  ) =>
+    request<BackendInvoice>(`/api/domain/invoices/${id}/payments`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getEquipmentHistory: (assetTag: string) =>
+    request<BackendEquipmentHistory>(`/api/domain/equipment-history/${encodeURIComponent(assetTag)}`),
+
+  recordQrScan: (assetTag: string, source: "camera" | "manual" | "label" = "manual") =>
+    request<{ equipment: BackendEquipment | null }>("/api/domain/qr-scans", {
+      method: "POST",
+      body: JSON.stringify({ assetTag, source }),
+    }),
+
+  listOfficeAssets: () => request<BackendOfficeAsset[]>("/api/domain/office-assets"),
+
+  createOfficeAsset: (data: OfficeAssetInput) =>
+    request<BackendOfficeAsset>("/api/domain/office-assets", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listExpenses: () => request<BackendExpense[]>("/api/domain/finance/expenses"),
+
+  createExpense: (data: {
+    branchId?: string | null;
+    projectRef?: string | null;
+    jobId?: string | null;
+    category: string;
+    description: string;
+    amount: number;
+    incurredAt: string;
+    vendor?: string | null;
+    receiptFileId?: string | null;
+  }) =>
+    request<BackendExpense>("/api/domain/finance/expenses", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listReferrals: () => request<BackendReferral[]>("/api/domain/finance/referrals"),
+  listCommissions: () => request<BackendCommission[]>("/api/domain/finance/commissions"),
+
+  createCommission: (data: { referralId?: string | null; invoiceId?: string | null; payeeName: string; basisAmount: number; rate: number }) =>
+    request<BackendCommission>("/api/domain/finance/commissions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listDomainRoles: () => request<BackendDomainRole[]>("/api/domain/roles"),
+
+  assignDomainRole: (data: { userId: string; roleId: string; branchId?: string | null }) =>
+    request<{ id: string }>("/api/domain/role-assignments", {
       method: "POST",
       body: JSON.stringify(data),
     }),

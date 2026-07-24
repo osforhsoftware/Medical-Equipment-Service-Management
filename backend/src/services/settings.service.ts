@@ -1,9 +1,12 @@
 import { settingsRepository } from "@/repositories/settings.repository";
 import { DEFAULT_RBAC_MATRIX } from "@/config/defaultRbac";
 import type { Prisma } from "@prisma/client";
+import { prisma } from "@/db/prisma";
+import { AppError } from "@/middleware/errorHandler";
 
 type UpdateSettingsData = {
   companyName?: string;
+  logoFileId?: string | null;
   supportEmail?: string;
   defaultTaxRate?: number;
   amcRenewalReminders?: boolean;
@@ -31,6 +34,8 @@ export class SettingsService {
     return {
       tenantId,
       companyName,
+      logoFileId: settings.logoFileId,
+      logoUrl: settings.logoFileId ? `/api/files/${settings.logoFileId}/download` : null,
       supportEmail: settings.supportEmail,
       defaultTaxRate: Number(settings.defaultTaxRate),
       amcRenewalReminders: settings.amcRenewalReminders,
@@ -49,6 +54,21 @@ export class SettingsService {
     }
 
     const updatePayload: Prisma.TenantSettingsUpdateInput = {};
+    if (data.logoFileId !== undefined) {
+      if (data.logoFileId === null) {
+        updatePayload.logoFile = { disconnect: true };
+      } else {
+        const logo = await prisma.storedFile.findFirst({
+          where: {
+            id: data.logoFileId,
+            tenantId,
+            mimeType: { in: ["image/jpeg", "image/png", "image/webp"] },
+          },
+        });
+        if (!logo) throw new AppError("Uploaded logo image not found", 404);
+        updatePayload.logoFile = { connect: { id: logo.id } };
+      }
+    }
     if (data.supportEmail !== undefined) updatePayload.supportEmail = data.supportEmail;
     if (data.defaultTaxRate !== undefined) updatePayload.defaultTaxRate = data.defaultTaxRate;
     if (data.amcRenewalReminders !== undefined) updatePayload.amcRenewalReminders = data.amcRenewalReminders;

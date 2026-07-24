@@ -10,7 +10,18 @@ import { prisma } from "@/db/prisma";
 const STATUS_ORDER = ["new", "inspection", "estimate", "approval", "inProgress", "completed", "invoiced"] as const;
 type ServiceStatus = (typeof STATUS_ORDER)[number];
 
+const TRANSITION_ROLES: Record<ServiceStatus, readonly string[]> = {
+  new: [],
+  inspection: ["admin", "coordinator", "inspector"],
+  estimate: ["admin", "coordinator", "inspector"],
+  approval: ["admin", "coordinator", "estimator"],
+  inProgress: ["admin", "coordinator"],
+  completed: ["admin", "coordinator", "engineer"],
+  invoiced: ["admin", "billing"],
+};
+
 const ASSIGNABLE_STAFF_ROLES = ["coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
+const ASSIGNMENT_SCOPED_ROLES = ["inspector", "estimator", "engineer", "inventory", "billing"];
 
 type CreateServiceRequestData = {
   customerId: string;
@@ -19,7 +30,7 @@ type CreateServiceRequestData = {
   type: string;
   priority: string;
   description: string;
-  assignedTo: string;
+  assignedTo?: string;
   assignedName?: string;
   slaDue?: string;
 };
@@ -34,6 +45,21 @@ type UpdateServiceRequestData = {
 };
 
 export class ServiceRequestsService {
+  private assertActorAccess(
+    request: { assignedTo: string | null },
+    actorId?: string,
+    actorRole?: string,
+  ) {
+    if (
+      actorId &&
+      actorRole &&
+      ASSIGNMENT_SCOPED_ROLES.includes(actorRole) &&
+      request.assignedTo !== actorId
+    ) {
+      throw new AppError("You can only access service requests assigned to you", 403);
+    }
+  }
+
   private async validateAssignee(assignedTo: string, tenantId: string) {
     const assignee = await usersRepository.findById(assignedTo, tenantId);
     if (!assignee) throw new AppError("Staff user not found", 404);
@@ -50,9 +76,10 @@ export class ServiceRequestsService {
     return serviceRequestsRepository.findAll(tenantId, { ...filters, assignedTo: assignedToFilter });
   }
 
-  async getById(id: string, tenantId: string) {
+  async getById(id: string, tenantId: string, actorId?: string, actorRole?: string) {
     const sr = await serviceRequestsRepository.findById(id, tenantId);
     if (!sr) throw new AppError("Service request not found", 404);
+    this.assertActorAccess(sr, actorId, actorRole);
     return sr;
   }
 
@@ -62,8 +89,8 @@ export class ServiceRequestsService {
     return sr;
   }
 
-  async getTimeline(id: string, tenantId: string) {
-    await this.getById(id, tenantId);
+  async getTimeline(id: string, tenantId: string, actorId?: string, actorRole?: string) {
+    await this.getById(id, tenantId, actorId, actorRole);
     return serviceRequestsRepository.getTimeline(id);
   }
 
@@ -81,7 +108,7 @@ export class ServiceRequestsService {
 
     // Resolve primary equipment
     const equipIds = data.equipmentIds?.length
-      ? data.equipmentIds
+      ? [...new Set(data.equipmentIds)]
       : data.equipmentId
         ? [data.equipmentId]
         : [];
@@ -93,7 +120,10 @@ export class ServiceRequestsService {
 
     for (const eqId of equipIds) {
       const equip = await equipmentRepository.findById(eqId, tenantId);
-      if (!equip) continue;
+      if (!equip) throw new AppError(`Equipment ${eqId} not found`, 404);
+      if (equip.customerId !== customer.id) {
+        throw new AppError("All selected equipment must belong to the selected customer", 400);
+      }
       const label = `${equip.name} (${equip.model})`;
       equipmentItems.push({ equipmentId: eqId, equipmentName: label, assetTag: equip.assetTag });
       if (!primaryEquipId) {
@@ -139,6 +169,7 @@ export class ServiceRequestsService {
       await notificationsService.notifyAssignment(
         tenantId,
         reference,
+        data.assignedTo,
         data.assignedName ?? data.assignedTo,
         primaryEquipName ?? "Equipment",
       );
@@ -152,22 +183,35 @@ export class ServiceRequestsService {
     return serviceRequestsRepository.findById(sr.id, tenantId);
   }
 
-  async update(id: string, tenantId: string, actorId: string, data: UpdateServiceRequestData) {
-    const existing = await this.getById(id, tenantId);
+  async update(id: string, tenantId: string, actorId: string, actorRole: string, data: UpdateServiceRequestData) {
+    const existing = await this.getById(id, tenantId, actorId, actorRole);
     const user = await usersRepository.findById(actorId, tenantId);
     const actor = user?.name ?? actorId;
 
-    const { timelineNote, ...updateData } = data;
-    const updated = await serviceRequestsRepository.update(id, tenantId, updateData as never);
-
-    if (data.status && data.status !== existing.status) {
-      await serviceRequestsRepository.addTimelineEvent(
+    const { timelineNote, status, ...updateData } = data;
+    if (
+      !["admin", "coordinator"].includes(actorRole) &&
+      Object.keys(updateData).length > 0
+    ) {
+      throw new AppError("Only administrators and coordinators can edit request details", 403);
+    }
+    if (status && status !== existing.status) {
+      await this.advanceWorkflow(
         id,
-        actor,
-        `Status changed to ${data.status}`,
-        timelineNote,
+        tenantId,
+        actorId,
+        actorRole,
+        status,
+        timelineNote ?? `Status changed to ${status}`,
       );
-    } else if (timelineNote) {
+    }
+
+    const hasUpdates = Object.keys(updateData).length > 0;
+    const updated = hasUpdates
+      ? await serviceRequestsRepository.update(id, tenantId, updateData as never)
+      : await this.getById(id, tenantId, actorId, actorRole);
+
+    if ((!status || status === existing.status) && timelineNote) {
       await serviceRequestsRepository.addTimelineEvent(id, actor, "Note added", timelineNote);
     }
 
@@ -194,6 +238,7 @@ export class ServiceRequestsService {
     await notificationsService.notifyAssignment(
       tenantId,
       existing.reference,
+      assignee.id,
       assignee.name,
       existing.equipmentName ?? "Equipment",
     );
@@ -201,8 +246,15 @@ export class ServiceRequestsService {
     return serviceRequestsRepository.findById(id, tenantId);
   }
 
-  async advanceWorkflow(id: string, tenantId: string, actorId: string, targetStatus: string, note: string) {
-    const existing = await this.getById(id, tenantId);
+  async advanceWorkflow(
+    id: string,
+    tenantId: string,
+    actorId: string,
+    actorRole: string,
+    targetStatus: string,
+    note: string,
+  ) {
+    const existing = await this.getById(id, tenantId, actorId, actorRole);
     const actor = await usersRepository.findById(actorId, tenantId);
     const actorName = actor?.name ?? actorId;
 
@@ -210,7 +262,12 @@ export class ServiceRequestsService {
     const targetIdx = STATUS_ORDER.indexOf(targetStatus as ServiceStatus);
 
     if (targetIdx < 0) throw new AppError("Invalid target status", 400);
-    if (targetIdx <= currentIdx) throw new AppError("Cannot move backward in workflow", 400);
+    if (targetIdx !== currentIdx + 1) {
+      throw new AppError("Workflow can only move to the next stage", 409);
+    }
+    if (!TRANSITION_ROLES[targetStatus as ServiceStatus].includes(actorRole)) {
+      throw new AppError("Your role cannot perform this workflow transition", 403);
+    }
 
     const updated = await serviceRequestsRepository.update(id, tenantId, {
       status: targetStatus as never,

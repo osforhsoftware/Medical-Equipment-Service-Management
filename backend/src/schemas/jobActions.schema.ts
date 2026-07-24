@@ -4,8 +4,8 @@ export const uploadJobPhotosSchema = z.object({
   photos: z
     .array(
       z.object({
-        filename: z.string().min(1).max(255),
-        mimeType: z.string().min(1).max(100),
+        filename: z.string().min(1).max(200),
+        mimeType: z.string().min(1).max(200),
         dataUrl: z.string().min(20).max(5_000_000),
       }),
     )

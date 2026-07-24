@@ -2,15 +2,19 @@ import { prisma } from "@/db/prisma";
 import type { Invoice, Prisma } from "@prisma/client";
 
 export class BillingRepository {
-  async findAll(tenantId: string, status?: string): Promise<Invoice[]> {
+  async findAll(tenantId: string, status?: string) {
     return prisma.invoice.findMany({
       where: { tenantId, ...(status ? { status: status as Invoice["status"] } : {}) },
+      include: { lineItems: true, payments: { orderBy: { paidAt: "desc" } }, documents: true },
       orderBy: { issuedAt: "desc" },
     });
   }
 
-  async findById(id: string, tenantId: string): Promise<Invoice | null> {
-    return prisma.invoice.findFirst({ where: { id, tenantId } });
+  async findById(id: string, tenantId: string) {
+    return prisma.invoice.findFirst({
+      where: { id, tenantId },
+      include: { lineItems: true, payments: { orderBy: { paidAt: "desc" } }, documents: true },
+    });
   }
 
   async create(tenantId: string, data: Omit<Prisma.InvoiceUncheckedCreateInput, "tenantId">): Promise<Invoice> {

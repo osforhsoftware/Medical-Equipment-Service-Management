@@ -22,7 +22,7 @@ async function main() {
   });
 
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
-  await prisma.user.upsert({
+  const admin = await prisma.user.upsert({
     where: { tenantId_username: { tenantId: TENANT_ID, username: ADMIN_USERNAME } },
     update: {
       name: "System Administrator",
@@ -87,6 +87,47 @@ async function main() {
       },
     },
   });
+
+  const systemRoles = [
+    ["admin", "Administrator"],
+    ["coordinator", "Service Coordinator"],
+    ["inspector", "Inspector"],
+    ["estimator", "Estimator"],
+    ["engineer", "Service Engineer"],
+    ["inventory", "Inventory Staff"],
+    ["billing", "Billing Staff"],
+    ["customer", "Customer"],
+  ] as const;
+  for (const [key, name] of systemRoles) {
+    const role = await prisma.role.upsert({
+      where: { tenantId_key: { tenantId: TENANT_ID, key } },
+      update: { name, isSystem: true },
+      create: { tenantId: TENANT_ID, key, name, isSystem: true, permissions: {} },
+    });
+    if (key === "admin") {
+      const assignment = await prisma.userRoleAssignment.findFirst({
+        where: { tenantId: TENANT_ID, userId: admin.id, roleId: role.id, branchId: null },
+      });
+      if (!assignment) {
+        await prisma.userRoleAssignment.create({
+          data: { tenantId: TENANT_ID, userId: admin.id, roleId: role.id },
+        });
+      }
+    }
+  }
+
+  const defaultServices = [
+    { code: "INSPECTION", name: "Equipment Inspection", category: "Inspection", unitPrice: 150 },
+    { code: "REPAIR-LABOR", name: "Repair Labor", category: "Repair", unit: "hour", unitPrice: 95 },
+    { code: "CALIBRATION", name: "Equipment Calibration", category: "Calibration", unitPrice: 250 },
+  ];
+  for (const service of defaultServices) {
+    await prisma.serviceCatalogItem.upsert({
+      where: { tenantId_code: { tenantId: TENANT_ID, code: service.code } },
+      update: {},
+      create: { tenantId: TENANT_ID, taxRate: 0, ...service },
+    });
+  }
 
   console.log("Database seeded successfully!");
   console.log(`Admin login — username: ${ADMIN_USERNAME} / password: ${ADMIN_PASSWORD}`);

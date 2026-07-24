@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { auditLogsController } from "@/controllers/auditLogs.controller";
-import { authenticate } from "@/middleware/auth";
+import { authenticate, requireRole } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
 
 const router = Router();
 router.use(authenticate, resolveTenant);
+router.use(requireRole("admin"));
 
 router.get("/", auditLogsController.getAll);
-router.post("/", auditLogsController.create);
 
 export default router;

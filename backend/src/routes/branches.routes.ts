@@ -1,15 +1,17 @@
 import { Router } from "express";
 import { branchesController } from "@/controllers/branches.controller";
-import { authenticate } from "@/middleware/auth";
+import { authenticate, requireRole } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
 
 const router = Router();
 router.use(authenticate, resolveTenant);
 
-router.get("/", branchesController.getAll);
-router.get("/:id", branchesController.getById);
-router.post("/", branchesController.create);
-router.put("/:id", branchesController.update);
-router.delete("/:id", branchesController.delete);
+const canRead = requireRole("admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing");
+
+router.get("/", canRead, branchesController.getAll);
+router.get("/:id", canRead, branchesController.getById);
+router.post("/", requireRole("admin"), branchesController.create);
+router.put("/:id", requireRole("admin"), branchesController.update);
+router.delete("/:id", requireRole("admin"), branchesController.delete);
 
 export default router;

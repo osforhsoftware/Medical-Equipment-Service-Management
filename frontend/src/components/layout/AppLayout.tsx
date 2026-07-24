@@ -24,12 +24,14 @@ export function AppLayout() {
   return (
     <BranchProvider>
       <SettingsProvider>
-        <div className="flex min-h-screen w-full bg-background">
+        <div className="flex min-h-screen w-full bg-transparent">
           <AppSidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
           <div className="flex min-w-0 flex-1 flex-col">
             <Topbar onMenu={() => setMobileOpen(true)} />
-            <main className="flex-1 animate-fade-in p-4 lg:p-6">
-              <Outlet />
+            <main className="flex-1 animate-fade-in p-4 sm:p-5 lg:p-7">
+              <div className="mx-auto w-full max-w-[1600px]">
+                <Outlet />
+              </div>
             </main>
           </div>
         </div>

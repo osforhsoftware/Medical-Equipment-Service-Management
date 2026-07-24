@@ -7,7 +7,7 @@ export const createServiceRequestSchema = z.object({
   type: z.enum(["Repair", "Maintenance", "Calibration", "Inspection", "Installation"]),
   priority: z.enum(["low", "medium", "high", "critical"]),
   description: z.string().trim().min(10, "Description must be at least 10 characters").max(500),
-  assignedTo: z.string().min(1, "Staff assignment is required"),
+  assignedTo: z.string().min(1).optional(),
   assignedName: z.string().optional(),
   slaDue: z.string().optional(),
 });

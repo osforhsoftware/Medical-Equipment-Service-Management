@@ -1,26 +1,44 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { HardDrive, FileClock, ShieldCheck, ArrowRight } from "lucide-react";
+import { HardDrive, FileClock, ShieldCheck, ArrowRight, Loader2 } from "lucide-react";
 import { StatCard } from "@/components/shared/StatCard";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
-import { equipment, estimates, serviceRequests } from "@/data/mock";
+import { ApiError, api, type BackendEquipment, type BackendEstimate, type BackendServiceRequest } from "@/lib/api";
+import { formatDate } from "@/lib/format";
 import { formatCurrency } from "@/lib/format";
+import { toast } from "@/hooks/use-toast";
 
 export default function PortalDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const myEquipment = equipment.filter((e) => e.customerId === user?.customerId);
-  const myRequests = serviceRequests.filter((r) => r.customerId === user?.customerId);
-  const pendingEstimates = estimates.filter((e) => e.customerName === user?.name && (e.status === "sent" || e.status === "revision"));
+  const [myEquipment, setMyEquipment] = useState<BackendEquipment[]>([]);
+  const [myRequests, setMyRequests] = useState<BackendServiceRequest[]>([]);
+  const [pendingEstimates, setPendingEstimates] = useState<BackendEstimate[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user?.customerId) { setLoading(false); return; }
+    void Promise.all([api.listEquipment({ customerId: user.customerId }), api.listServiceRequests(), api.listEstimates()])
+      .then(([equipment, requests, estimates]) => {
+        setMyEquipment(equipment);
+        setMyRequests(requests.filter((request) => request.customerId === user.customerId));
+        setPendingEstimates(estimates.filter((estimate) => estimate.customerId === user.customerId && ["sent", "revision"].includes(estimate.status)));
+      })
+      .catch((error) => toast({ title: "Unable to load portal overview", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" }))
+      .finally(() => setLoading(false));
+  }, [user?.customerId]);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold">Welcome, {user?.name}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Your equipment, service requests and estimates at a glance.</p>
-      </div>
+      <PageHeader
+        title={`Welcome, ${user?.name}`}
+        description="Your equipment, service requests and estimates at a glance."
+      />
+      {loading ? <div className="flex justify-center gap-2 py-12 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /> Loading overview…</div> : null}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="My Equipment" value={String(myEquipment.length)} icon={HardDrive} accent="primary" />
@@ -29,7 +47,7 @@ export default function PortalDashboard() {
       </div>
 
       {pendingEstimates.length > 0 && (
-        <Card className="border-warning/30 bg-warning/5 shadow-card">
+        <Card className="border-warning/30 bg-gradient-to-br from-warning/10 via-card to-card shadow-card">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-base">Estimates awaiting your approval</CardTitle>
             <Button size="sm" variant="outline" onClick={() => navigate("/portal/estimates")}>
@@ -38,10 +56,10 @@ export default function PortalDashboard() {
           </CardHeader>
           <CardContent className="space-y-2">
             {pendingEstimates.map((e) => (
-              <div key={e.id} className="flex items-center justify-between rounded-lg bg-card p-3 text-sm">
+              <div key={e.id} className="flex items-center justify-between rounded-xl border border-warning/15 bg-card/80 p-3 text-sm shadow-sm">
                 <div>
                   <p className="font-medium">{e.equipmentName}</p>
-                  <p className="text-xs text-muted-foreground">{e.reference} · valid until {e.validUntil}</p>
+                  <p className="text-xs text-muted-foreground">{e.reference} · valid until {formatDate(e.validUntil)}</p>
                 </div>
                 <span className="font-semibold">{formatCurrency(e.total)}</span>
               </div>
@@ -54,7 +72,7 @@ export default function PortalDashboard() {
         <CardHeader><CardTitle className="text-base">Recent Service Requests</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           {myRequests.map((r) => (
-            <div key={r.id} className="flex items-center justify-between rounded-lg border border-border p-3">
+            <div key={r.id} className="flex items-center justify-between rounded-xl border border-border/80 bg-gradient-to-r from-secondary/30 to-transparent p-3 transition-colors hover:border-primary/20">
               <div>
                 <p className="text-sm font-medium">{r.equipmentName}</p>
                 <p className="text-xs text-muted-foreground">{r.reference} · {r.type}</p>

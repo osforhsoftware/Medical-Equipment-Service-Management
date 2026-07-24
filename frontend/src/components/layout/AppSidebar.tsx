@@ -30,14 +30,16 @@ export function AppSidebar({ mobileOpen, onClose }: AppSidebarProps) {
       )}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-sidebar text-sidebar-foreground transition-transform duration-300 lg:static lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col overflow-hidden bg-sidebar text-sidebar-foreground shadow-2xl transition-transform duration-300 lg:static lg:translate-x-0 lg:shadow-none",
           mobileOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-5 bg-white">
-   
-          <MesmsLogo size="md" />
-          <button onClick={onClose} className="text-sidebar-foreground/70 lg:hidden">
+        <div className="relative flex h-20 items-center justify-between border-b border-sidebar-border px-4">
+          <div className="absolute inset-0 bg-gradient-to-r from-sidebar-primary/10 to-transparent" aria-hidden="true" />
+          <div className="relative rounded-xl bg-white px-3 py-1.5 shadow-md">
+            <MesmsLogo size="md" />
+          </div>
+          <button onClick={onClose} className="relative rounded-lg p-2 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-white lg:hidden" aria-label="Close navigation">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -48,7 +50,7 @@ export function AppSidebar({ mobileOpen, onClose }: AppSidebarProps) {
             if (items.length === 0) return null;
             return (
               <div key={group}>
-                <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/45">
+                <p className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-sidebar-foreground/45">
                   {group}
                 </p>
                 <div className="space-y-0.5">
@@ -60,13 +62,13 @@ export function AppSidebar({ mobileOpen, onClose }: AppSidebarProps) {
                         to={item.to}
                         onClick={onClose}
                         className={cn(
-                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                          "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
                           active
-                            ? "bg-sidebar-primary/15 text-sidebar-primary"
+                            ? "bg-gradient-to-r from-sidebar-primary/20 to-sidebar-primary/5 text-sidebar-primary shadow-sm"
                             : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                         )}
                       >
-                        <item.icon className="h-[18px] w-[18px] shrink-0" />
+                        <item.icon className="h-[18px] w-[18px] shrink-0 transition-transform group-hover:scale-110" />
                         {item.label}
                       </NavLink>
                     );
@@ -78,7 +80,7 @@ export function AppSidebar({ mobileOpen, onClose }: AppSidebarProps) {
         </nav>
 
         <div className="border-t border-sidebar-border p-3">
-          <div className="flex items-center gap-3 rounded-lg bg-sidebar-accent px-3 py-2.5">
+          <div className="flex items-center gap-3 rounded-xl border border-sidebar-border bg-sidebar-accent/80 px-3 py-3 shadow-inner">
             <div
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white"
               style={{ backgroundColor: `hsl(${user.avatarColor})` }}

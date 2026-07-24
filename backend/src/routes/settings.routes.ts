@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { settingsController } from "@/controllers/settings.controller";
-import { authenticate, requireRole } from "@/middleware/auth";
+import { authenticate, requireRole, requireStaff } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
 import { validate } from "@/middleware/validate";
 import { updateSettingsSchema } from "@/schemas/settings.schema";
@@ -8,6 +8,7 @@ import { updateSettingsSchema } from "@/schemas/settings.schema";
 const router = Router();
 
 router.use(authenticate, resolveTenant);
+router.use(requireStaff);
 
 router.get("/", settingsController.get);
 router.put("/", requireRole("admin"), validate(updateSettingsSchema), settingsController.update);

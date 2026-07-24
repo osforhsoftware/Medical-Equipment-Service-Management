@@ -3,6 +3,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { env } from "@/config/env";
 import { errorHandler } from "@/middleware/errorHandler";
+import { auditMutation } from "@/middleware/audit";
 
 // Routes
 import authRoutes from "@/routes/auth.routes";
@@ -24,6 +25,8 @@ import usersRoutes from "@/routes/users.routes";
 import settingsRoutes from "@/routes/settings.routes";
 import dashboardRoutes from "@/routes/dashboard.routes";
 import inspectionsRoutes from "@/routes/inspections.routes";
+import domainRoutes from "@/routes/domain.routes";
+import filesRoutes from "@/routes/files.routes";
 
 const app = express();
 
@@ -32,6 +35,7 @@ app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(auditMutation);
 
 // ── Health Check ─────────────────────────────────────────────
 app.get("/api/health", (_req, res) => {
@@ -58,6 +62,8 @@ app.use("/api/audit-logs", auditLogsRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/inspections", inspectionsRoutes);
+app.use("/api/domain", domainRoutes);
+app.use("/api/files", filesRoutes);
 
 // ── 404 Catch-All ─────────────────────────────────────────────
 app.use((_req, res) => {

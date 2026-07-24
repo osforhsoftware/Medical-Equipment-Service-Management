@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, FileText, Loader2 } from "lucide-react";
+import { Check, Eye, FileText, Loader2, MessageSquare, Plus, Send, Trash2, X } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { ProfessionalDocument } from "@/components/shared/ProfessionalDocument";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -20,45 +22,56 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { ApiError } from "@/lib/api";
 import { useBranch } from "@/context/BranchContext";
-import { api, type BackendEstimate, type BackendServiceRequest } from "@/lib/api";
+import { api, type BackendCatalogItem, type BackendEstimate, type BackendServiceRequest, type EstimateLineInput } from "@/lib/api";
+import { useSettings } from "@/context/SettingsContext";
 import { defaultDatePlusDays, formatDate, formatCurrency } from "@/lib/format";
 import { toast } from "@/hooks/use-toast";
 
+const newLine = (taxRate = 0): EstimateLineInput => ({
+  type: "service",
+  description: "",
+  quantity: 1,
+  unitPrice: 0,
+  taxRate,
+  discount: 0,
+});
+
 export default function Estimates() {
   const { branchId } = useBranch();
+  const { settings } = useSettings();
   const [estimates, setEstimates] = useState<BackendEstimate[]>([]);
   const [requests, setRequests] = useState<BackendServiceRequest[]>([]);
+  const [catalog, setCatalog] = useState<BackendCatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selected, setSelected] = useState<BackendEstimate | null>(null);
+  const [preview, setPreview] = useState<BackendEstimate | null>(null);
+  const [decisionNote, setDecisionNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     serviceRequestId: "",
-    laborCost: "",
-    partsCost: "",
     validUntil: defaultDatePlusDays(14),
     status: "draft",
+    discount: 0,
+    terms: "Payment due as agreed. Parts are subject to availability.",
+    notes: "",
+    lines: [newLine(settings?.defaultTaxRate ?? 0)],
   });
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [est, sr] = await Promise.all([
+      const [est, sr, services] = await Promise.all([
         api.listEstimates(),
         api.listServiceRequests({ branchId }),
+        api.listServiceCatalog(),
       ]);
       setEstimates(est);
       setRequests(sr.filter((r) => ["inspection", "estimate", "approval", "new"].includes(r.status)));
+      setCatalog(services.filter((service) => service.isActive));
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Failed to load estimates";
       toast({ title: "Error", description: message, variant: "destructive" });
@@ -77,20 +90,29 @@ export default function Estimates() {
   );
 
   const saveEstimate = async () => {
-    if (!form.serviceRequestId) return;
+    if (!form.serviceRequestId || form.lines.some((line) => !line.description.trim() || line.quantity <= 0)) return;
     setSaving(true);
     try {
-      await api.createEstimate({
+      const laborCost = form.lines.filter((line) => line.type !== "part").reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
+      const partsCost = form.lines.filter((line) => line.type === "part").reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
+      const created = await api.createEstimate({
         serviceRequestId: form.serviceRequestId,
-        laborCost: Number(form.laborCost) || 0,
-        partsCost: Number(form.partsCost) || 0,
+        laborCost,
+        partsCost,
         validUntil: form.validUntil,
-        status: form.status,
+        status: "draft",
       });
-      toast({ title: "Estimate created", description: "Estimate saved to the database." });
+      await api.createEstimateRevision(created.id, {
+        lines: form.lines,
+        discount: form.discount,
+        terms: form.terms,
+        notes: form.notes,
+      });
+      if (form.status === "sent") await api.updateEstimate(created.id, { status: "sent" });
       setDialogOpen(false);
-      setForm({ serviceRequestId: "", laborCost: "", partsCost: "", validUntil: defaultDatePlusDays(14), status: "draft" });
+      setForm({ serviceRequestId: "", validUntil: defaultDatePlusDays(14), status: "draft", discount: 0, terms: "Payment due as agreed. Parts are subject to availability.", notes: "", lines: [newLine(settings?.defaultTaxRate ?? 0)] });
       await loadData();
+      toast({ title: form.status === "sent" ? "Estimate created and sent" : "Estimate draft created" });
     } catch (err) {
       const message = err instanceof ApiError ? err.errors?.join(", ") || err.message : "Unable to save estimate";
       toast({ title: "Save failed", description: message, variant: "destructive" });
@@ -98,6 +120,37 @@ export default function Estimates() {
       setSaving(false);
     }
   };
+
+  const act = async (estimate: BackendEstimate, action: "sent" | "approved" | "rejected" | "revision") => {
+    setSaving(true);
+    try {
+      if (action === "sent") await api.updateEstimate(estimate.id, { status: "sent" });
+      else await api.decideEstimate(estimate.id, action, decisionNote || undefined);
+      setSelected(null);
+      setDecisionNote("");
+      await loadData();
+      toast({ title: action === "sent" ? "Estimate marked as sent" : `Estimate ${action}` });
+    } catch (error) {
+      toast({ title: "Workflow update failed", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openPreview = async (estimate: BackendEstimate) => {
+    try {
+      setPreview(await api.getEstimate(estimate.id));
+    } catch {
+      setPreview(estimate);
+    }
+  };
+
+  const previewLines = (estimate: BackendEstimate) => estimate.lineItems?.length
+    ? estimate.lineItems.map((line) => ({ id: line.id, description: `${line.type}: ${line.description}`, quantity: Number(line.quantity), unitPrice: Number(line.unitPrice), discount: Number(line.discount), taxRate: Number(line.taxRate) }))
+    : [
+      ...(Number(estimate.laborCost) ? [{ id: "labor", description: "Services and labor", quantity: 1, unitPrice: Number(estimate.laborCost), taxRate: 0 }] : []),
+      ...(Number(estimate.partsCost) ? [{ id: "parts", description: "Products and parts", quantity: 1, unitPrice: Number(estimate.partsCost), taxRate: 0 }] : []),
+    ];
 
   const columns: Column<BackendEstimate>[] = [
     {
@@ -120,6 +173,7 @@ export default function Estimates() {
     { key: "total", header: "Total", render: (e) => <span className="font-semibold">{formatCurrency(e.total)}</span> },
     { key: "validUntil", header: "Valid Until", render: (e) => <span className="text-sm text-muted-foreground">{formatDate(e.validUntil)}</span> },
     { key: "status", header: "Status", render: (e) => <StatusBadge status={e.status} /> },
+    { key: "actions" as keyof BackendEstimate, header: "", render: (estimate) => <Button size="icon" variant="ghost" onClick={(event) => { event.stopPropagation(); void openPreview(estimate); }}><Eye className="h-4 w-4" /></Button> },
   ];
 
   return (
@@ -132,7 +186,7 @@ export default function Estimates() {
             <Button
               onClick={() => setDialogOpen(true)}
               disabled={eligibleRequests.length === 0}
-              className="bg-gradient-primary text-primary-foreground hover:opacity-90"
+              variant="brand"
             >
               <Plus className="mr-1 h-4 w-4" /> New Estimate
             </Button>
@@ -167,17 +221,16 @@ export default function Estimates() {
           />
         )}
 
-        <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-          <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+        <Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
+          <DialogContent className="sm:max-w-lg">
             {selected && (
               <>
-                <SheetHeader>
+                <DialogHeader>
                   <div className="flex items-center gap-2">
-                    <SheetTitle>{selected.reference}</SheetTitle>
+                    <DialogTitle>{selected.reference}</DialogTitle>
                     <StatusBadge status={selected.status} />
                   </div>
-                  <SheetDescription>{selected.customerName} · {selected.equipmentName}</SheetDescription>
-                </SheetHeader>
+                </DialogHeader>
                 <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
                   <Info label="Request" value={selected.requestRef} />
                   <Info label="Revision" value={String(selected.revision)} />
@@ -186,13 +239,32 @@ export default function Estimates() {
                   <Info label="Total" value={formatCurrency(selected.total)} />
                   <Info label="Valid until" value={formatDate(selected.validUntil)} />
                 </div>
+                <div className="grid gap-2">
+                  <Label>Decision / revision note</Label>
+                  <Textarea value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)} placeholder="Optional context for the customer or estimator" />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={() => void openPreview(selected)}><Eye className="mr-1 h-4 w-4" /> Preview</Button>
+                  {selected.status === "draft" ? <Button onClick={() => void act(selected, "sent")} disabled={saving}><Send className="mr-1 h-4 w-4" /> Send</Button> : null}
+                  {["sent", "revision"].includes(selected.status) ? <>
+                    <Button className="bg-success text-success-foreground" onClick={() => void act(selected, "approved")} disabled={saving}><Check className="mr-1 h-4 w-4" /> Approve</Button>
+                    <Button variant="outline" onClick={() => void act(selected, "revision")} disabled={saving}><MessageSquare className="mr-1 h-4 w-4" /> Revision</Button>
+                    <Button variant="outline" className="text-destructive" onClick={() => void act(selected, "rejected")} disabled={saving}><X className="mr-1 h-4 w-4" /> Reject</Button>
+                  </> : null}
+                </div>
               </>
             )}
-          </SheetContent>
-        </Sheet>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
+          <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto p-0">
+            {preview ? <ProfessionalDocument kind="Estimate" reference={preview.reference} customerName={preview.customerName} issueDate={preview.createdAt} validOrDueLabel="Valid until" validOrDueDate={preview.validUntil} lines={previewLines(preview)} notes={[preview.terms, preview.notes].filter(Boolean).join("\n\n")} /> : null}
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
             <DialogHeader>
               <DialogTitle>New Estimate</DialogTitle>
             </DialogHeader>
@@ -208,15 +280,18 @@ export default function Estimates() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="labor">Labor cost (₹)</Label>
-                  <Input id="labor" type="number" min={0} value={form.laborCost} onChange={(e) => setForm({ ...form, laborCost: e.target.value })} />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="parts">Parts cost (₹)</Label>
-                  <Input id="parts" type="number" min={0} value={form.partsCost} onChange={(e) => setForm({ ...form, partsCost: e.target.value })} />
-                </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between"><Label>Service / product lines</Label><Button size="sm" variant="outline" onClick={() => setForm({ ...form, lines: [...form.lines, newLine(settings?.defaultTaxRate ?? 0)] })}><Plus className="mr-1 h-3.5 w-3.5" /> Line</Button></div>
+                {form.lines.map((line, index) => <div key={index} className="space-y-2 rounded-xl border p-3">
+                  <div className="grid gap-2 sm:grid-cols-[130px_1fr_auto]">
+                    <Select value={line.type} onValueChange={(type: EstimateLineInput["type"]) => setForm({ ...form, lines: form.lines.map((item, i) => i === index ? { ...item, type } : item) })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{["labor", "part", "transport", "testing", "calibration", "service", "other"].map((type) => <SelectItem key={type} value={type} className="capitalize">{type}</SelectItem>)}</SelectContent></Select>
+                    <Select onValueChange={(catalogId) => { const service = catalog.find((item) => item.id === catalogId); if (!service) return; setForm({ ...form, lines: form.lines.map((item, i) => i === index ? { ...item, catalogItemId: service.id, description: service.name, unitPrice: Number(service.unitPrice), taxRate: Number(service.taxRate), type: "service" } : item) }); }}><SelectTrigger><SelectValue placeholder="Use catalog service (optional)" /></SelectTrigger><SelectContent>{catalog.map((item) => <SelectItem key={item.id} value={item.id}>{item.code} · {item.name}</SelectItem>)}</SelectContent></Select>
+                    <Button size="icon" variant="ghost" disabled={form.lines.length === 1} onClick={() => setForm({ ...form, lines: form.lines.filter((_, i) => i !== index) })}><Trash2 className="h-4 w-4" /></Button>
+                  </div>
+                  <Input placeholder="Description" value={line.description} onChange={(event) => setForm({ ...form, lines: form.lines.map((item, i) => i === index ? { ...item, description: event.target.value } : item) })} />
+                  <div className="grid grid-cols-4 gap-2"><Input aria-label="Quantity" type="number" min={0.01} value={line.quantity} onChange={(event) => setForm({ ...form, lines: form.lines.map((item, i) => i === index ? { ...item, quantity: Number(event.target.value) } : item) })} /><Input aria-label="Unit price" type="number" min={0} value={line.unitPrice} onChange={(event) => setForm({ ...form, lines: form.lines.map((item, i) => i === index ? { ...item, unitPrice: Number(event.target.value) } : item) })} /><Input aria-label="Tax rate" type="number" min={0} max={100} value={line.taxRate} onChange={(event) => setForm({ ...form, lines: form.lines.map((item, i) => i === index ? { ...item, taxRate: Number(event.target.value) } : item) })} /><Input aria-label="Line discount" type="number" min={0} value={line.discount} onChange={(event) => setForm({ ...form, lines: form.lines.map((item, i) => i === index ? { ...item, discount: Number(event.target.value) } : item) })} /></div>
+                  <p className="text-xs text-muted-foreground">Quantity · Unit price · Tax % · Discount</p>
+                </div>)}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
@@ -235,6 +310,12 @@ export default function Estimates() {
                   </Select>
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2"><Label>Overall discount</Label><Input type="number" min={0} value={form.discount} onChange={(event) => setForm({ ...form, discount: Number(event.target.value) })} /></div>
+                <div className="grid gap-2"><Label>Calculated total</Label><Input readOnly value={formatCurrency(Math.max(0, form.lines.reduce((sum, line) => sum + Math.max(0, line.quantity * line.unitPrice - line.discount) * (1 + line.taxRate / 100), 0) - form.discount))} /></div>
+              </div>
+              <div className="grid gap-2"><Label>Terms</Label><Textarea value={form.terms} onChange={(event) => setForm({ ...form, terms: event.target.value })} /></div>
+              <div className="grid gap-2"><Label>Internal / customer notes</Label><Textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>

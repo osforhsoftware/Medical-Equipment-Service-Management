@@ -15,6 +15,8 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   CORS_ORIGIN: z.string().default("http://localhost:8080"),
   DEFAULT_TENANT_ID: z.string().default("tenant_medtech_01"),
+  PRIVATE_STORAGE_PATH: z.string().default("./storage/private"),
+  MAX_UPLOAD_BYTES: z.string().default("10485760").transform(Number),
 });
 
 const parsed = envSchema.safeParse(process.env);

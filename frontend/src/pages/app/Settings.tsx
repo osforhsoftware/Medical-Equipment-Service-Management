@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, Database, Trash2 } from "lucide-react";
+import { Image, Loader2, Database, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -57,6 +57,8 @@ export default function Settings() {
   const { settings, loading, refresh, updateLocal } = useSettings();
   const [companyName, setCompanyName] = useState("");
   const [supportEmail, setSupportEmail] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [defaultTaxRate, setDefaultTaxRate] = useState("8");
   const [rbacMatrix, setRbacMatrix] = useState<Record<string, Role[]>>(buildDefaultRbacMatrix());
   const [savingOrg, setSavingOrg] = useState(false);
@@ -121,6 +123,7 @@ export default function Settings() {
     if (!settings) return;
     setCompanyName(settings.companyName);
     setSupportEmail(settings.supportEmail);
+    setLogoUrl(settings.logoUrl ?? "");
     setDefaultTaxRate(String(settings.defaultTaxRate));
     setRbacMatrix(
       Object.fromEntries(
@@ -135,15 +138,25 @@ export default function Settings() {
   const saveOrganization = async () => {
     setSavingOrg(true);
     try {
+      let nextLogoUrl = logoUrl.trim() || null;
+      if (logoFile) {
+        const uploaded = await api.uploadFile(logoFile);
+        nextLogoUrl = api.fileDownloadUrl(uploaded.id);
+      }
       const updated = await api.updateSettings({
         companyName: companyName.trim(),
         supportEmail: supportEmail.trim(),
+        logoUrl: nextLogoUrl,
         defaultTaxRate: Number(defaultTaxRate) || 0,
       });
+      if (nextLogoUrl && updated.logoUrl !== nextLogoUrl) {
+        throw new Error("The server did not persist the tenant logo setting.");
+      }
       updateLocal(updated);
+      setLogoFile(null);
       toast({ title: "Organization saved", description: "Company details updated." });
     } catch (err) {
-      const message = err instanceof ApiError ? err.errors?.join(", ") || err.message : "Unable to save";
+      const message = err instanceof Error ? err.message : "Unable to save";
       toast({ title: "Save failed", description: message, variant: "destructive" });
     } finally {
       setSavingOrg(false);
@@ -214,6 +227,16 @@ export default function Settings() {
             </Button>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
+            <div className="flex items-center gap-4 sm:col-span-2">
+              <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-xl border bg-muted">
+                {logoFile ? <img src={URL.createObjectURL(logoFile)} alt="New tenant logo preview" className="h-full w-full object-contain" /> : logoUrl ? <img src={logoUrl} alt="Tenant logo" className="h-full w-full object-contain" /> : <Image className="h-7 w-7 text-muted-foreground" />}
+              </div>
+              <div className="grid flex-1 gap-2">
+                <Label htmlFor="tenant-logo">Tenant logo</Label>
+                <Input id="tenant-logo" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)} />
+                <p className="text-xs text-muted-foreground">Used on estimates, invoices and branded service documents.</p>
+              </div>
+            </div>
             <div className="grid gap-2">
               <Label htmlFor="company-name">Company name</Label>
               <Input id="company-name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
@@ -366,7 +389,7 @@ export default function Settings() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
-              Add staff accounts, assign roles, reset passwords, and remove inactive users from the PostgreSQL database.
+              Add staff accounts, assign roles, reset passwords, and remove inactive users from the MySQL database.
             </p>
           </CardContent>
         </Card>
