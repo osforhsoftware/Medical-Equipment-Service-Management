@@ -3,6 +3,7 @@ import { RBAC_ROLES } from "@/config/defaultRbac";
 
 export const updateSettingsSchema = z.object({
   companyName: z.string().min(2).max(200).optional(),
+  logoFileId: z.string().cuid().nullable().optional(),
   supportEmail: z.string().email().optional(),
   defaultTaxRate: z.coerce.number().min(0).max(100).optional(),
   amcRenewalReminders: z.boolean().optional(),

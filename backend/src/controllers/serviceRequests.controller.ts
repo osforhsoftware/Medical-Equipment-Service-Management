@@ -13,14 +13,24 @@ export class ServiceRequestsController {
 
   async getById(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await serviceRequestsService.getById(req.params.id, req.tenantId!);
+      const data = await serviceRequestsService.getById(
+        req.params.id,
+        req.tenantId!,
+        req.user!.userId,
+        req.user!.role,
+      );
       res.json(success("Service request fetched successfully", data));
     } catch (err) { next(err); }
   }
 
   async getTimeline(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await serviceRequestsService.getTimeline(req.params.id, req.tenantId!);
+      const data = await serviceRequestsService.getTimeline(
+        req.params.id,
+        req.tenantId!,
+        req.user!.userId,
+        req.user!.role,
+      );
       res.json(success("Timeline fetched successfully", data));
     } catch (err) { next(err); }
   }
@@ -34,7 +44,13 @@ export class ServiceRequestsController {
 
   async update(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await serviceRequestsService.update(req.params.id, req.tenantId!, req.user!.userId, req.body);
+      const data = await serviceRequestsService.update(
+        req.params.id,
+        req.tenantId!,
+        req.user!.userId,
+        req.user!.role,
+        req.body,
+      );
       res.json(success("Service request updated successfully", data));
     } catch (err) { next(err); }
   }
@@ -50,7 +66,14 @@ export class ServiceRequestsController {
   async workflow(req: Request, res: Response, next: NextFunction) {
     try {
       const { status, note } = req.body as { status: string; note: string };
-      const data = await serviceRequestsService.advanceWorkflow(req.params.id, req.tenantId!, req.user!.userId, status, note);
+      const data = await serviceRequestsService.advanceWorkflow(
+        req.params.id,
+        req.tenantId!,
+        req.user!.userId,
+        req.user!.role,
+        status,
+        note,
+      );
       res.json(success("Workflow advanced successfully", data));
     } catch (err) { next(err); }
   }

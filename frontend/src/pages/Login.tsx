@@ -16,8 +16,8 @@ function homeForRole(role: string) {
 export default function Login() {
   const { user, loading, login } = useAuth();
   const navigate = useNavigate();
-  const [username, setUsername] = useState("medical_equment");
-  const [password, setPassword] = useState("medical@961");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   if (loading) {
@@ -47,14 +47,19 @@ export default function Login() {
   };
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-2">
-      <div className="relative hidden flex-col justify-between overflow-hidden bg-sidebar p-12 text-sidebar-foreground lg:flex">
-        <div className="absolute -right-24 -top-24 h-80 w-80 rounded-full bg-primary/20 blur-3xl" />
-        <div className="absolute -bottom-32 -left-16 h-96 w-96 rounded-full bg-accent/20 blur-3xl" />
-        <MesmsLogo size="hero" className="relative" />
+    <div className="grid min-h-screen bg-background lg:grid-cols-[1.08fr_0.92fr]">
+      <div className="brand-grid relative hidden flex-col justify-between overflow-hidden bg-sidebar p-12 text-sidebar-foreground lg:flex xl:p-16">
+        <div className="absolute -right-24 -top-24 h-96 w-96 rounded-full bg-sidebar-primary/25 blur-3xl" />
+        <div className="absolute -bottom-32 -left-16 h-[28rem] w-[28rem] rounded-full bg-primary/35 blur-3xl" />
+        <div className="relative w-fit rounded-2xl bg-white px-5 py-3 shadow-elevated">
+          <MesmsLogo size="hero" />
+        </div>
 
         <div className="relative space-y-6">
-          <h1 className="font-display text-4xl font-bold leading-tight text-sidebar-accent-foreground">
+          <div className="inline-flex w-fit items-center rounded-full border border-sidebar-primary/25 bg-sidebar-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-sidebar-primary">
+            Smarter medical service operations
+          </div>
+          <h1 className="font-display text-4xl font-bold leading-tight text-sidebar-accent-foreground xl:text-5xl">
             Medical Equipment Service Management
           </h1>
           <p className="max-w-md text-sidebar-foreground/70">
@@ -67,8 +72,10 @@ export default function Login() {
               { icon: Boxes, t: "Inventory reservation system", d: "Reserve before deduct, low-stock alerts" },
               { icon: ShieldCheck, t: "Role-based access control", d: "8 roles, tenant separation, audit logs" },
             ].map((f) => (
-              <div key={f.t} className="flex items-start gap-3 rounded-xl bg-sidebar-accent/60 p-3">
-                <f.icon className="mt-0.5 h-5 w-5 text-sidebar-primary" />
+              <div key={f.t} className="flex items-start gap-3 rounded-xl border border-sidebar-border bg-sidebar-accent/65 p-3.5 backdrop-blur-sm">
+                <div className="rounded-lg bg-sidebar-primary/15 p-2">
+                  <f.icon className="h-5 w-5 text-sidebar-primary" />
+                </div>
                 <div>
                   <p className="text-sm font-medium text-sidebar-accent-foreground">{f.t}</p>
                   <p className="text-xs text-sidebar-foreground/60">{f.d}</p>
@@ -80,8 +87,9 @@ export default function Login() {
         <p className="relative text-xs text-sidebar-foreground/50">SaaS-ready · Multi-branch · QR equipment tracking</p>
       </div>
 
-      <div className="flex items-center justify-center bg-background p-6">
-        <div className="w-full max-w-md animate-scale-in">
+      <div className="relative flex items-center justify-center overflow-hidden p-6 sm:p-10">
+        <div className="absolute right-0 top-0 h-72 w-72 rounded-full bg-accent/10 blur-3xl" />
+        <div className="relative w-full max-w-md animate-scale-in rounded-2xl border border-primary/10 bg-card/90 p-6 shadow-elevated backdrop-blur sm:p-8">
           <div className="mb-8 lg:hidden">
             <MesmsLogo size="lg" className="mb-4" />
             <h1 className="font-display text-2xl font-bold">Welcome to MESMS</h1>
@@ -92,7 +100,7 @@ export default function Login() {
             <p className="mt-1 text-sm text-muted-foreground">Access your service operations workspace.</p>
           </div>
 
-          <form onSubmit={submit} className="space-y-4">
+          <form onSubmit={submit} className="space-y-5">
             <div className="space-y-2">
               <Label htmlFor="username">Username</Label>
               <Input
@@ -117,7 +125,8 @@ export default function Login() {
             <Button
               type="submit"
               disabled={submitting}
-              className="w-full bg-gradient-primary text-primary-foreground hover:opacity-90"
+              variant="brand"
+              className="w-full"
             >
               {submitting ? (
                 <>
@@ -131,9 +140,6 @@ export default function Login() {
             </Button>
           </form>
 
-          <p className="mt-6 text-center text-xs text-muted-foreground">
-            Default admin: <span className="font-mono">medical_equment</span>
-          </p>
         </div>
       </div>
     </div>

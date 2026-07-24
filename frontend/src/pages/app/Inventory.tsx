@@ -191,7 +191,7 @@ export default function Inventory() {
           title="Inventory"
           description="Spare parts with reservation system — reserve before deduct."
           actions={
-            <Button onClick={openCreate} disabled={branches.length === 0} className="bg-gradient-primary text-primary-foreground hover:opacity-90">
+            <Button onClick={openCreate} disabled={branches.length === 0} variant="brand">
               <Plus className="mr-1 h-4 w-4" /> Add Item
             </Button>
           }

@@ -5,7 +5,12 @@ import { success } from "@/utils/response";
 export class InspectionsController {
   async get(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await inspectionsService.getByRequestId(req.params.requestId, req.tenantId!);
+      const data = await inspectionsService.getByRequestId(
+        req.params.requestId,
+        req.tenantId!,
+        req.user!.userId,
+        req.user!.role,
+      );
       res.json(success("Inspection report fetched", data));
     } catch (err) { next(err); }
   }
@@ -16,6 +21,7 @@ export class InspectionsController {
         req.params.requestId,
         req.tenantId!,
         req.user!.userId,
+        req.user!.role,
         req.body,
       );
       res.json(success("Inspection report saved", data));

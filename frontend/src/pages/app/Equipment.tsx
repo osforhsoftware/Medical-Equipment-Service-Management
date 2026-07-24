@@ -289,7 +289,7 @@ export default function EquipmentPage() {
           <Button
             onClick={openCreate}
             disabled={customers.length === 0}
-            className="bg-gradient-primary text-primary-foreground hover:opacity-90"
+            variant="brand"
           >
             <Plus className="mr-1 h-4 w-4" /> Register Equipment
           </Button>

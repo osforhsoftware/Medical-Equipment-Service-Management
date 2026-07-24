@@ -14,3 +14,5 @@ export const updateEstimateSchema = z.object({
   validUntil: z.string().optional(),
   status: z.enum(["draft", "sent", "approved", "rejected", "revision"]).optional(),
 });
+
+export const estimateStatusSchema = z.enum(["draft", "sent", "approved", "rejected", "revision"]);

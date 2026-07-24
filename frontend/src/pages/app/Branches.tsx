@@ -71,7 +71,7 @@ export default function Branches() {
           title="Branch Management"
           description="Multi-branch operations under one tenant."
           actions={
-            <Button onClick={() => { setForm(emptyForm); setDialogOpen(true); }} className="bg-gradient-primary text-primary-foreground hover:opacity-90">
+            <Button onClick={() => { setForm(emptyForm); setDialogOpen(true); }} variant="brand">
               <Plus className="mr-1 h-4 w-4" /> Add Branch
             </Button>
           }

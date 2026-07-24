@@ -72,16 +72,16 @@ export function DataTable<T extends { id: string }>({
 
   return (
     <Card className="overflow-hidden shadow-card">
-      <div className="flex flex-col gap-3 border-b border-border p-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 border-b border-border/70 bg-gradient-to-r from-secondary/45 via-card to-card p-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:items-center">
           {searchKeys.length > 0 && (
-            <div className="relative max-w-xs flex-1">
+            <div className="relative max-w-sm flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={searchPlaceholder}
-                className="pl-9"
+                className="border-border/80 bg-card/90 pl-9 shadow-sm"
               />
             </div>
           )}
@@ -111,7 +111,7 @@ export function DataTable<T extends { id: string }>({
       <div className="overflow-x-auto">
         <Table>
           <TableHeader>
-            <TableRow className="bg-muted/40 hover:bg-muted/40">
+            <TableRow className="bg-primary/[0.045] hover:bg-primary/[0.045]">
               {columns.map((c) => (
                 <TableHead key={c.key} className={c.className}>
                   {c.header}
@@ -131,7 +131,7 @@ export function DataTable<T extends { id: string }>({
                 <TableRow
                   key={row.id}
                   onClick={() => onRowClick?.(row)}
-                  className={onRowClick ? "cursor-pointer" : undefined}
+                  className={onRowClick ? "cursor-pointer hover:bg-secondary/35" : "hover:bg-secondary/20"}
                 >
                   {columns.map((c) => (
                     <TableCell key={c.key} className={c.className}>
@@ -145,7 +145,7 @@ export function DataTable<T extends { id: string }>({
         </Table>
       </div>
 
-      <div className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
+      <div className="border-t border-border/70 bg-muted/25 px-4 py-2.5 text-xs font-medium text-muted-foreground">
         Showing {filtered.length} of {data.length} records
       </div>
     </Card>

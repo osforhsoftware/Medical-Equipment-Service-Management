@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MesmsLogo } from "@/components/shared/MesmsLogo";
+import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { useAuth } from "@/context/AuthContext";
 import { useBranch } from "@/context/BranchContext";
 import { api, type BackendBranch } from "@/lib/api";
@@ -55,14 +56,14 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
   if (!user) return null;
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-card/80 px-4 backdrop-blur lg:px-6">
-      <button onClick={onMenu} className="text-muted-foreground lg:hidden">
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/70 bg-card/75 px-4 shadow-sm backdrop-blur-xl lg:px-6">
+      <button onClick={onMenu} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-primary lg:hidden" aria-label="Open navigation">
         <Menu className="h-5 w-5" />
       </button>
 
       <div className="relative hidden max-w-sm flex-1 md:block">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder="Search requests, equipment, customers…" className="bg-background pl-9" />
+        <Input placeholder="Search requests, equipment, customers…" className="border-border/70 bg-background/70 pl-9 shadow-sm" />
       </div>
 
       <div className="ml-auto flex items-center gap-2">
@@ -81,7 +82,9 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
           </SelectContent>
         </Select>
 
-        <Button variant="ghost" size="icon" className="relative" onClick={() => navigate("/app/notifications")}>
+        <ThemeToggle />
+
+        <Button variant="ghost" size="icon" className="relative" onClick={() => navigate("/app/notifications")} aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ""}`}>
           <Bell className="h-5 w-5" />
           {unread > 0 && (
             <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground">
@@ -95,6 +98,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
             <button
               className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold text-white"
               style={{ backgroundColor: `hsl(${user.avatarColor})` }}
+              aria-label="Open user menu"
             >
               {user.name.charAt(0)}
             </button>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Area,
@@ -12,15 +12,27 @@ import {
   YAxis,
 } from "recharts";
 import {
-  ClipboardList,
-  Wrench,
   AlertTriangle,
-  IndianRupee,
-  ShieldAlert,
   ArrowRight,
+  Bell,
+  CalendarClock,
+  CheckCircle2,
+  ClipboardList,
   Clock,
+  FileText,
+  IndianRupee,
   Loader2,
+  MapPin,
+  Package,
+  QrCode,
+  Receipt,
+  Search,
+  ShieldAlert,
+  ShoppingCart,
+  Timer,
   UserCheck,
+  Wrench,
+  type LucideIcon,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatCard } from "@/components/shared/StatCard";
@@ -30,32 +42,193 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/context/AuthContext";
-import { ApiError } from "@/lib/api";
 import { useBranch } from "@/context/BranchContext";
-import { api, type DashboardData, type BackendServiceRequest, type BackendServiceJob } from "@/lib/api";
-import { formatCurrency, formatDateTime, formatServiceStatus, formatJobStatus } from "@/lib/format";
+import {
+  ApiError,
+  api,
+  type DashboardData,
+  type DashboardQueueItem,
+} from "@/lib/api";
+import { formatCurrency, formatDate, formatDateTime, formatJobStatus } from "@/lib/format";
 import { roleLabels } from "@/data/mock";
+import type { Role } from "@/data/types";
 import { toast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
-const STAFF_ROLES = ["inspector", "estimator", "engineer", "inventory", "billing"];
+const JOB_STATUS_ACTIONS = [
+  { value: "scheduled", label: "Assigned" },
+  { value: "inProgress", label: "In Progress" },
+  { value: "partsPending", label: "Waiting for Spare Parts" },
+  { value: "review", label: "Waiting for Customer" },
+  { value: "completed", label: "Completed" },
+] as const;
 
-const JOB_STATUS_COLOR: Record<string, string> = {
-  scheduled: "bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400",
-  "in-progress": "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400",
-  "parts-pending": "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-  review: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-  completed: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-};
+type QuickAction = { label: string; to: string; icon: LucideIcon };
 
-const STATUS_COLOR: Record<string, string> = {
-  new: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-  inspection: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-  estimate: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-  approval: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-  "in-progress": "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400",
-  completed: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-  invoiced: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400",
-};
+function roleQuickActions(role: Role): QuickAction[] {
+  switch (role) {
+    case "inspector":
+      return [
+        { label: "Assigned Inspections", to: "/app/inspections", icon: Search },
+        { label: "Service Requests", to: "/app/service-requests", icon: ClipboardList },
+        { label: "QR Scanner", to: "/app/qr-tracking", icon: QrCode },
+        { label: "Notifications", to: "/app/notifications", icon: Bell },
+      ];
+    case "estimator":
+      return [
+        { label: "Pending Estimates", to: "/app/estimates", icon: FileText },
+        { label: "Create Quotation", to: "/app/estimates", icon: FileText },
+        { label: "Notifications", to: "/app/notifications", icon: Bell },
+      ];
+    case "engineer":
+      return [
+        { label: "Assigned Jobs", to: "/app/jobs", icon: Wrench },
+        { label: "Request Parts", to: "/app/jobs", icon: Package },
+        { label: "Inventory", to: "/app/inventory", icon: Package },
+        { label: "QR Scanner", to: "/app/qr-tracking", icon: QrCode },
+        { label: "Service Requests", to: "/app/service-requests", icon: ClipboardList },
+      ];
+    case "inventory":
+      return [
+        { label: "Low Stock", to: "/app/inventory", icon: AlertTriangle },
+        { label: "Purchase Orders", to: "/app/purchase-orders", icon: ShoppingCart },
+        { label: "Stock Transfers", to: "/app/stock-transfers", icon: Package },
+        { label: "Notifications", to: "/app/notifications", icon: Bell },
+      ];
+    case "billing":
+      return [
+        { label: "Pending Bills", to: "/app/billing", icon: Receipt },
+        { label: "Estimates", to: "/app/estimates", icon: FileText },
+        { label: "AMC Contracts", to: "/app/amc", icon: ShieldAlert },
+        { label: "Reports", to: "/app/reports", icon: IndianRupee },
+      ];
+    case "coordinator":
+      return [
+        { label: "New Request", to: "/app/service-requests", icon: ClipboardList },
+        { label: "Schedule Job", to: "/app/jobs", icon: CalendarClock },
+        { label: "Inspections", to: "/app/inspections", icon: Search },
+        { label: "Estimates", to: "/app/estimates", icon: FileText },
+        { label: "QR Tracking", to: "/app/qr-tracking", icon: QrCode },
+      ];
+    case "admin":
+    default:
+      return [
+        { label: "Service Requests", to: "/app/service-requests", icon: ClipboardList },
+        { label: "Jobs", to: "/app/jobs", icon: Wrench },
+        { label: "Inventory", to: "/app/inventory", icon: Package },
+        { label: "Billing", to: "/app/billing", icon: Receipt },
+        { label: "Users", to: "/app/users", icon: UserCheck },
+        { label: "Reports", to: "/app/reports", icon: IndianRupee },
+      ];
+  }
+}
+
+function overviewCards(role: Role, data: DashboardData) {
+  const { stats, personal } = data;
+
+  switch (role) {
+    case "inspector":
+      return [
+        { label: "Assigned Inspections", value: String(personal.assignedOpen), icon: Search, accent: "primary" as const },
+        { label: "Due Today", value: String(personal.dueToday), icon: Timer, accent: "warning" as const },
+        { label: "Overdue", value: String(personal.overdue), icon: AlertTriangle, accent: "destructive" as const },
+        { label: "In Progress", value: String(personal.inProgress), icon: Clock, accent: "accent" as const },
+      ];
+    case "estimator":
+      return [
+        { label: "Pending Estimates", value: String(stats.pendingEstimates), icon: FileText, accent: "primary" as const },
+        { label: "Awaiting Approval", value: String(personal.pendingApprovals), icon: Clock, accent: "warning" as const },
+        { label: "Approved", value: String(personal.completedThisMonth), icon: CheckCircle2, accent: "success" as const },
+        { label: "Unread Alerts", value: String(stats.unreadNotifications), icon: Bell, accent: "accent" as const },
+      ];
+    case "engineer":
+      return [
+        { label: "Assigned Jobs", value: String(personal.assignedOpen || stats.activeJobs), icon: Wrench, accent: "primary" as const },
+        { label: "In Progress", value: String(personal.inProgress), icon: Clock, accent: "accent" as const },
+        { label: "Due Today", value: String(personal.dueToday), icon: CalendarClock, accent: "warning" as const },
+        { label: "Completed (MTD)", value: String(personal.completedThisMonth), icon: CheckCircle2, accent: "success" as const },
+      ];
+    case "inventory":
+      return [
+        { label: "Low Stock Alerts", value: String(stats.lowStockItems), icon: AlertTriangle, accent: "warning" as const },
+        { label: "Parts Requests", value: String(stats.pendingPartsRequests), icon: Package, accent: "primary" as const },
+        { label: "Open POs", value: String(stats.openPurchaseOrders), icon: ShoppingCart, accent: "accent" as const },
+        { label: "Transfers", value: String(stats.pendingTransfers), icon: Package, accent: "destructive" as const },
+      ];
+    case "billing":
+      return [
+        { label: "Pending Bills", value: String(stats.pendingInvoices), icon: Receipt, accent: "primary" as const },
+        { label: "Overdue Payments", value: String(stats.overdueInvoices), icon: AlertTriangle, accent: "destructive" as const },
+        { label: "Revenue (MTD)", value: stats.revenueMtdLabel, icon: IndianRupee, accent: "success" as const, trend: data.trends.revenue },
+        { label: "Expiring AMC", value: String(stats.expiringAmc), icon: ShieldAlert, accent: "warning" as const },
+      ];
+    case "coordinator":
+      return [
+        { label: "Open Requests", value: String(stats.openRequests), icon: ClipboardList, accent: "primary" as const },
+        { label: "Unassigned", value: String(stats.unassignedRequests), icon: UserCheck, accent: "warning" as const },
+        { label: "Active Jobs", value: String(stats.activeJobs), icon: Wrench, accent: "accent" as const, trend: data.trends.activeJobs },
+        { label: "Due Today", value: String(personal.dueToday), icon: Timer, accent: "destructive" as const },
+      ];
+    case "admin":
+    default:
+      return [
+        { label: "Open Requests", value: String(stats.openRequests), icon: ClipboardList, accent: "primary" as const },
+        { label: "Active Jobs", value: String(stats.activeJobs), icon: Wrench, accent: "accent" as const, trend: data.trends.activeJobs },
+        { label: "Low Stock", value: String(stats.lowStockItems), icon: AlertTriangle, accent: "warning" as const },
+        { label: "Revenue (MTD)", value: stats.revenueMtdLabel, icon: IndianRupee, accent: "success" as const, trend: data.trends.revenue },
+      ];
+  }
+}
+
+function queueTitle(role: Role) {
+  switch (role) {
+    case "inspector":
+      return "Assigned Inspections";
+    case "estimator":
+      return "Estimate Workload";
+    case "engineer":
+      return "My Assigned Jobs";
+    case "inventory":
+      return "Supply Chain Queue";
+    case "billing":
+      return "Billing Queue";
+    case "coordinator":
+      return "Operations Queue";
+    default:
+      return "Company Workload";
+  }
+}
+
+function QueueRow({
+  item,
+  onOpen,
+  actions,
+}: {
+  item: DashboardQueueItem;
+  onOpen: () => void;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-muted/30">
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-xs text-muted-foreground">{item.reference}</span>
+          <StatusBadge status={item.status} className="text-[10px]" />
+          {item.priority ? <StatusBadge status={item.priority} /> : null}
+        </div>
+        <p className="mt-0.5 truncate text-sm font-medium">{item.title}</p>
+        <p className="text-xs text-muted-foreground">{item.subtitle}</p>
+        {item.dueAt ? (
+          <p className="mt-1 text-[11px] text-muted-foreground">Due {formatDate(item.dueAt)}</p>
+        ) : null}
+        {typeof item.progress === "number" ? (
+          <Progress value={item.progress} className="mt-2 h-1.5" />
+        ) : null}
+      </button>
+      {actions}
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -63,11 +236,9 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [myAssignments, setMyAssignments] = useState<BackendServiceRequest[]>([]);
-  const [myJobs, setMyJobs] = useState<BackendServiceJob[]>([]);
+  const [updatingJobId, setUpdatingJobId] = useState<string | null>(null);
 
-  const isStaffRole = user ? STAFF_ROLES.includes(user.role) : false;
-  const isEngineer = user?.role === "engineer";
+  const role = (user?.role ?? "admin") as Role;
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -83,291 +254,364 @@ export default function Dashboard() {
     }
   }, [branchId]);
 
-  const loadAssignments = useCallback(async () => {
-    if (!isStaffRole) return;
-    try {
-      const requests = await api.listServiceRequests({ branchId });
-      setMyAssignments(requests.filter((r) => r.status !== "completed" && r.status !== "invoiced"));
-    } catch {
-      setMyAssignments([]);
-    }
-  }, [branchId, isStaffRole]);
-
-  const loadMyJobs = useCallback(async () => {
-    if (!isEngineer) return;
-    try {
-      const jobs = await api.listJobs();
-      setMyJobs(jobs.filter((j) => j.status !== "completed"));
-    } catch {
-      setMyJobs([]);
-    }
-  }, [isEngineer]);
-
   useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
 
-  useEffect(() => {
-    void loadAssignments();
-  }, [loadAssignments]);
+  const cards = useMemo(() => (data ? overviewCards(role, data) : []), [data, role]);
+  const actions = useMemo(() => roleQuickActions(role), [role]);
 
-  useEffect(() => {
-    void loadMyJobs();
-  }, [loadMyJobs]);
+  const updateJobStatus = async (jobId: string, status: string) => {
+    setUpdatingJobId(jobId);
+    try {
+      const progress =
+        status === "completed" ? 100 : status === "inProgress" ? 40 : status === "partsPending" ? 55 : status === "review" ? 85 : 10;
+      await api.updateJob(jobId, { status, progress });
+      toast({
+        title: "Work status updated",
+        description: `Moved to ${JOB_STATUS_ACTIONS.find((s) => s.value === status)?.label ?? status}.`,
+      });
+      await loadDashboard();
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "Could not update job status";
+      toast({ title: "Update failed", description: message, variant: "destructive" });
+    } finally {
+      setUpdatingJobId(null);
+    }
+  };
 
   if (!user) return null;
-
-  const showFinance = user.role === "admin" || user.role === "billing";
 
   if (loading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center text-muted-foreground">
-        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading dashboard…
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your dashboard…
       </div>
     );
   }
 
-  const stats = data?.stats ?? {
-    openRequests: 0,
-    activeJobs: 0,
-    lowStockItems: 0,
-    revenueMtd: 0,
-    revenueMtdLabel: "₹0",
-    expiringAmc: 0,
-  };
-  const trends = data?.trends;
-  const revenueTrend = data?.revenueTrend ?? [];
-  const jobsByType = data?.jobsByType ?? [];
-  const activeJobs = data?.activeJobs ?? [];
-  const recentActivity = data?.recentActivity ?? [];
-  const lowStock = data?.lowStock ?? [];
+  if (!data) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Dashboard" description="Unable to load overview" />
+        <Button onClick={() => void loadDashboard()}>Retry</Button>
+      </div>
+    );
+  }
+
+  const showFinance = data.visibility.showFinance;
+  const showCharts = data.visibility.showCharts;
+  const showSchedule = data.visibility.showSchedule;
+  const canUpdateJobStatus = data.visibility.canUpdateJobStatus && role === "engineer";
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={`Welcome back, ${user.name.split(" ")[0]}`}
-        description={`${roleLabels[user.role]} · operations overview for today`}
+        description={`${roleLabels[role]} · role-based work overview`}
         actions={
-          <Button onClick={() => navigate("/app/service-requests")} className="bg-gradient-primary text-primary-foreground hover:opacity-90">
-            New Service Request
-          </Button>
+          role === "admin" || role === "coordinator" ? (
+            <Button onClick={() => navigate("/app/service-requests")} variant="brand">
+              New Service Request
+            </Button>
+          ) : (
+            <Button onClick={() => navigate(actions[0]?.to ?? "/app/notifications")} variant="brand">
+              Open {actions[0]?.label ?? "Workspace"}
+            </Button>
+          )
         }
       />
 
+      {/* Overview cards */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Open Requests"
-          value={String(stats.openRequests)}
-          icon={ClipboardList}
-          trend={trends?.openRequests}
-          accent="primary"
-        />
-        <StatCard
-          label="Active Jobs"
-          value={String(stats.activeJobs)}
-          icon={Wrench}
-          trend={trends?.activeJobs}
-          accent="accent"
-        />
-        <StatCard
-          label="Low Stock Items"
-          value={String(stats.lowStockItems)}
-          icon={AlertTriangle}
-          accent="warning"
-        />
-        {showFinance ? (
+        {cards.map((card) => (
           <StatCard
-            label="Revenue (MTD)"
-            value={stats.revenueMtdLabel}
-            icon={IndianRupee}
-            trend={trends?.revenue}
-            accent="success"
+            key={card.label}
+            label={card.label}
+            value={card.value}
+            icon={card.icon}
+            accent={card.accent}
+            trend={"trend" in card ? card.trend : undefined}
           />
-        ) : (
-          <StatCard
-            label="Expiring AMC"
-            value={String(stats.expiringAmc)}
-            icon={ShieldAlert}
-            accent="destructive"
-          />
-        )}
+        ))}
       </div>
 
-      {/* My Service Jobs — shown for service engineers */}
-      {isEngineer && (
-        <Card className="shadow-card border-accent/30">
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div className="flex items-center gap-2">
-              <Wrench className="h-4 w-4 text-accent" />
-              <CardTitle className="text-base">My Service Jobs</CardTitle>
-              <Badge variant="secondary">{myJobs.length}</Badge>
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/app/jobs")}>
-              View all <ArrowRight className="ml-1 h-3.5 w-3.5" />
-            </Button>
+      {/* Service request status strip for ops roles */}
+      {(role === "admin" || role === "coordinator" || role === "inspector" || role === "estimator" || role === "engineer") && (
+        <Card className="shadow-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Work Status</CardTitle>
           </CardHeader>
           <CardContent>
-            {myJobs.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">No service jobs assigned to you.</p>
-            ) : (
-              <div className="space-y-2">
-                {myJobs.slice(0, 8).map((j) => {
-                  const statusKey = formatJobStatus(j.status);
-                  const colorClass = JOB_STATUS_COLOR[statusKey] ?? "";
-                  return (
-                    <div
-                      key={j.id}
-                      onClick={() => navigate("/app/jobs")}
-                      className="flex cursor-pointer items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/30 transition-colors"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-mono text-xs text-muted-foreground">{j.reference}</span>
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${colorClass}`}>
-                            {statusKey.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-                          </span>
-                        </div>
-                        <p className="mt-0.5 truncate text-sm font-medium">{j.equipmentName}</p>
-                        <p className="text-xs text-muted-foreground">{j.customerName} · {j.type}</p>
-                        <Progress value={j.progress} className="mt-2 h-1.5" />
-                      </div>
-                      <span className="text-sm font-semibold text-muted-foreground shrink-0">{j.progress}%</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              {[
+                { label: "New Assigned", value: data.roleQueues.newAssigned },
+                { label: "Inspection", value: data.roleQueues.inspection },
+                { label: "Estimate Pending", value: data.roleQueues.estimatePending },
+                { label: "Waiting Approval", value: data.roleQueues.waitingApproval },
+                { label: "Service Pending", value: data.roleQueues.servicePending },
+                { label: "Completed (MTD)", value: data.roleQueues.completed },
+              ].map((item) => (
+                <div key={item.label} className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                  <p className="text-xs text-muted-foreground">{item.label}</p>
+                  <p className="font-display text-xl font-semibold">{item.value}</p>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}
 
-      {/* My Assignments — shown only for staff roles (non-engineer focus) */}
-      {isStaffRole && !isEngineer && (
-        <Card className="shadow-card border-primary/20">
+      <div className="grid gap-6 xl:grid-cols-3">
+        {/* My Work */}
+        <Card className="shadow-card xl:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <div className="flex items-center gap-2">
               <UserCheck className="h-4 w-4 text-primary" />
-              <CardTitle className="text-base">My Assignments</CardTitle>
-              <Badge variant="secondary">{myAssignments.length}</Badge>
+              <CardTitle className="text-base">{queueTitle(role)}</CardTitle>
+              <Badge variant="secondary">{data.myQueue.length}</Badge>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/app/service-requests")}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate(data.myQueue[0]?.href ?? actions[0]?.to ?? "/app")}
+            >
               View all <ArrowRight className="ml-1 h-3.5 w-3.5" />
             </Button>
           </CardHeader>
-          <CardContent>
-            {myAssignments.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">No work currently assigned to you.</p>
+          <CardContent className="space-y-2">
+            {data.myQueue.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                No assigned work in your queue right now.
+              </p>
             ) : (
-              <div className="space-y-2">
-                {myAssignments.slice(0, 6).map((r) => {
-                  const statusKey = formatServiceStatus(r.status);
-                  const colorClass = STATUS_COLOR[statusKey] ?? "";
-                  const allEquip = r.equipmentItems?.length
-                    ? r.equipmentItems.map((e) => e.equipmentName).join(", ")
-                    : (r.equipmentName ?? "Equipment");
-                  return (
-                    <div
-                      key={r.id}
-                      onClick={() => navigate("/app/service-requests")}
-                      className="flex cursor-pointer items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/30 transition-colors"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-mono text-xs text-muted-foreground">{r.reference}</span>
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${colorClass}`}>
-                            {statusKey.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-                          </span>
-                          <StatusBadge status={r.priority} />
-                        </div>
-                        <p className="mt-0.5 truncate text-sm font-medium">{allEquip}</p>
-                        <p className="text-xs text-muted-foreground">{r.customerName} · {r.type}</p>
+              data.myQueue.slice(0, 8).map((item) => (
+                <QueueRow
+                  key={`${item.kind}-${item.id}`}
+                  item={item}
+                  onOpen={() => navigate(item.href)}
+                  actions={
+                    canUpdateJobStatus && item.kind === "job" ? (
+                      <div className="flex max-w-[11rem] flex-col gap-1">
+                        {JOB_STATUS_ACTIONS.filter((s) => formatJobStatus(s.value) !== item.status).slice(0, 3).map((s) => (
+                          <Button
+                            key={s.value}
+                            size="sm"
+                            variant="outline"
+                            className="h-7 justify-start px-2 text-[11px]"
+                            disabled={updatingJobId === item.id}
+                            onClick={() => void updateJobStatus(item.id, s.value)}
+                          >
+                            {updatingJobId === item.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                            {s.label}
+                          </Button>
+                        ))}
                       </div>
-                      <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    </div>
-                  );
-                })}
-              </div>
+                    ) : (
+                      <ArrowRight className="mt-2 h-4 w-4 shrink-0 text-muted-foreground" />
+                    )
+                  }
+                />
+              ))
             )}
           </CardContent>
         </Card>
+
+        {/* Quick actions + notifications */}
+        <div className="space-y-6">
+          <Card className="shadow-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Quick Actions</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-2">
+              {actions.map((action) => (
+                <Button
+                  key={action.label}
+                  variant="outline"
+                  className="justify-start gap-2"
+                  onClick={() => navigate(action.to)}
+                >
+                  <action.icon className="h-4 w-4 text-primary" />
+                  {action.label}
+                </Button>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-card">
+            <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <div className="flex items-center gap-2">
+                <Bell className="h-4 w-4 text-primary" />
+                <CardTitle className="text-base">Notifications</CardTitle>
+              </div>
+              {data.stats.unreadNotifications > 0 ? (
+                <Badge variant="secondary">{data.stats.unreadNotifications} new</Badge>
+              ) : null}
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Assignments, approvals, stock alerts, and system updates appear here.
+              </p>
+              <Button variant="ghost" size="sm" className="px-0" onClick={() => navigate("/app/notifications")}>
+                Open notification center <ArrowRight className="ml-1 h-3.5 w-3.5" />
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Engineer schedule + map shortcut */}
+      {showSchedule && (role === "engineer" || data.todaySchedule.length > 0 || data.upcomingJobs.length > 0) && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card className="shadow-card">
+            <CardHeader className="flex flex-row items-center gap-2 pb-3">
+              <CalendarClock className="h-4 w-4 text-primary" />
+              <CardTitle className="text-base">Today&apos;s Schedule</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {data.todaySchedule.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">No jobs scheduled for today.</p>
+              ) : (
+                data.todaySchedule.map((job) => (
+                  <button
+                    key={job.id}
+                    type="button"
+                    onClick={() => navigate(job.href)}
+                    className="flex w-full items-center justify-between rounded-lg border border-border p-3 text-left hover:bg-muted/30"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs text-muted-foreground">{job.reference}</span>
+                        <StatusBadge status={job.status} className="text-[10px]" />
+                      </div>
+                      <p className="truncate text-sm font-medium">{job.title}</p>
+                      <p className="text-xs text-muted-foreground">{job.subtitle}</p>
+                    </div>
+                    <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-card">
+            <CardHeader className="flex flex-row items-center gap-2 pb-3">
+              <Clock className="h-4 w-4 text-primary" />
+              <CardTitle className="text-base">Upcoming Jobs</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {data.upcomingJobs.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">No upcoming scheduled jobs.</p>
+              ) : (
+                data.upcomingJobs.map((job) => (
+                  <div key={job.id} className="rounded-lg border border-border p-3">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs text-muted-foreground">{job.reference}</span>
+                      <StatusBadge status={job.status} className="text-[10px]" />
+                    </div>
+                    <p className="mt-0.5 text-sm font-medium">{job.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {job.subtitle} · {formatDate(job.scheduledFor)}
+                    </p>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Analytics — admin / coordinator / billing / engineer productivity */}
+      {showCharts && (
+        <div className="grid gap-6 lg:grid-cols-3">
+          <Card className="shadow-card lg:col-span-2">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base">{showFinance ? "Revenue & Job Volume" : "Productivity · Job Volume"}</CardTitle>
+              <span className="text-xs text-muted-foreground">Last 6 months</span>
+            </CardHeader>
+            <CardContent>
+              {data.revenueTrend.length === 0 ? (
+                <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">
+                  No job or revenue data yet
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={240}>
+                  <AreaChart data={data.revenueTrend} margin={{ left: -16, right: 8 }}>
+                    <defs>
+                      <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 12 }}
+                      formatter={(v: number, n: string) => (n === "revenue" ? [formatCurrency(v), "Revenue"] : [v, "Jobs"])}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey={showFinance ? "revenue" : "jobs"}
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={2.5}
+                      fill="url(#rev)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-card">
+            <CardHeader>
+              <CardTitle className="text-base">Jobs by Type</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {data.jobsByType.length === 0 ? (
+                <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">
+                  No jobs recorded yet
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={data.jobsByType} layout="vertical" margin={{ left: 8, right: 16 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+                    <XAxis type="number" hide />
+                    <YAxis type="category" dataKey="type" width={84} stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 12 }} cursor={{ fill: "hsl(var(--muted))" }} />
+                    <Bar dataKey="count" fill="hsl(var(--accent))" radius={[0, 6, 6, 0]} barSize={20} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="shadow-card lg:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">{showFinance ? "Revenue & Job Volume" : "Job Volume"}</CardTitle>
-            <span className="text-xs text-muted-foreground">Last 6 months</span>
-          </CardHeader>
-          <CardContent>
-            {revenueTrend.length === 0 ? (
-              <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">
-                No job or revenue data yet
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={revenueTrend} margin={{ left: -16, right: 8 }}>
-                  <defs>
-                    <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                  <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip
-                    contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 12 }}
-                    formatter={(v: number, n: string) => (n === "revenue" ? [formatCurrency(v), "Revenue"] : [v, "Jobs"])}
-                  />
-                  <Area type="monotone" dataKey={showFinance ? "revenue" : "jobs"} stroke="hsl(var(--primary))" strokeWidth={2.5} fill="url(#rev)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-card">
-          <CardHeader>
-            <CardTitle className="text-base">Jobs by Type</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {jobsByType.length === 0 ? (
-              <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">
-                No jobs recorded yet
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={jobsByType} layout="vertical" margin={{ left: 8, right: 16 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
-                  <XAxis type="number" hide />
-                  <YAxis type="category" dataKey="type" width={84} stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 12 }} cursor={{ fill: "hsl(var(--muted))" }} />
-                  <Bar dataKey="count" fill="hsl(var(--accent))" radius={[0, 6, 6, 0]} barSize={20} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="shadow-card lg:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">{isEngineer ? "My Active Jobs" : "Active Service Jobs"}</CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/app/jobs")}>
+            <CardTitle className="text-base">
+              {role === "engineer" ? "My Active Jobs" : data.visibility.showCompanyOps ? "Active Service Jobs" : "Recent Queue"}
+            </CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => navigate(role === "billing" ? "/app/billing" : "/app/jobs")}>
               View all <ArrowRight className="ml-1 h-3.5 w-3.5" />
             </Button>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {(isEngineer ? myJobs : activeJobs).length === 0 ? (
+          <CardContent className="space-y-3">
+            {data.activeJobs.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">No active jobs right now</p>
             ) : (
-              (isEngineer ? myJobs : activeJobs).map((j) => (
-                <div key={j.id} className="flex items-center gap-4 rounded-lg border border-border p-3 cursor-pointer hover:bg-muted/30" onClick={() => navigate("/app/jobs")}>
+              data.activeJobs.map((j) => (
+                <div
+                  key={j.id}
+                  className="flex cursor-pointer items-center gap-4 rounded-lg border border-border p-3 hover:bg-muted/30"
+                  onClick={() => navigate("/app/jobs")}
+                >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <p className="truncate text-sm font-medium">{j.equipmentName}</p>
-                      <StatusBadge status={isEngineer ? formatJobStatus(j.status) : j.status} />
+                      <StatusBadge status={j.status} />
                     </div>
                     <p className="truncate text-xs text-muted-foreground">
                       {j.reference} · {j.customerName} · {j.engineer}
@@ -385,14 +629,14 @@ export default function Dashboard() {
           <Card className="shadow-card">
             <CardHeader className="flex flex-row items-center gap-2">
               <Clock className="h-4 w-4 text-primary" />
-              <CardTitle className="text-base">Recent Activity</CardTitle>
+              <CardTitle className="text-base">Recent Activities</CardTitle>
             </CardHeader>
             <CardContent>
-              {recentActivity.length === 0 ? (
+              {data.recentActivity.length === 0 ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">No recent activity</p>
               ) : (
                 <ol className="relative space-y-4 border-l border-border pl-4">
-                  {recentActivity.map((t) => (
+                  {data.recentActivity.map((t) => (
                     <li key={t.id} className="relative">
                       <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-primary ring-4 ring-background" />
                       <p className="text-sm font-medium">{t.action}</p>
@@ -406,21 +650,43 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {lowStock.length > 0 && (
-            <Card className="border-warning/30 bg-warning/5 shadow-card">
+          {data.visibility.showInventoryAlerts && data.lowStock.length > 0 && (
+            <Card className={cn("shadow-card", "border-warning/30 bg-warning/5")}>
               <CardHeader className="flex flex-row items-center gap-2 pb-2">
                 <AlertTriangle className="h-4 w-4 text-warning-foreground" />
-                <CardTitle className="text-base">Low Stock Alerts</CardTitle>
+                <CardTitle className="text-base">Inventory Alerts</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {lowStock.map((i) => (
-                  <div key={i.id} className="flex items-center justify-between text-sm">
+                {data.lowStock.map((i) => (
+                  <button
+                    key={i.id}
+                    type="button"
+                    className="flex w-full items-center justify-between text-sm hover:underline"
+                    onClick={() => navigate("/app/inventory")}
+                  >
                     <span className="truncate">{i.name}</span>
                     <span className="font-medium text-warning-foreground">
                       {i.inStock}/{i.reorderLevel}
                     </span>
-                  </div>
+                  </button>
                 ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {(role === "admin" || role === "coordinator") && data.stats.expiringAmc > 0 && (
+            <Card className="border-destructive/20 bg-destructive/5 shadow-card">
+              <CardHeader className="flex flex-row items-center gap-2 pb-2">
+                <ShieldAlert className="h-4 w-4 text-destructive" />
+                <CardTitle className="text-base">AMC Watchlist</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  {data.stats.expiringAmc} contract{data.stats.expiringAmc === 1 ? "" : "s"} expiring within 30 days.
+                </p>
+                <Button variant="ghost" size="sm" className="mt-2 px-0" onClick={() => navigate("/app/amc")}>
+                  Review AMC <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                </Button>
               </CardContent>
             </Card>
           )}

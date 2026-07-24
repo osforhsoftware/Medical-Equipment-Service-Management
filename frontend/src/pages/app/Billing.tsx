@@ -137,7 +137,7 @@ export default function Billing() {
           title="Billing & Invoicing"
           description="Generate invoices from completed jobs and track payments."
           actions={
-            <Button onClick={() => { setForm(emptyForm); setDialogOpen(true); }} className="bg-gradient-primary text-primary-foreground hover:opacity-90">
+            <Button onClick={() => { setForm(emptyForm); setDialogOpen(true); }} variant="brand">
               <Plus className="mr-1 h-4 w-4" /> New Invoice
             </Button>
           }

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Camera, Video, FileCheck, ClipboardCheck, Loader2, AlertTriangle } from "lucide-react";
+import { Camera, FileCheck, ClipboardCheck, Loader2, AlertTriangle, Plus, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -29,13 +30,6 @@ import { api, type BackendServiceRequest, type BackendInspectionReport } from "@
 import { formatServiceStatus } from "@/lib/format";
 import { toast } from "@/hooks/use-toast";
 
-const SEVERITY_COLORS: Record<string, string> = {
-  low: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-  medium: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-  high: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-  critical: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-};
-
 export default function Inspections() {
   const { branchId } = useBranch();
   const [requests, setRequests] = useState<BackendServiceRequest[]>([]);
@@ -45,6 +39,11 @@ export default function Inspections() {
 
   const [findings, setFindings] = useState("");
   const [recommendation, setRecommendation] = useState("");
+  const [workDetails, setWorkDetails] = useState("");
+  const [machineImage, setMachineImage] = useState<File | null>(null);
+  const [recommendedItems, setRecommendedItems] = useState([
+    { title: "", description: "", priority: "medium" as "low" | "medium" | "high" | "critical", kind: "service" as "service" | "inventory" },
+  ]);
   const [severity, setSeverity] = useState("medium");
   const [saving, setSaving] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
@@ -72,6 +71,9 @@ export default function Inspections() {
     setActive(task);
     setFindings("");
     setRecommendation("");
+    setWorkDetails("");
+    setMachineImage(null);
+    setRecommendedItems([{ title: "", description: "", priority: "medium", kind: "service" }]);
     setSeverity("medium");
     setExistingReport(null);
 
@@ -112,13 +114,32 @@ export default function Inspections() {
       toast({ title: "Recommendation required", description: "Please provide a recommendation.", variant: "destructive" });
       return;
     }
+    if (!existingReport && !machineImage) {
+      toast({ title: "Machine image required", description: "Attach a current image of the equipment before submitting.", variant: "destructive" });
+      return;
+    }
     setSaving(true);
     try {
-      await api.saveInspectionReport(active.id, {
-        findings: findings.trim(),
+      const uploaded = machineImage ? await api.uploadFile(machineImage) : null;
+      const report = await api.saveInspectionReport(active.id, {
+        findings: [findings.trim(), workDetails.trim() ? `Work details:\n${workDetails.trim()}` : ""].filter(Boolean).join("\n\n"),
         recommendation: recommendation.trim(),
         severity,
       });
+      if (uploaded) {
+        await api.attachInspectionFile(report.id, {
+          fileId: uploaded.id,
+          caption: `${active.equipmentName ?? "Equipment"} inspection image`,
+          kind: "image",
+        });
+      }
+      for (const item of recommendedItems.filter((entry) => entry.title.trim())) {
+        await api.addInspectionRecommendation(report.id, {
+          title: `${item.kind === "inventory" ? "Inventory" : "Service"}: ${item.title.trim()}`,
+          description: item.description.trim() || item.title.trim(),
+          priority: item.priority,
+        });
+      }
       toast({
         title: "Inspection report saved",
         description: "Request advanced to the Estimate stage.",
@@ -171,31 +192,13 @@ export default function Inspections() {
                     {report && (
                       <div className="rounded-lg bg-muted/50 p-2.5 space-y-1">
                         <div className="flex items-center gap-1.5">
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${SEVERITY_COLORS[report.severity] ?? ""}`}>
-                            {report.severity.toUpperCase()}
-                          </span>
+                          <StatusBadge status={report.severity} className="text-[10px]" />
                           <span className="text-xs text-muted-foreground">Report filed</span>
                         </div>
                         <p className="text-xs line-clamp-2">{report.findings}</p>
                       </div>
                     )}
                     <div className="space-y-2">
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        <button
-                          type="button"
-                          onClick={() => toast({ title: "Camera", description: "Photo capture coming soon." })}
-                          className="inline-flex items-center gap-1 hover:text-primary transition-colors"
-                        >
-                          <Camera className="h-3.5 w-3.5" /> Add Photos
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => toast({ title: "Video", description: "Video capture coming soon." })}
-                          className="inline-flex items-center gap-1 hover:text-primary transition-colors"
-                        >
-                          <Video className="h-3.5 w-3.5" /> Add Videos
-                        </button>
-                      </div>
                       <Button variant="outline" className="w-full" onClick={() => void startInspection(t)}>
                         <ClipboardCheck className="mr-1 h-4 w-4" />
                         {report ? "Update Report" : "Conduct Inspection"}
@@ -210,7 +213,7 @@ export default function Inspections() {
       </div>
 
       <Dialog open={!!active} onOpenChange={(o) => !o && setActive(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Inspection Report</DialogTitle>
             <DialogDescription>
@@ -227,7 +230,7 @@ export default function Inspections() {
           ) : (
             <div className="space-y-4 py-2">
               {existingReport && (
-                <div className="flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400">
+                <div className="flex items-center gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   Updating existing report filed by <strong className="mx-0.5">{existingReport.reportedBy}</strong>
                 </div>
@@ -242,22 +245,22 @@ export default function Inspections() {
                   <SelectContent>
                     <SelectItem value="low">
                       <span className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-blue-500 inline-block" /> Low
+                        <span className="inline-block h-2 w-2 rounded-full bg-info" /> Low
                       </span>
                     </SelectItem>
                     <SelectItem value="medium">
                       <span className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-yellow-500 inline-block" /> Medium
+                        <span className="inline-block h-2 w-2 rounded-full bg-warning" /> Medium
                       </span>
                     </SelectItem>
                     <SelectItem value="high">
                       <span className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-orange-500 inline-block" /> High
+                        <span className="inline-block h-2 w-2 rounded-full bg-warning-foreground" /> High
                       </span>
                     </SelectItem>
                     <SelectItem value="critical">
                       <span className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-red-500 inline-block" /> Critical
+                        <span className="inline-block h-2 w-2 rounded-full bg-destructive" /> Critical
                       </span>
                     </SelectItem>
                   </SelectContent>
@@ -276,6 +279,17 @@ export default function Inspections() {
               </div>
 
               <div className="grid gap-2">
+                <Label>Work details</Label>
+                <Textarea value={workDetails} onChange={(e) => setWorkDetails(e.target.value)} rows={3} placeholder="Tests performed, measurements, error codes and machine condition…" />
+              </div>
+
+              <div className="grid gap-2">
+                <Label>Current machine image {!existingReport ? <span className="text-destructive">*</span> : null}</Label>
+                <Input type="file" accept="image/*" capture="environment" onChange={(event) => setMachineImage(event.target.files?.[0] ?? null)} />
+                {machineImage ? <p className="text-xs text-muted-foreground">{machineImage.name} · {(machineImage.size / 1024).toFixed(0)} KB</p> : null}
+              </div>
+
+              <div className="grid gap-2">
                 <Label>Recommendation <span className="text-destructive">*</span></Label>
                 <Textarea
                   value={recommendation}
@@ -284,13 +298,32 @@ export default function Inspections() {
                   placeholder="What action do you recommend? E.g. replace compressor, calibrate sensor…"
                 />
               </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label>Recommended services & inventory</Label>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setRecommendedItems((items) => [...items, { title: "", description: "", priority: "medium", kind: "service" }])}><Plus className="mr-1 h-3.5 w-3.5" /> Add</Button>
+                </div>
+                {recommendedItems.map((item, index) => (
+                  <div key={index} className="space-y-2 rounded-lg border p-3">
+                    <div className="grid grid-cols-[120px_1fr_auto] gap-2">
+                      <Select value={item.kind} onValueChange={(kind: "service" | "inventory") => setRecommendedItems((items) => items.map((entry, i) => i === index ? { ...entry, kind } : entry))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="service">Service</SelectItem><SelectItem value="inventory">Inventory</SelectItem></SelectContent>
+                      </Select>
+                      <Input value={item.title} onChange={(event) => setRecommendedItems((items) => items.map((entry, i) => i === index ? { ...entry, title: event.target.value } : entry))} placeholder={item.kind === "service" ? "Calibration / repair service" : "Part, SKU or consumable"} />
+                      <Button type="button" size="icon" variant="ghost" onClick={() => setRecommendedItems((items) => items.filter((_, i) => i !== index))} disabled={recommendedItems.length === 1}><Trash2 className="h-4 w-4" /></Button>
+                    </div>
+                    <Textarea value={item.description} onChange={(event) => setRecommendedItems((items) => items.map((entry, i) => i === index ? { ...entry, description: event.target.value } : entry))} rows={2} placeholder="Reason, scope or quantity…" />
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setActive(null)}>Cancel</Button>
             <Button
-              className="bg-gradient-primary text-primary-foreground hover:opacity-90"
+              variant="brand"
               onClick={submitReport}
               disabled={saving || loadingReport}
             >

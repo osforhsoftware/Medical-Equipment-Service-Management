@@ -13,13 +13,15 @@ import {
 const router = Router();
 router.use(authenticate, resolveTenant);
 
-router.get("/", serviceRequestsController.getAll);
-router.get("/:id/timeline", serviceRequestsController.getTimeline);
-router.get("/:id", serviceRequestsController.getById);
-router.post("/", validate(createServiceRequestSchema), serviceRequestsController.create);
-router.put("/:id", validate(updateServiceRequestSchema), serviceRequestsController.update);
+const canRead = requireRole("admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing");
+
+router.get("/", canRead, serviceRequestsController.getAll);
+router.get("/:id/timeline", canRead, serviceRequestsController.getTimeline);
+router.get("/:id", canRead, serviceRequestsController.getById);
+router.post("/", requireRole("admin", "coordinator"), validate(createServiceRequestSchema), serviceRequestsController.create);
+router.put("/:id", canRead, validate(updateServiceRequestSchema), serviceRequestsController.update);
 router.put("/:id/assign", requireRole("admin", "coordinator"), validate(assignServiceRequestSchema), serviceRequestsController.assign);
-router.put("/:id/workflow", validate(workflowServiceRequestSchema), serviceRequestsController.workflow);
-router.delete("/:id", serviceRequestsController.delete);
+router.put("/:id/workflow", canRead, validate(workflowServiceRequestSchema), serviceRequestsController.workflow);
+router.delete("/:id", requireRole("admin"), serviceRequestsController.delete);
 
 export default router;

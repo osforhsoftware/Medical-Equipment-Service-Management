@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, ArrowLeftRight, Loader2 } from "lucide-react";
+import { ArrowLeftRight, Loader2, Plus, Truck } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -28,30 +28,31 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError } from "@/lib/api";
-import { api, type BackendBranch, type BackendStockTransfer } from "@/lib/api";
+import { ApiError, api, type BackendBranch, type BackendInventoryItem, type BackendStockTransfer } from "@/lib/api";
+import { useBranch } from "@/context/BranchContext";
 import { formatDate, formatTransferStatus } from "@/lib/format";
 import { toast } from "@/hooks/use-toast";
 
 export default function StockTransfers() {
+  const { branchId } = useBranch();
   const [transfers, setTransfers] = useState<BackendStockTransfer[]>([]);
   const [branches, setBranches] = useState<BackendBranch[]>([]);
+  const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selected, setSelected] = useState<BackendStockTransfer | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
-    fromBranch: "",
-    toBranch: "",
-    items: "1",
-    status: "pending",
+    fromBranchId: "",
+    toBranchId: "",
+    inventoryItemId: "",
+    quantity: "1",
   });
 
   const loadTransfers = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.listStockTransfers();
-      setTransfers(data);
+      setTransfers(await api.listDomainStockTransfers());
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Failed to load stock transfers";
       toast({ title: "Error", description: message, variant: "destructive" });
@@ -68,32 +69,35 @@ export default function StockTransfers() {
     void api.listBranches().then(setBranches).catch(() => setBranches([]));
   }, []);
 
-  const branchNames = branches.map((b) => b.name);
+  useEffect(() => {
+    if (!form.fromBranchId) {
+      setInventory([]);
+      return;
+    }
+    void api.listInventory(form.fromBranchId).then(setInventory).catch(() => setInventory([]));
+  }, [form.fromBranchId]);
 
   const openCreate = () => {
+    const defaultFrom = branchId !== "all" ? branchId : branches[0]?.id ?? "";
     setForm({
-      fromBranch: branchNames[0] ?? "",
-      toBranch: branchNames[1] ?? branchNames[0] ?? "",
-      items: "1",
-      status: "pending",
+      fromBranchId: defaultFrom,
+      toBranchId: branches.find((branch) => branch.id !== defaultFrom)?.id ?? "",
+      inventoryItemId: "",
+      quantity: "1",
     });
     setDialogOpen(true);
   };
 
   const saveTransfer = async () => {
-    if (!form.fromBranch || !form.toBranch || form.fromBranch === form.toBranch) {
-      toast({ title: "Invalid route", description: "Select different from and to branches.", variant: "destructive" });
-      return;
-    }
+    if (!form.fromBranchId || !form.toBranchId || !form.inventoryItemId) return;
     setSaving(true);
     try {
-      await api.createStockTransfer({
-        fromBranch: form.fromBranch,
-        toBranch: form.toBranch,
-        items: Number(form.items) || 1,
-        status: form.status,
+      await api.createDomainStockTransfer({
+        fromBranchId: form.fromBranchId,
+        toBranchId: form.toBranchId,
+        lines: [{ inventoryItemId: form.inventoryItemId, quantity: Number(form.quantity) || 1 }],
       });
-      toast({ title: "Transfer created", description: "Stock transfer saved to the database." });
+      toast({ title: "Stock transfer created", description: "Pending transfer ready for dispatch." });
       setDialogOpen(false);
       await loadTransfers();
     } catch (err) {
@@ -104,18 +108,48 @@ export default function StockTransfers() {
     }
   };
 
+  const dispatchTransfer = async (transfer: BackendStockTransfer) => {
+    setSaving(true);
+    try {
+      await api.dispatchStockTransfer(transfer.id);
+      toast({ title: "Transfer dispatched", description: "Stock has left the source branch." });
+      await loadTransfers();
+      setSelected(null);
+    } catch (err) {
+      toast({ title: "Dispatch failed", description: err instanceof ApiError ? err.message : "Request failed", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const receiveTransfer = async (transfer: BackendStockTransfer) => {
+    setSaving(true);
+    try {
+      await api.receiveStockTransfer(transfer.id);
+      toast({ title: "Transfer received", description: "Destination stock updated." });
+      await loadTransfers();
+      setSelected(null);
+    } catch (err) {
+      toast({ title: "Receive failed", description: err instanceof ApiError ? err.message : "Request failed", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const columns: Column<BackendStockTransfer>[] = [
-    { key: "reference", header: "Transfer", render: (t) => <span className="font-mono text-sm font-medium">{t.reference}</span> },
     {
-      key: "route",
-      header: "Route",
+      key: "reference",
+      header: "Transfer",
       render: (t) => (
-        <span className="inline-flex items-center gap-2 text-sm">
-          {t.fromBranch} <ArrowLeftRight className="h-3.5 w-3.5 text-muted-foreground" /> {t.toBranch}
-        </span>
+        <div className="flex items-center gap-2">
+          <ArrowLeftRight className="h-4 w-4 text-primary" />
+          <span className="font-mono text-sm font-medium">{t.reference}</span>
+        </div>
       ),
     },
-    { key: "items", header: "Items", render: (t) => <span className="font-medium">{t.items}</span> },
+    { key: "fromBranch", header: "From", render: (t) => <span className="text-sm">{t.fromBranch}</span> },
+    { key: "toBranch", header: "To", render: (t) => <span className="text-sm">{t.toBranch}</span> },
+    { key: "items", header: "Lines", render: (t) => <span className="font-medium">{t.lineItems?.length ?? t.items}</span> },
     { key: "createdAt", header: "Created", render: (t) => <span className="text-sm text-muted-foreground">{formatDate(t.createdAt)}</span> },
     { key: "status", header: "Status", render: (t) => <StatusBadge status={formatTransferStatus(t.status)} /> },
   ];
@@ -125,9 +159,9 @@ export default function StockTransfers() {
       <div className="space-y-6">
         <PageHeader
           title="Stock Transfers"
-          description="Move parts between branches."
+          description="Move inventory between branches with dispatch, receive, and stock ledger updates."
           actions={
-            <Button onClick={openCreate} disabled={branchNames.length < 2} className="bg-gradient-primary text-primary-foreground hover:opacity-90">
+            <Button onClick={openCreate} variant="brand">
               <Plus className="mr-1 h-4 w-4" /> New Transfer
             </Button>
           }
@@ -135,7 +169,7 @@ export default function StockTransfers() {
 
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" /> Loading transfers…
+            <Loader2 className="h-5 w-5 animate-spin" /> Loading stock transfers…
           </div>
         ) : (
           <DataTable
@@ -172,9 +206,29 @@ export default function StockTransfers() {
                     {selected.fromBranch} → {selected.toBranch}
                   </SheetDescription>
                 </SheetHeader>
-                <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                  <Info label="Items" value={String(selected.items)} />
-                  <Info label="Created" value={formatDate(selected.createdAt)} />
+                <div className="mt-5 space-y-3 text-sm">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Info label="Lines" value={String(selected.lineItems?.length ?? selected.items)} />
+                    <Info label="Created" value={formatDate(selected.createdAt)} />
+                  </div>
+                  <div className="space-y-2">
+                    {(selected.lineItems ?? []).map((line) => (
+                      <div key={line.id} className="rounded-lg border border-border p-2.5">
+                        <p className="font-medium">{line.description}</p>
+                        <p className="text-xs text-muted-foreground">{line.sku} · qty {line.quantity}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {formatTransferStatus(selected.status) === "pending" ? (
+                    <Button className="w-full" disabled={saving} onClick={() => void dispatchTransfer(selected)}>
+                      <Truck className="mr-1 h-4 w-4" /> Dispatch Transfer
+                    </Button>
+                  ) : null}
+                  {formatTransferStatus(selected.status) === "in-transit" ? (
+                    <Button className="w-full" disabled={saving} onClick={() => void receiveTransfer(selected)}>
+                      Receive into Destination
+                    </Button>
+                  ) : null}
                 </div>
               </>
             )}
@@ -185,47 +239,47 @@ export default function StockTransfers() {
           <DialogContent className="sm:max-w-md">
             <DialogHeader><DialogTitle>New Stock Transfer</DialogTitle></DialogHeader>
             <div className="grid gap-4 py-2">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>From branch</Label>
-                  <Select value={form.fromBranch} onValueChange={(v) => setForm({ ...form, fromBranch: v })}>
-                    <SelectTrigger><SelectValue placeholder="From" /></SelectTrigger>
-                    <SelectContent>
-                      {branchNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>To branch</Label>
-                  <Select value={form.toBranch} onValueChange={(v) => setForm({ ...form, toBranch: v })}>
-                    <SelectTrigger><SelectValue placeholder="To" /></SelectTrigger>
-                    <SelectContent>
-                      {branchNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="grid gap-2">
+                <Label>From branch</Label>
+                <Select value={form.fromBranchId} onValueChange={(v) => setForm({ ...form, fromBranchId: v, inventoryItemId: "" })}>
+                  <SelectTrigger><SelectValue placeholder="Select source" /></SelectTrigger>
+                  <SelectContent>
+                    {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="items">Item count</Label>
-                  <Input id="items" type="number" min={1} value={form.items} onChange={(e) => setForm({ ...form, items: e.target.value })} />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Status</Label>
-                  <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="inTransit">In Transit</SelectItem>
-                      <SelectItem value="received">Received</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="grid gap-2">
+                <Label>To branch</Label>
+                <Select value={form.toBranchId} onValueChange={(v) => setForm({ ...form, toBranchId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select destination" /></SelectTrigger>
+                  <SelectContent>
+                    {branches.filter((b) => b.id !== form.fromBranchId).map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Inventory item</Label>
+                <Select value={form.inventoryItemId} onValueChange={(v) => setForm({ ...form, inventoryItemId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select item" /></SelectTrigger>
+                  <SelectContent>
+                    {inventory.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {item.name} ({item.sku}) · {item.inStock - item.reserved} available
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="qty">Quantity</Label>
+                <Input id="qty" type="number" min={1} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
               </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={saveTransfer} disabled={saving}>
+              <Button onClick={saveTransfer} disabled={saving || !form.fromBranchId || !form.toBranchId || !form.inventoryItemId}>
                 {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Create transfer
               </Button>

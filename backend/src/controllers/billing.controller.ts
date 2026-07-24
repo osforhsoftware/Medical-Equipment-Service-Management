@@ -1,6 +1,9 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { billingRepository } from "@/repositories/billing.repository";
 import { success } from "@/utils/response";
+import { domainService } from "@/services/domain.service";
+import { AppError } from "@/middleware/errorHandler";
+import { prisma } from "@/db/prisma";
 
 export class BillingController {
   async getAll(req: Request, res: Response, next: NextFunction) {
@@ -41,33 +44,46 @@ export class BillingController {
 
   async create(req: Request, res: Response, next: NextFunction) {
     try {
-      const { amount, tax, ...rest } = req.body;
-      const total = (Number(amount) || 0) + (Number(tax) || 0);
-      const data = await billingRepository.create(req.tenantId!, { ...rest, amount, tax, total } as never);
+      if (!req.body.jobId || !req.body.dueAt) {
+        throw new AppError("jobId and dueAt are required; invoice totals are derived server-side", 422);
+      }
+      const data = await domainService.createInvoiceFromJob(
+        req.tenantId!,
+        { userId: req.user!.userId, role: req.user!.role },
+        {
+          jobId: req.body.jobId,
+          dueAt: new Date(req.body.dueAt),
+          currency: String(req.body.currency ?? "USD"),
+        },
+      );
       res.status(201).json(success("Invoice created successfully", data));
     } catch (err) { next(err); }
   }
 
   async update(req: Request, res: Response, next: NextFunction) {
     try {
-      const { amount, tax, ...rest } = req.body;
-      const data: Record<string, unknown> = { ...rest };
-      if (amount != null || tax != null) {
-        const existing = await billingRepository.findById(req.params.id, req.tenantId!);
-        if (existing) {
-          data.amount = amount ?? existing.amount;
-          data.tax = tax ?? existing.tax;
-          data.total = Number(data.amount) + Number(data.tax);
-        }
+      if (["amount", "tax", "total", "paidTotal", "balanceDue", "lineItems"].some((key) => key in req.body)) {
+        throw new AppError("Authoritative invoice financial fields cannot be edited", 409);
       }
-      const result = await billingRepository.update(req.params.id, req.tenantId!, data as never);
+      const allowed: Record<string, unknown> = {};
+      if (req.body.status) allowed.status = req.body.status;
+      if (req.body.dueAt) allowed.dueAt = new Date(req.body.dueAt);
+      const result = await billingRepository.update(req.params.id, req.tenantId!, allowed as never);
       res.json(success("Invoice updated successfully", result));
     } catch (err) { next(err); }
   }
 
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      await billingRepository.delete(req.params.id, req.tenantId!);
+      const invoice = await prisma.invoice.findFirst({
+        where: { id: req.params.id, tenantId: req.tenantId! },
+        include: { payments: { take: 1 } },
+      });
+      if (!invoice) throw new AppError("Invoice not found", 404);
+      if (invoice.status !== "draft" || invoice.payments.length) {
+        throw new AppError("Only unpaid draft invoices can be deleted", 409);
+      }
+      await prisma.invoice.delete({ where: { id: invoice.id } });
       res.status(204).send();
     } catch (err) { next(err); }
   }

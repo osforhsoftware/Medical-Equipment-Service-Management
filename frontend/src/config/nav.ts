@@ -19,6 +19,10 @@ import {
   QrCode,
   Settings,
   UserCog,
+  BookOpen,
+  FolderKanban,
+  BriefcaseBusiness,
+  BadgeIndianRupee,
   type LucideIcon,
 } from "lucide-react";
 import type { Role } from "@/data/types";
@@ -42,6 +46,8 @@ export const navItems: NavItem[] = [
   { label: "Inspections", to: "/app/inspections", icon: Search, roles: ["admin", "coordinator", "inspector"], group: "Operations" },
   { label: "Estimates", to: "/app/estimates", icon: FileText, roles: ["admin", "coordinator", "estimator", "billing"], group: "Operations" },
   { label: "Service Jobs", to: "/app/jobs", icon: Wrench, roles: ["admin", "coordinator", "engineer"], group: "Operations" },
+  { label: "Projects", to: "/app/projects", icon: FolderKanban, roles: ["admin", "coordinator", "estimator", "engineer"], group: "Operations" },
+  { label: "Service Catalog", to: "/app/service-catalog", icon: BookOpen, roles: ["admin", "coordinator", "estimator"], group: "Operations" },
 
   { label: "Inventory", to: "/app/inventory", icon: Boxes, roles: ["admin", "inventory", "engineer"], group: "Supply Chain" },
   { label: "Suppliers", to: "/app/suppliers", icon: Truck, roles: ["admin", "inventory"], group: "Supply Chain" },
@@ -50,6 +56,7 @@ export const navItems: NavItem[] = [
 
   { label: "AMC Contracts", to: "/app/amc", icon: ShieldCheck, roles: ["admin", "coordinator", "billing"], group: "Contracts & Finance" },
   { label: "Billing", to: "/app/billing", icon: Receipt, roles: ["admin", "billing"], group: "Contracts & Finance" },
+  { label: "Expenses & Commissions", to: "/app/finance-operations", icon: BadgeIndianRupee, roles: ["admin", "billing"], group: "Contracts & Finance" },
 
   { label: "Reports", to: "/app/reports", icon: BarChart3, roles: ["admin", "billing", "coordinator"], group: "Insights" },
   { label: "Notifications", to: "/app/notifications", icon: Bell, roles: ALL, group: "Insights" },
@@ -58,6 +65,7 @@ export const navItems: NavItem[] = [
 
   { label: "Branches", to: "/app/branches", icon: Building2, roles: ["admin"], group: "Administration" },
   { label: "Users", to: "/app/users", icon: UserCog, roles: ["admin"], group: "Administration" },
+  { label: "Office Assets", to: "/app/office-assets", icon: BriefcaseBusiness, roles: ["admin"], group: "Administration" },
   { label: "Settings", to: "/app/settings", icon: Settings, roles: ["admin"], group: "Administration" },
 ];
 

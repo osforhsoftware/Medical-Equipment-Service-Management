@@ -58,14 +58,14 @@ const WORKFLOW_STEPS = [
 ] as const;
 
 const STATUS_COLOR: Record<string, string> = {
-  new: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-  inspection: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-  estimate: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-  approval: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-  "in-progress": "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400",
-  inProgress: "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400",
-  completed: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-  invoiced: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400",
+  new: "border-info/20 bg-info/10 text-info",
+  inspection: "border-warning/25 bg-warning/12 text-warning-foreground",
+  estimate: "border-accent/20 bg-accent/10 text-accent",
+  approval: "border-primary/20 bg-primary/10 text-primary",
+  "in-progress": "border-accent/20 bg-accent/12 text-accent",
+  inProgress: "border-accent/20 bg-accent/12 text-accent",
+  completed: "border-success/20 bg-success/12 text-success",
+  invoiced: "border-success/20 bg-success/12 text-success",
 };
 
 const columns = [
@@ -227,12 +227,8 @@ export default function ServiceRequests() {
       setErrors((e) => ({ ...e, equipment: "Select at least one equipment item" }));
       return;
     }
-    if (!assignRole) {
-      setErrors((e) => ({ ...e, assignRole: "Select a role to assign work" }));
-      return;
-    }
-    if (!selectedStaff) {
-      setErrors((e) => ({ ...e, assignedStaff: "Select a staff member to assign" }));
+    if (assignRole && !selectedStaff) {
+      setErrors((e) => ({ ...e, assignedStaff: "Select a staff member or clear the role" }));
       return;
     }
     setSaving(true);
@@ -240,8 +236,9 @@ export default function ServiceRequests() {
       await api.createServiceRequest({
         ...result.data,
         equipmentIds: selectedEquipIds,
-        assignedTo: selectedStaff.id,
-        assignedName: selectedStaff.name,
+        ...(selectedStaff
+          ? { assignedTo: selectedStaff.id, assignedName: selectedStaff.name }
+          : {}),
       });
       toast({ title: "Service request created", description: "Request added to the New column." });
       setErrors({});
@@ -318,7 +315,7 @@ export default function ServiceRequests() {
           canCreate ? (
             <Button
               onClick={() => { resetCreateForm(); setOpen(true); }}
-              className="bg-gradient-primary text-primary-foreground hover:opacity-90"
+              variant="brand"
             >
               <Plus className="mr-1 h-4 w-4" /> New Request
             </Button>
@@ -340,10 +337,10 @@ export default function ServiceRequests() {
             const items = requests.filter((r) => formatServiceStatus(r.status) === col.status);
             const colorClass = STATUS_COLOR[col.status] ?? "";
             return (
-              <div key={col.status} className="flex min-w-0 flex-col rounded-xl bg-muted/40 p-3">
+              <div key={col.status} className="flex min-w-0 flex-col rounded-2xl border border-border/70 bg-card/55 p-3 shadow-sm backdrop-blur">
                 <div className="mb-3 flex items-center justify-between px-1">
-                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${colorClass}`}>{col.label}</span>
-                  <span className="rounded-full bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                  <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${colorClass}`}>{col.label}</span>
+                  <span className="rounded-full border border-primary/10 bg-secondary px-2.5 py-0.5 text-xs font-semibold text-primary">
                     {items.length}
                   </span>
                 </div>
@@ -356,7 +353,7 @@ export default function ServiceRequests() {
                       <Card
                         key={r.id}
                         onClick={() => void openDetail(r)}
-                        className="cursor-pointer space-y-2 p-3 transition-shadow hover:shadow-elevated"
+                        className="cursor-pointer space-y-2 p-3 hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-elevated"
                       >
                         <div className="flex items-center justify-between">
                           <span className="font-mono text-xs text-muted-foreground">{r.reference}</span>
@@ -487,10 +484,10 @@ export default function ServiceRequests() {
             {/* Role-based assignment */}
             <div className="rounded-lg border border-border p-3 space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Assign Work <span className="text-destructive">*</span>
+                Assign Work <span className="font-normal normal-case text-muted-foreground">(optional — assign later if needed)</span>
               </p>
               <div className="grid gap-2">
-                <Label>Select Role <span className="text-destructive">*</span></Label>
+                <Label>Select Role</Label>
                 <Select
                   value={assignRole}
                   onValueChange={(v) => {
@@ -511,7 +508,7 @@ export default function ServiceRequests() {
               {assignRole && (
                 <div className="grid gap-2">
                   <Label>
-                    Assign to — {roleLabels[assignRole as Role]} <span className="text-destructive">*</span>
+                    Assign to — {roleLabels[assignRole as Role]}
                   </Label>
                   {loadingStaff ? (
                     <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
@@ -543,7 +540,7 @@ export default function ServiceRequests() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { resetCreateForm(); setOpen(false); }}>Cancel</Button>
-            <Button onClick={submit} disabled={saving || !assignRole || !selectedStaff} className="bg-gradient-primary text-primary-foreground hover:opacity-90">
+            <Button onClick={submit} disabled={saving} variant="brand">
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Create Request
             </Button>
@@ -559,7 +556,7 @@ export default function ServiceRequests() {
               <SheetHeader>
                 <div className="flex items-center gap-2 flex-wrap">
                   <SheetTitle>{selected.reference}</SheetTitle>
-                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLOR[formatServiceStatus(selected.status)] ?? ""}`}>
+                  <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLOR[formatServiceStatus(selected.status)] ?? ""}`}>
                     {formatServiceStatus(selected.status).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
                   </span>
                 </div>
@@ -581,9 +578,9 @@ export default function ServiceRequests() {
                       const active = idx === currentStepIndex;
                       return (
                         <div key={step.status} className="flex items-center shrink-0">
-                          <div className={`flex flex-col items-center gap-1 ${active ? "text-primary" : done ? "text-green-600" : "text-muted-foreground"}`}>
+                          <div className={`flex flex-col items-center gap-1 ${active ? "text-primary" : done ? "text-success" : "text-muted-foreground"}`}>
                             {done ? (
-                              <CheckCircle2 className="h-4 w-4 text-green-600" />
+                              <CheckCircle2 className="h-4 w-4 text-success" />
                             ) : active ? (
                               <div className="h-4 w-4 rounded-full border-2 border-primary bg-primary/20" />
                             ) : (
@@ -694,7 +691,7 @@ export default function ServiceRequests() {
             <Button
               onClick={submitWorkflow}
               disabled={workflowSaving || !workflowNote.trim()}
-              className="bg-gradient-primary text-primary-foreground hover:opacity-90"
+              variant="brand"
             >
               {workflowSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Advance Stage
@@ -762,7 +759,7 @@ export default function ServiceRequests() {
             <Button
               onClick={submitAssign}
               disabled={assignSaving || !assignTarget}
-              className="bg-gradient-primary text-primary-foreground hover:opacity-90"
+              variant="brand"
             >
               {assignSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Confirm Assignment

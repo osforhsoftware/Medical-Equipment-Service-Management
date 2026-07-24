@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { estimatesController } from "@/controllers/estimates.controller";
-import { authenticate } from "@/middleware/auth";
+import { authenticate, requireRole } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
 import { validate } from "@/middleware/validate";
 import { createEstimateSchema, updateEstimateSchema } from "@/schemas/estimates.schema";
@@ -8,10 +8,13 @@ import { createEstimateSchema, updateEstimateSchema } from "@/schemas/estimates.
 const router = Router();
 router.use(authenticate, resolveTenant);
 
-router.get("/", estimatesController.getAll);
-router.get("/:id", estimatesController.getById);
-router.post("/", validate(createEstimateSchema), estimatesController.create);
-router.put("/:id", validate(updateEstimateSchema), estimatesController.update);
-router.delete("/:id", estimatesController.delete);
+const canRead = requireRole("admin", "coordinator", "estimator", "billing");
+const canManage = requireRole("admin", "coordinator", "estimator");
+
+router.get("/", canRead, estimatesController.getAll);
+router.get("/:id", canRead, estimatesController.getById);
+router.post("/", canManage, validate(createEstimateSchema), estimatesController.create);
+router.put("/:id", canManage, validate(updateEstimateSchema), estimatesController.update);
+router.delete("/:id", requireRole("admin", "coordinator"), estimatesController.delete);
 
 export default router;

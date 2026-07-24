@@ -112,7 +112,7 @@ export default function PurchaseOrders() {
           title="Purchase Orders"
           description="Procurement of spare parts and consumables."
           actions={
-            <Button onClick={() => setDialogOpen(true)} className="bg-gradient-primary text-primary-foreground hover:opacity-90">
+            <Button onClick={() => setDialogOpen(true)} variant="brand">
               <Plus className="mr-1 h-4 w-4" /> New PO
             </Button>
           }

@@ -4,6 +4,19 @@ import { env } from "@/config/env";
 import type { JwtPayload } from "@/types";
 import { failure } from "@/utils/response";
 import { AUTH_COOKIE_NAME } from "@/utils/authCookie";
+import { prisma } from "@/db/prisma";
+
+export const STAFF_ROLES = [
+  "admin",
+  "coordinator",
+  "inspector",
+  "estimator",
+  "engineer",
+  "inventory",
+  "billing",
+] as const;
+
+export type StaffRole = (typeof STAFF_ROLES)[number];
 
 function extractToken(req: Request): string | null {
   const cookieToken = req.cookies?.[AUTH_COOKIE_NAME];
@@ -40,12 +53,30 @@ export const authenticate = (req: Request, res: Response, next: NextFunction): v
 export const signToken = (payload: JwtPayload): string =>
   jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN as SignOptions["expiresIn"] });
 
-/** Role guard — restrict endpoint to specific roles */
-export const requireRole = (...roles: string[]) =>
-  (req: Request, res: Response, next: NextFunction): void => {
-    if (!req.user || !roles.includes(req.user.role)) {
+/** Role guard — every protected API action must declare its allowed roles. */
+export const requireRole = (...roles: readonly string[]) =>
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(403).json(failure("Insufficient permissions"));
+      return;
+    }
+    if (roles.includes(req.user.role)) {
+      next();
+      return;
+    }
+    const assignment = await prisma.userRoleAssignment.findFirst({
+      where: {
+        tenantId: req.user.tenantId,
+        userId: req.user.userId,
+        role: { key: { in: [...roles] } },
+      },
+    });
+    if (!assignment) {
       res.status(403).json(failure("Insufficient permissions"));
       return;
     }
     next();
   };
+
+/** Prevent customer sessions from reaching staff-only API modules. */
+export const requireStaff = requireRole(...STAFF_ROLES);

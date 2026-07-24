@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, Pencil, Phone, Plus, Trash2, UserCog } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { StatusBadge } from "@/components/shared/StatusBadge";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +35,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/context/AuthContext";
 import { ApiError } from "@/lib/api";
-import { api, type BackendUser } from "@/lib/api";
+import { api, type BackendBranch, type BackendDomainRole, type BackendUser } from "@/lib/api";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
 import { toast } from "@/hooks/use-toast";
@@ -65,6 +66,8 @@ const emptyForm: FormState = {
 export default function UsersPage() {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<BackendUser[]>([]);
+  const [domainRoles, setDomainRoles] = useState<BackendDomainRole[]>([]);
+  const [branches, setBranches] = useState<BackendBranch[]>([]);
   const [loading, setLoading] = useState(true);
   const [roleFilter, setRoleFilter] = useState<Role | "all">("all");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -72,12 +75,20 @@ export default function UsersPage() {
   const [editing, setEditing] = useState<BackendUser | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [additionalRoleId, setAdditionalRoleId] = useState("");
+  const [roleBranchId, setRoleBranchId] = useState("all");
 
   const loadUsers = async () => {
     setLoading(true);
     try {
-      const data = await api.listUsers();
+      const [data, roles, branchRows] = await Promise.all([
+        api.listUsers(),
+        api.listDomainRoles(),
+        api.listBranches(),
+      ]);
       setUsers(data);
+      setDomainRoles(roles);
+      setBranches(branchRows);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Failed to load users";
       toast({ title: "Error", description: message, variant: "destructive" });
@@ -92,12 +103,16 @@ export default function UsersPage() {
 
   const openCreate = () => {
     setEditing(null);
+    setAdditionalRoleId("");
+    setRoleBranchId("all");
     setForm(emptyForm);
     setDialogOpen(true);
   };
 
   const openEdit = (target: BackendUser) => {
     setEditing(target);
+    setAdditionalRoleId("");
+    setRoleBranchId("all");
     setForm({
       name: target.name,
       username: target.username,
@@ -123,6 +138,13 @@ export default function UsersPage() {
           isActive: form.isActive,
           ...(form.password ? { password: form.password } : {}),
         });
+        if (additionalRoleId) {
+          await api.assignDomainRole({
+            userId: editing.id,
+            roleId: additionalRoleId,
+            branchId: roleBranchId === "all" ? null : roleBranchId,
+          });
+        }
         toast({ title: "User updated", description: `${form.name} was updated successfully.` });
       } else {
         await api.createUser({
@@ -168,7 +190,7 @@ export default function UsersPage() {
           title="User Management"
           description="Create and manage staff accounts. Assign roles, phone numbers, and active status."
           actions={
-            <Button onClick={openCreate} className="bg-gradient-primary text-primary-foreground hover:opacity-90">
+            <Button onClick={openCreate} variant="brand">
               <Plus className="mr-1 h-4 w-4" /> Add User
             </Button>
           }
@@ -201,7 +223,7 @@ export default function UsersPage() {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[820px] text-sm">
                   <thead>
-                    <tr className="border-b border-border text-left">
+                    <tr className="border-b border-border bg-primary/[0.045] text-left">
                       <th className="px-4 py-3 font-medium">User</th>
                       <th className="px-4 py-3 font-medium">Contact</th>
                       <th className="px-4 py-3 font-medium">Role</th>
@@ -211,7 +233,7 @@ export default function UsersPage() {
                   </thead>
                   <tbody>
                     {filtered.map((u) => (
-                      <tr key={u.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                      <tr key={u.id} className="border-b border-border last:border-0 transition-colors hover:bg-secondary/30">
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <div
@@ -238,16 +260,15 @@ export default function UsersPage() {
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <Badge variant="outline">{roleLabels[u.role as Role] ?? u.role}</Badge>
+                          <div className="flex flex-wrap gap-1">
+                            <Badge variant="outline">{roleLabels[u.role as Role] ?? u.role}</Badge>
+                            {domainRoles.filter((role) => role.assignments?.some((assignment) => assignment.userId === u.id)).map((role) => (
+                              <Badge key={role.id} variant="secondary">{role.name}</Badge>
+                            ))}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                            u.isActive
-                              ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                              : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-                          }`}>
-                            {u.isActive ? "Active" : "Inactive"}
-                          </span>
+                          <StatusBadge status={u.isActive ? "active" : "inactive"} />
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-2">
@@ -339,6 +360,22 @@ export default function UsersPage() {
                 </SelectContent>
               </Select>
             </div>
+            {editing ? (
+              <div className="space-y-3 rounded-lg border border-border p-3">
+                <div>
+                  <p className="text-sm font-medium">Additional role assignment</p>
+                  <p className="text-xs text-muted-foreground">Assign another tenant role, optionally scoped to a branch.</p>
+                </div>
+                <Select value={additionalRoleId} onValueChange={setAdditionalRoleId}>
+                  <SelectTrigger><SelectValue placeholder="Select additional role" /></SelectTrigger>
+                  <SelectContent>{domainRoles.map((role) => <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>)}</SelectContent>
+                </Select>
+                <Select value={roleBranchId} onValueChange={setRoleBranchId}>
+                  <SelectTrigger><SelectValue placeholder="All branches" /></SelectTrigger>
+                  <SelectContent><SelectItem value="all">All branches</SelectItem>{branches.map((branch) => <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            ) : null}
             <div className="grid gap-2">
               <Label htmlFor="password">{editing ? "New password (optional)" : "Password"}</Label>
               <Input

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { equipmentController } from "@/controllers/equipment.controller";
-import { authenticate } from "@/middleware/auth";
+import { authenticate, requireRole } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
 import { validate } from "@/middleware/validate";
 import { createEquipmentSchema, updateEquipmentSchema } from "@/schemas/equipment.schema";
@@ -8,11 +8,14 @@ import { createEquipmentSchema, updateEquipmentSchema } from "@/schemas/equipmen
 const router = Router();
 router.use(authenticate, resolveTenant);
 
-router.get("/", equipmentController.getAll);
-router.get("/by-tag/:tag", equipmentController.getByTag);
-router.get("/:id", equipmentController.getById);
-router.post("/", validate(createEquipmentSchema), equipmentController.create);
-router.put("/:id", validate(updateEquipmentSchema), equipmentController.update);
-router.delete("/:id", equipmentController.delete);
+const canRead = requireRole("admin", "coordinator", "inspector", "engineer", "inventory");
+const canManage = requireRole("admin", "coordinator", "inventory");
+
+router.get("/", canRead, equipmentController.getAll);
+router.get("/by-tag/:tag", canRead, equipmentController.getByTag);
+router.get("/:id", canRead, equipmentController.getById);
+router.post("/", canManage, validate(createEquipmentSchema), equipmentController.create);
+router.put("/:id", canManage, validate(updateEquipmentSchema), equipmentController.update);
+router.delete("/:id", requireRole("admin"), equipmentController.delete);
 
 export default router;

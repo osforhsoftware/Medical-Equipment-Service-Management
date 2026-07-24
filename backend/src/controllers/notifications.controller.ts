@@ -5,14 +5,14 @@ import { success } from "@/utils/response";
 export class NotificationsController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await notificationsService.getAll(req.tenantId!);
+      const data = await notificationsService.getAll(req.tenantId!, req.user!.userId, req.user!.role);
       res.json(success("Notifications fetched successfully", data));
     } catch (err) { next(err); }
   }
 
   async getUnreadCount(req: Request, res: Response, next: NextFunction) {
     try {
-      const count = await notificationsService.unreadCount(req.tenantId!);
+      const count = await notificationsService.unreadCount(req.tenantId!, req.user!.userId, req.user!.role);
       res.json(success("Unread count fetched", { count }));
     } catch (err) { next(err); }
   }
@@ -26,14 +26,14 @@ export class NotificationsController {
 
   async markRead(req: Request, res: Response, next: NextFunction) {
     try {
-      await notificationsService.markRead(req.params.id, req.tenantId!);
+      await notificationsService.markRead(req.params.id, req.tenantId!, req.user!.userId, req.user!.role);
       res.status(204).send();
     } catch (err) { next(err); }
   }
 
   async markAllRead(req: Request, res: Response, next: NextFunction) {
     try {
-      await notificationsService.markAllRead(req.tenantId!);
+      await notificationsService.markAllRead(req.tenantId!, req.user!.userId, req.user!.role);
       res.status(204).send();
     } catch (err) { next(err); }
   }

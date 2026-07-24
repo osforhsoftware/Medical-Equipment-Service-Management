@@ -1,21 +1,44 @@
 import { prisma } from "@/db/prisma";
-import type { Estimate, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 export class EstimatesRepository {
-  async findAll(tenantId: string): Promise<Estimate[]> {
-    return prisma.estimate.findMany({ where: { tenantId }, orderBy: { createdAt: "desc" } });
+  async findAll(tenantId: string) {
+    return prisma.estimate.findMany({
+      where: { tenantId },
+      include: {
+        lineItems: true,
+        decisions: { orderBy: { createdAt: "desc" } },
+        revisions: { orderBy: { revision: "desc" } },
+        reservations: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
   }
 
-  async findById(id: string, tenantId: string): Promise<Estimate | null> {
-    return prisma.estimate.findFirst({ where: { id, tenantId } });
+  async findById(id: string, tenantId: string) {
+    return prisma.estimate.findFirst({
+      where: { id, tenantId },
+      include: {
+        lineItems: true,
+        decisions: { orderBy: { createdAt: "desc" } },
+        revisions: { orderBy: { revision: "desc" } },
+        reservations: true,
+      },
+    });
   }
 
-  async create(tenantId: string, data: Omit<Prisma.EstimateUncheckedCreateInput, "tenantId">): Promise<Estimate> {
+  async create(tenantId: string, data: Omit<Prisma.EstimateUncheckedCreateInput, "tenantId">) {
     return prisma.estimate.create({ data: { ...data, tenantId } });
   }
 
-  async update(id: string, tenantId: string, data: Prisma.EstimateUpdateInput): Promise<Estimate> {
-    return prisma.estimate.update({ where: { id }, data });
+  async update(id: string, tenantId: string, data: Prisma.EstimateUpdateInput) {
+    const exists = await prisma.estimate.findFirst({ where: { id, tenantId }, select: { id: true } });
+    if (!exists) return null;
+    return prisma.estimate.update({
+      where: { id },
+      data,
+      include: { lineItems: true, decisions: true, revisions: true, reservations: true },
+    });
   }
 
   async delete(id: string, tenantId: string): Promise<void> {
