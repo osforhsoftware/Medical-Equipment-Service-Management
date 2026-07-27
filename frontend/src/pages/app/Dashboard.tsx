@@ -70,7 +70,7 @@ function roleQuickActions(role: Role): QuickAction[] {
     case "inspector":
       return [
         { label: "Assigned Inspections", to: "/app/inspections", icon: Search },
-        { label: "Service Requests", to: "/app/service-requests", icon: ClipboardList },
+        { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList },
         { label: "QR Scanner", to: "/app/qr-tracking", icon: QrCode },
         { label: "Notifications", to: "/app/notifications", icon: Bell },
       ];
@@ -86,7 +86,7 @@ function roleQuickActions(role: Role): QuickAction[] {
         { label: "Request Parts", to: "/app/jobs", icon: Package },
         { label: "Inventory", to: "/app/inventory", icon: Package },
         { label: "QR Scanner", to: "/app/qr-tracking", icon: QrCode },
-        { label: "Service Requests", to: "/app/service-requests", icon: ClipboardList },
+        { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList },
       ];
     case "inventory":
       return [
@@ -113,7 +113,7 @@ function roleQuickActions(role: Role): QuickAction[] {
     case "admin":
     default:
       return [
-        { label: "Service Requests", to: "/app/service-requests", icon: ClipboardList },
+        { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList },
         { label: "Jobs", to: "/app/jobs", icon: Wrench },
         { label: "Inventory", to: "/app/inventory", icon: Package },
         { label: "Billing", to: "/app/billing", icon: Receipt },
@@ -312,7 +312,7 @@ export default function Dashboard() {
         actions={
           role === "admin" || role === "coordinator" ? (
             <Button onClick={() => navigate("/app/service-requests")} variant="brand">
-              New Service Request
+              New Service Ticket
             </Button>
           ) : (
             <Button onClick={() => navigate(actions[0]?.to ?? "/app/notifications")} variant="brand">

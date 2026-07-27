@@ -22,6 +22,8 @@ export const estimateRevisionSchema = z.object({
     terms: z.string().max(10000).nullable().optional(),
     notes: z.string().max(10000).nullable().optional(),
     discount: money.default(0),
+    sendForApproval: z.boolean().optional(),
+    status: z.enum(["draft", "pendingAdminApproval"]).optional(),
     lines: z.array(z.object({
       type: z.enum(["labor", "part", "transport", "testing", "calibration", "service", "other"]),
       description: z.string().trim().min(1).max(500),
@@ -61,6 +63,40 @@ export const estimateDecisionSchema = z.object({
   body: z.object({
     decision: z.enum(["approved", "rejected", "revision"]),
     note: z.string().trim().max(5000).optional(),
+    engineerId: z.string().cuid().optional(),
+    scheduledFor: z.coerce.date().optional(),
+  }),
+});
+
+export const stockPurchaseRequestSchema = z.object({
+  body: z.object({
+    inventoryItemId: z.string().cuid(),
+    quantity: z.coerce.number().int().positive(),
+    serviceRequestId: z.string().cuid().nullable().optional(),
+    jobId: z.string().cuid().nullable().optional(),
+    note: z.string().trim().max(2000).optional(),
+    force: z.boolean().optional(),
+  }),
+});
+
+export const convertStockPurchaseRequestSchema = z.object({
+  body: z.object({
+    expectedDate: z.coerce.date(),
+    unitCost: money.optional(),
+  }),
+});
+
+export const stockAdjustmentSchema = z.object({
+  body: z.object({
+    quantityDelta: z.coerce.number().int(),
+    reason: z.string().trim().min(1).max(500),
+  }),
+});
+
+export const inventoryImageSchema = z.object({
+  body: z.object({
+    fileId: z.string().cuid(),
+    sortOrder: z.coerce.number().int().min(0).optional().default(0),
   }),
 });
 

@@ -1,6 +1,11 @@
 import { Prisma, UserRole } from "@prisma/client";
 import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
+import {
+  assertEstimateDecisionAllowed,
+  resolveTicketEventStatus,
+} from "@/services/workflow/serviceTicketStateMachine";
+import { generateReference } from "@/utils/reference";
 
 type Actor = { userId: string; role: string };
 type JsonObject = Record<string, unknown>;
@@ -149,6 +154,12 @@ export class DomainService {
           lineTotal: line.lineTotal,
         })),
       });
+      const nextStatus =
+        input.sendForApproval === true || input.status === "pendingAdminApproval"
+          ? "pendingAdminApproval"
+          : estimate.status === "revision"
+            ? "revision"
+            : "draft";
       await tx.estimate.update({
         where: { id: estimateId },
         data: {
@@ -157,13 +168,23 @@ export class DomainService {
           discount,
           tax: money(tax),
           total,
-          laborCost: money(lines.filter((x: any) => x.type === "labor").reduce((s: number, x: any) => s + Number(x.lineTotal), 0)),
+          laborCost: money(lines.filter((x: any) => x.type === "labor" || x.type === "service").reduce((s: number, x: any) => s + Number(x.lineTotal), 0)),
           partsCost: money(lines.filter((x: any) => x.type === "part").reduce((s: number, x: any) => s + Number(x.lineTotal), 0)),
           terms: input.terms,
           notes: input.notes,
-          status: "draft",
+          status: nextStatus as never,
+          ...(nextStatus === "pendingAdminApproval" ? { sentAt: new Date() } : {}),
         },
       });
+      if (estimate.serviceRequestId && nextStatus === "pendingAdminApproval") {
+        const sr = await tx.serviceRequest.findFirst({ where: { id: estimate.serviceRequestId, tenantId } });
+        if (sr) {
+          const next = resolveTicketEventStatus(sr.status, "estimatePendingApproval");
+          if (next !== sr.status) {
+            await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
+          }
+        }
+      }
       return tx.estimate.findUniqueOrThrow({
         where: { id: estimateId },
         include: { lineItems: true, revisions: { orderBy: { revision: "desc" } } },
@@ -178,14 +199,37 @@ export class DomainService {
         include: { lineItems: true, serviceRequest: true },
       });
       if (!estimate) throw new AppError("Estimate not found", 404);
-      if (!["sent", "revision"].includes(estimate.status)) {
-        throw new AppError("Only sent estimates can receive a decision", 409);
-      }
+      assertEstimateDecisionAllowed(estimate.status);
+
+      const isStaffApprover = ["admin", "coordinator"].includes(actor.role);
       if (actor.role === "customer") {
         const user = await tx.user.findFirst({ where: { id: actor.userId, tenantId } });
         if (!user?.customerId || user.customerId !== estimate.customerId) {
           throw new AppError("This estimate does not belong to the customer", 403);
         }
+        // Customer ack only — cannot alone unlock jobs
+        if (input.decision === "approved" && !isStaffApprover) {
+          await tx.estimateDecision.create({
+            data: {
+              tenantId,
+              estimateId,
+              decision: "customer_acknowledged",
+              note: input.note,
+              actorId: actor.userId,
+              actorRole: actor.role,
+            },
+          });
+          return tx.estimate.findUniqueOrThrow({
+            where: { id: estimateId },
+            include: { decisions: true, reservations: true, lineItems: true },
+          });
+        }
+      }
+      if (input.decision === "approved" && !isStaffApprover && actor.role !== "estimator") {
+        throw new AppError("Only admin or coordinator can approve estimates for job scheduling", 403);
+      }
+      if (input.decision === "approved" && isStaffApprover && !input.engineerId) {
+        throw new AppError("engineerId is required when approving an estimate", 422);
       }
 
       const status = input.decision as "approved" | "rejected" | "revision";
@@ -196,11 +240,58 @@ export class DomainService {
         where: { id: estimateId },
         data: { status, approvedAt: status === "approved" ? new Date() : null },
       });
+
       if (estimate.serviceRequestId) {
-        await tx.serviceRequest.updateMany({
-          where: { id: estimate.serviceRequestId, tenantId },
-          data: { status: status === "approved" ? "approval" : "estimate" },
+        const sr = await tx.serviceRequest.findFirst({ where: { id: estimate.serviceRequestId, tenantId } });
+        if (sr) {
+          const event =
+            status === "approved"
+              ? "estimateApproved"
+              : status === "rejected"
+                ? "estimateRejected"
+                : "estimatePendingApproval";
+          const next = resolveTicketEventStatus(sr.status, event);
+          if (next !== sr.status) {
+            await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
+          }
+        }
+      }
+
+      if (status === "rejected" || status === "revision") {
+        const active = await tx.stockReservation.findMany({
+          where: { tenantId, estimateId, status: "active" },
         });
+        for (const reservation of active) {
+          const remaining = reservation.quantity - reservation.consumed - reservation.released;
+          if (remaining > 0) {
+            await tx.inventoryItem.update({
+              where: { id: reservation.inventoryItemId },
+              data: { reserved: { decrement: remaining } },
+            });
+            const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id: reservation.inventoryItemId } });
+            await tx.stockMovement.create({
+              data: {
+                tenantId,
+                inventoryItemId: reservation.inventoryItemId,
+                reservationId: reservation.id,
+                type: "release",
+                quantity: remaining,
+                balanceAfter: item.inStock,
+                referenceType: "estimate",
+                referenceId: estimateId,
+                reason: `Estimate ${status}`,
+                actorId: actor.userId,
+              },
+            });
+          }
+          await tx.stockReservation.update({
+            where: { id: reservation.id },
+            data: {
+              released: { increment: Math.max(0, reservation.quantity - reservation.consumed - reservation.released) },
+              status: "released",
+            },
+          });
+        }
       }
 
       if (status === "approved") {
@@ -242,22 +333,110 @@ export class DomainService {
               });
             }
             if (shortageQuantity) {
+              await tx.stockPurchaseRequest.create({
+                data: {
+                  tenantId,
+                  inventoryItemId: item.id,
+                  quantity: shortageQuantity,
+                  requestedBy: actor.userId,
+                  serviceRequestId: estimate.serviceRequestId,
+                  note: `Shortage for estimate ${estimate.reference}`,
+                },
+              });
               await tx.notification.create({
                 data: {
                   tenantId,
                   type: "stock",
-                  title: "Purchase required",
+                  title: "Stock purchase request",
                   body: `${shortageQuantity} × ${item.name} (${item.sku}) required for ${estimate.reference}`,
                   recipientRole: "inventory",
+                },
+              });
+              await tx.notification.create({
+                data: {
+                  tenantId,
+                  type: "stock",
+                  title: "Stock purchase request",
+                  body: `${shortageQuantity} × ${item.name} (${item.sku}) required for ${estimate.reference}`,
+                  recipientRole: "admin",
                 },
               });
             }
           }
         }
+
+        // Auto-create job + assign engineer
+        if (input.engineerId && estimate.serviceRequestId) {
+          const sr = await tx.serviceRequest.findFirst({ where: { id: estimate.serviceRequestId, tenantId } });
+          const engineer = await tx.user.findFirst({
+            where: { id: input.engineerId, tenantId, isActive: true },
+          });
+          if (!sr || !engineer) throw new AppError("Service ticket or engineer not found", 404);
+          const existingJob = await tx.serviceJob.findFirst({
+            where: { tenantId, OR: [{ serviceRequestId: sr.id }, { requestRef: sr.reference }] },
+          });
+          if (!existingJob) {
+            const reference = await generateReference(tenantId, "JOB", "serviceJob");
+            const scheduledFor = input.scheduledFor
+              ? new Date(input.scheduledFor)
+              : new Date(Date.now() + 24 * 60 * 60 * 1000);
+            const job = await tx.serviceJob.create({
+              data: {
+                tenantId,
+                serviceRequestId: sr.id,
+                estimateId,
+                customerId: sr.customerId,
+                equipmentId: sr.equipmentId,
+                reference,
+                requestRef: sr.reference,
+                customerName: sr.customerName,
+                equipmentName: (sr.equipmentName ?? "Equipment").split(" (")[0],
+                engineer: engineer.name,
+                engineerId: engineer.id,
+                type: sr.type,
+                status: "scheduled",
+                scheduledFor,
+                progress: 0,
+                assignments: {
+                  create: {
+                    tenantId,
+                    userId: engineer.id,
+                    role: "engineer",
+                    isLead: true,
+                    assignedBy: actor.userId,
+                  },
+                },
+                activities: {
+                  create: {
+                    actor: engineer.name,
+                    action: "Job scheduled",
+                    note: `Auto-assigned after estimate approval`,
+                  },
+                },
+              },
+            });
+            await tx.stockReservation.updateMany({
+              where: { tenantId, estimateId, jobId: null, status: { in: ["active", "shortage"] } },
+              data: { jobId: job.id },
+            });
+            const next = resolveTicketEventStatus(sr.status === "approval" ? "approval" : sr.status, "jobScheduled");
+            await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
+            await tx.notification.create({
+              data: {
+                tenantId,
+                type: "job",
+                title: "Job assigned",
+                body: `${job.reference} assigned to you`,
+                recipientUserId: engineer.id,
+              },
+            });
+          }
+        }
       }
+
       return tx.estimate.findUniqueOrThrow({
         where: { id: estimateId },
-        include: { decisions: true, reservations: true },
+        include: { decisions: true, reservations: true, lineItems: true },
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
@@ -709,10 +888,13 @@ export class DomainService {
         include: { lineItems: true },
       });
       if (job.serviceRequestId) {
-        await tx.serviceRequest.updateMany({
-          where: { id: job.serviceRequestId, tenantId },
-          data: { status: "invoiced" },
-        });
+        const sr = await tx.serviceRequest.findFirst({ where: { id: job.serviceRequestId, tenantId } });
+        if (sr) {
+          const next = resolveTicketEventStatus(sr.status, "invoiceGenerated");
+          if (next !== sr.status) {
+            await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
+          }
+        }
       }
       return invoice;
     });
@@ -1097,6 +1279,126 @@ export class DomainService {
   async unassignRole(tenantId: string, id: string) {
     const result = await prisma.userRoleAssignment.deleteMany({ where: { id, tenantId } });
     if (!result.count) throw new AppError("Role assignment not found", 404);
+  }
+
+  listStockPurchaseRequests(tenantId: string, status?: string) {
+    return prisma.stockPurchaseRequest.findMany({
+      where: { tenantId, ...(status ? { status } : {}) },
+      include: { inventoryItem: true, purchaseOrder: true },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async createStockPurchaseRequest(tenantId: string, actor: Actor, input: any) {
+    const item = await prisma.inventoryItem.findFirst({ where: { id: input.inventoryItemId, tenantId } });
+    if (!item) throw new AppError("Inventory item not found", 404);
+    const available = item.inStock - item.reserved;
+    if (available >= input.quantity && !input.force) {
+      throw new AppError("Sufficient stock is available; purchase request not required", 409);
+    }
+    const request = await prisma.stockPurchaseRequest.create({
+      data: {
+        tenantId,
+        inventoryItemId: input.inventoryItemId,
+        quantity: input.quantity,
+        requestedBy: actor.userId,
+        serviceRequestId: input.serviceRequestId ?? null,
+        jobId: input.jobId ?? null,
+        note: input.note,
+      },
+      include: { inventoryItem: true },
+    });
+    await prisma.notification.createMany({
+      data: [
+        {
+          tenantId,
+          type: "stock",
+          title: "Stock purchase request",
+          body: `${input.quantity} × ${item.name} (${item.sku}) requested`,
+          recipientRole: "inventory",
+        },
+        {
+          tenantId,
+          type: "stock",
+          title: "Stock purchase request",
+          body: `${input.quantity} × ${item.name} (${item.sku}) requested`,
+          recipientRole: "admin",
+        },
+      ],
+    });
+    return request;
+  }
+
+  async convertStockPurchaseRequest(tenantId: string, id: string, actor: Actor, input: any) {
+    return prisma.$transaction(async (tx) => {
+      const request = await tx.stockPurchaseRequest.findFirst({
+        where: { id, tenantId, status: "open" },
+        include: { inventoryItem: true },
+      });
+      if (!request) throw new AppError("Open stock purchase request not found", 404);
+      const item = request.inventoryItem;
+      const unitCost = input.unitCost ?? Number(item.unitCost);
+      const lineTotal = unitCost * request.quantity;
+      const reference = await generateReference(tenantId, "PO", "purchaseOrder");
+      const po = await tx.purchaseOrder.create({
+        data: {
+          tenantId,
+          supplierId: item.supplierId,
+          branchId: item.branchId,
+          reference,
+          supplier: item.supplier,
+          items: 1,
+          total: lineTotal,
+          status: "sent",
+          expectedDate: input.expectedDate,
+          lineItems: {
+            create: {
+              inventoryItemId: item.id,
+              sku: item.sku,
+              description: item.name,
+              quantityOrdered: request.quantity,
+              unitCost,
+              lineTotal,
+            },
+          },
+        },
+        include: { lineItems: true },
+      });
+      await tx.stockPurchaseRequest.update({
+        where: { id },
+        data: {
+          status: "converted",
+          purchaseOrderId: po.id,
+          convertedAt: new Date(),
+        },
+      });
+      if (request.serviceRequestId || request.jobId) {
+        await tx.notification.create({
+          data: {
+            tenantId,
+            type: "stock",
+            title: "Purchase order created",
+            body: `PO ${po.reference} created for ${item.name}`,
+            recipientRole: "inventory",
+          },
+        });
+      }
+      return { request: await tx.stockPurchaseRequest.findUniqueOrThrow({ where: { id }, include: { inventoryItem: true } }), purchaseOrder: po };
+    });
+  }
+
+  async finishTicket(tenantId: string, serviceRequestId: string, actor: Actor) {
+    if (!["admin", "coordinator", "billing"].includes(actor.role)) {
+      throw new AppError("Only admin, coordinator, or billing can finish a ticket", 403);
+    }
+    const sr = await prisma.serviceRequest.findFirst({ where: { id: serviceRequestId, tenantId } });
+    if (!sr) throw new AppError("Service ticket not found", 404);
+    if (sr.status !== "invoiced") throw new AppError("Ticket must be invoiced before finishing", 409);
+    const next = resolveTicketEventStatus(sr.status, "ticketFinished");
+    return prisma.serviceRequest.update({
+      where: { id: serviceRequestId },
+      data: { status: next as never },
+    });
   }
 }
 

@@ -8,6 +8,7 @@ import {
   catalogItemSchema,
   commissionActionSchema,
   commissionSchema,
+  convertStockPurchaseRequestSchema,
   createPurchaseOrderSchema,
   createStockTransferSchema,
   estimateDecisionSchema,
@@ -27,6 +28,7 @@ import {
   reservationActionSchema,
   roleAssignmentSchema,
   roleSchema,
+  stockPurchaseRequestSchema,
   workLogSchema,
 } from "@/schemas/domain.schema";
 
@@ -64,6 +66,9 @@ router.post("/job-extras/:id/approve", requireRole("admin", "coordinator", "esti
 router.get("/stock/reservations", inventory, c.reservations);
 router.post("/stock/reservations/:id/action", inventory, validate(reservationActionSchema), c.reservationAction);
 router.get("/stock/movements", inventory, c.movements);
+router.get("/stock-purchase-requests", requireRole("admin", "inventory", "inspector", "engineer"), c.stockPurchaseRequests);
+router.post("/stock-purchase-requests", requireRole("admin", "inventory", "inspector", "engineer"), validate(stockPurchaseRequestSchema), c.stockPurchaseRequestCreate);
+router.post("/stock-purchase-requests/:id/convert", inventory, validate(convertStockPurchaseRequestSchema), c.stockPurchaseRequestConvert);
 router.get("/stock-transfers", inventory, c.stockTransfers);
 router.post("/stock-transfers", inventory, validate(createStockTransferSchema), c.stockTransferCreate);
 router.post("/stock-transfers/:id/dispatch", inventory, c.stockTransferDispatch);
@@ -74,6 +79,7 @@ router.post("/purchase-orders/:id/receipts", inventory, validate(receivePurchase
 router.post("/invoices/from-job", finance, validate(invoiceFromJobSchema), c.invoiceFromJob);
 router.post("/invoices/:id/payments", finance, validate(paymentSchema), c.payment);
 router.post("/documents/:kind/:id", documentRole, c.documentGenerate);
+router.post("/service-tickets/:id/finish", requireRole("admin", "coordinator", "billing"), c.finishTicket);
 
 router.get("/equipment-history/:assetTag", requireStaff, c.equipmentHistory);
 router.get("/projects/:requestId", requireStaff, c.projectDetails);

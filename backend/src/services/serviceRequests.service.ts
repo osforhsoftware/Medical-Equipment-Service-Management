@@ -6,19 +6,11 @@ import { notificationsService } from "@/services/notifications.service";
 import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
 import { prisma } from "@/db/prisma";
-
-const STATUS_ORDER = ["new", "inspection", "estimate", "approval", "inProgress", "completed", "invoiced"] as const;
-type ServiceStatus = (typeof STATUS_ORDER)[number];
-
-const TRANSITION_ROLES: Record<ServiceStatus, readonly string[]> = {
-  new: [],
-  inspection: ["admin", "coordinator", "inspector"],
-  estimate: ["admin", "coordinator", "inspector"],
-  approval: ["admin", "coordinator", "estimator"],
-  inProgress: ["admin", "coordinator"],
-  completed: ["admin", "coordinator", "engineer"],
-  invoiced: ["admin", "billing"],
-};
+import {
+  assertTicketAdvance,
+  resolveTicketEventStatus,
+  type TicketEvent,
+} from "@/services/workflow/serviceTicketStateMachine";
 
 const ASSIGNABLE_STAFF_ROLES = ["coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
 const ASSIGNMENT_SCOPED_ROLES = ["inspector", "estimator", "engineer", "inventory", "billing"];
@@ -56,7 +48,7 @@ export class ServiceRequestsService {
       ASSIGNMENT_SCOPED_ROLES.includes(actorRole) &&
       request.assignedTo !== actorId
     ) {
-      throw new AppError("You can only access service requests assigned to you", 403);
+      throw new AppError("You can only access service tickets assigned to you", 403);
     }
   }
 
@@ -70,6 +62,24 @@ export class ServiceRequestsService {
     return assignee;
   }
 
+  /** Shared helper for domain side-effects (estimate/job/invoice). */
+  async applyTicketEvent(
+    id: string,
+    tenantId: string,
+    event: TicketEvent,
+    tx?: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  ) {
+    const client = tx ?? prisma;
+    const existing = await client.serviceRequest.findFirst({ where: { id, tenantId } });
+    if (!existing) throw new AppError("Service ticket not found", 404);
+    const status = resolveTicketEventStatus(existing.status, event);
+    if (status === existing.status) return existing;
+    return client.serviceRequest.update({
+      where: { id },
+      data: { status: status as never },
+    });
+  }
+
   async getAll(tenantId: string, actorId: string, actorRole: string, filters?: { branchId?: string; status?: string }) {
     const restrictedRoles = ["inspector", "estimator", "engineer", "inventory", "billing"];
     const assignedToFilter = restrictedRoles.includes(actorRole) ? actorId : undefined;
@@ -78,14 +88,14 @@ export class ServiceRequestsService {
 
   async getById(id: string, tenantId: string, actorId?: string, actorRole?: string) {
     const sr = await serviceRequestsRepository.findById(id, tenantId);
-    if (!sr) throw new AppError("Service request not found", 404);
+    if (!sr) throw new AppError("Service ticket not found", 404);
     this.assertActorAccess(sr, actorId, actorRole);
     return sr;
   }
 
   async getWithTimeline(id: string, tenantId: string) {
     const sr = await serviceRequestsRepository.findWithTimeline(id, tenantId);
-    if (!sr) throw new AppError("Service request not found", 404);
+    if (!sr) throw new AppError("Service ticket not found", 404);
     return sr;
   }
 
@@ -106,7 +116,6 @@ export class ServiceRequestsService {
       ? new Date(data.slaDue)
       : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    // Resolve primary equipment
     const equipIds = data.equipmentIds?.length
       ? [...new Set(data.equipmentIds)]
       : data.equipmentId
@@ -161,7 +170,7 @@ export class ServiceRequestsService {
     await serviceRequestsRepository.addTimelineEvent(
       sr.id,
       createdBy,
-      "Service request created",
+      "Service ticket created",
       `Type: ${data.type}, Priority: ${data.priority}`,
     );
 
@@ -193,7 +202,7 @@ export class ServiceRequestsService {
       !["admin", "coordinator"].includes(actorRole) &&
       Object.keys(updateData).length > 0
     ) {
-      throw new AppError("Only administrators and coordinators can edit request details", 403);
+      throw new AppError("Only administrators and coordinators can edit ticket details", 403);
     }
     if (status && status !== existing.status) {
       await this.advanceWorkflow(
@@ -258,15 +267,46 @@ export class ServiceRequestsService {
     const actor = await usersRepository.findById(actorId, tenantId);
     const actorName = actor?.name ?? actorId;
 
-    const currentIdx = STATUS_ORDER.indexOf(existing.status as ServiceStatus);
-    const targetIdx = STATUS_ORDER.indexOf(targetStatus as ServiceStatus);
+    assertTicketAdvance(existing.status, targetStatus, actorRole);
 
-    if (targetIdx < 0) throw new AppError("Invalid target status", 400);
-    if (targetIdx !== currentIdx + 1) {
-      throw new AppError("Workflow can only move to the next stage", 409);
+    if (targetStatus === "inProgress") {
+      const estimate = await prisma.estimate.findFirst({
+        where: {
+          tenantId,
+          status: "approved",
+          OR: [{ serviceRequestId: id }, { requestRef: existing.reference }],
+        },
+      });
+      const job = await prisma.serviceJob.findFirst({
+        where: { tenantId, OR: [{ serviceRequestId: id }, { requestRef: existing.reference }] },
+      });
+      if (!estimate || !job) {
+        throw new AppError("An approved estimate and scheduled job are required before in-progress", 409);
+      }
     }
-    if (!TRANSITION_ROLES[targetStatus as ServiceStatus].includes(actorRole)) {
-      throw new AppError("Your role cannot perform this workflow transition", 403);
+    if (targetStatus === "completed") {
+      const job = await prisma.serviceJob.findFirst({
+        where: {
+          tenantId,
+          status: "completed",
+          OR: [{ serviceRequestId: id }, { requestRef: existing.reference }],
+        },
+        include: { signature: true },
+      });
+      if (!job?.signature) {
+        throw new AppError("Customer sign-off is required before completing the ticket", 409);
+      }
+    }
+    if (targetStatus === "invoiced") {
+      const invoice = await prisma.invoice.findFirst({
+        where: { tenantId, serviceRequestId: id },
+      });
+      if (!invoice) throw new AppError("An invoice is required before marking invoiced", 409);
+    }
+    if (targetStatus === "finished") {
+      if (existing.status !== "invoiced") {
+        throw new AppError("Ticket must be invoiced before finishing", 409);
+      }
     }
 
     const updated = await serviceRequestsRepository.update(id, tenantId, {
@@ -275,6 +315,7 @@ export class ServiceRequestsService {
 
     const label = targetStatus.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase());
     await serviceRequestsRepository.addTimelineEvent(id, actorName, `Moved to ${label}`, note);
+    await notificationsService.notifyWorkflowAdvanced(tenantId, existing.reference, targetStatus, actorName);
 
     return updated;
   }

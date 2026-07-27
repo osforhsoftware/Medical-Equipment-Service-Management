@@ -188,6 +188,18 @@ export interface BackendServiceRequestEquipment {
   assetTag: string;
 }
 
+export interface BackendInspectionRecommendation {
+  id: string;
+  inventoryItemId?: string | null;
+  catalogItemId?: string | null;
+  type: string;
+  title: string;
+  description: string;
+  priority: string;
+  quantity: string | number;
+  estimatedCost: string | number;
+}
+
 export interface BackendInspectionReport {
   id: string;
   serviceRequestId: string;
@@ -196,6 +208,10 @@ export interface BackendInspectionReport {
   severity: string;
   reportedBy: string;
   reportedAt: string;
+  submittedAt?: string | null;
+  version?: number;
+  recommendations?: BackendInspectionRecommendation[];
+  attachments?: { id: string; fileId: string; caption?: string | null; kind: string; file?: { id: string; originalName: string } }[];
 }
 
 export interface BackendServiceRequest {
@@ -265,6 +281,8 @@ export interface CreateInspectionInput {
   findings: string;
   recommendation: string;
   severity: string;
+  attachmentFileIds?: string[];
+  submit?: boolean;
 }
 
 export interface BackendSupplier {
@@ -528,9 +546,10 @@ export interface UpdateJobInput {
 }
 
 export interface JobPhotoInput {
-  filename: string;
-  mimeType: string;
-  dataUrl: string;
+  filename?: string;
+  mimeType?: string;
+  dataUrl?: string;
+  fileId?: string;
 }
 
 export interface BackendJobActivity {
@@ -548,12 +567,19 @@ export interface BackendInventoryItem {
   sku: string;
   name: string;
   category: string;
+  description?: string | null;
   branchId: string;
   inStock: number;
   reserved: number;
   reorderLevel: number;
   unitCost: string | number;
+  sellingPrice?: string | number;
+  deliveryCharge?: string | number;
+  deliveryChargeType?: "flat" | "perUnit" | string;
+  unitOfMeasure?: string;
   supplier: string;
+  supplierId?: string | null;
+  images?: { id: string; fileId: string; file?: { id: string; originalName: string; mimeType: string } }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -562,12 +588,34 @@ export interface CreateInventoryInput {
   sku: string;
   name: string;
   category: string;
+  description?: string | null;
   branchId: string;
   inStock?: number;
-  reserved?: number;
   reorderLevel?: number;
   unitCost?: number;
+  sellingPrice?: number;
+  deliveryCharge?: number;
+  deliveryChargeType?: "flat" | "perUnit";
+  unitOfMeasure?: string;
   supplier: string;
+  supplierId?: string | null;
+  imageFileIds?: string[];
+}
+
+export interface BackendStockPurchaseRequest {
+  id: string;
+  tenantId: string;
+  inventoryItemId: string;
+  quantity: number;
+  status: string;
+  requestedBy: string;
+  serviceRequestId?: string | null;
+  jobId?: string | null;
+  purchaseOrderId?: string | null;
+  note?: string | null;
+  inventoryItem?: BackendInventoryItem;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface BackendPurchaseOrder {
@@ -1028,7 +1076,16 @@ export const api = {
 
   addInspectionRecommendation: (
     reportId: string,
-    data: { title: string; description: string; priority: "low" | "medium" | "high" | "critical" },
+    data: {
+      title: string;
+      description: string;
+      priority: "low" | "medium" | "high" | "critical";
+      type?: "service" | "part" | "labor" | "testing" | "calibration" | "transport" | "other";
+      inventoryItemId?: string | null;
+      catalogItemId?: string | null;
+      quantity?: number;
+      estimatedCost?: number;
+    },
   ) =>
     request<{ id: string }>(`/api/domain/inspection-reports/${reportId}/recommendations`, {
       method: "POST",
@@ -1118,6 +1175,46 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  adjustInventoryStock: (id: string, quantityDelta: number, reason: string) =>
+    request<BackendInventoryItem>(`/api/inventory/${id}/adjust`, {
+      method: "POST",
+      body: JSON.stringify({ quantityDelta, reason }),
+    }),
+
+  listStockPurchaseRequests: (status?: string) =>
+    request<BackendStockPurchaseRequest[]>(`/api/domain/stock-purchase-requests${queryString({ status })}`),
+
+  createStockPurchaseRequest: (data: {
+    inventoryItemId: string;
+    quantity: number;
+    serviceRequestId?: string | null;
+    jobId?: string | null;
+    note?: string;
+    force?: boolean;
+  }) =>
+    request<BackendStockPurchaseRequest>("/api/domain/stock-purchase-requests", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  convertStockPurchaseRequest: (id: string, data: { expectedDate: string; unitCost?: number }) =>
+    request<{ request: BackendStockPurchaseRequest; purchaseOrder: BackendPurchaseOrder }>(
+      `/api/domain/stock-purchase-requests/${id}/convert`,
+      { method: "POST", body: JSON.stringify(data) },
+    ),
+
+  finishServiceTicket: (id: string) =>
+    request<BackendServiceRequest>(`/api/domain/service-tickets/${id}/finish`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  generateDocument: (kind: "estimate" | "invoice" | "service-report", id: string) =>
+    request<{ document: { id: string; fileId: string }; file: { id: string }; downloadUrl: string; reference: string }>(
+      `/api/domain/documents/${kind}/${id}`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
 
   listPurchaseOrders: (status?: string) =>
     request<BackendPurchaseOrder[]>(`/api/purchase-orders${queryString({ status })}`),
@@ -1259,17 +1356,29 @@ export const api = {
 
   createEstimateRevision: (
     id: string,
-    data: { lines: EstimateLineInput[]; discount: number; terms?: string | null; notes?: string | null },
+    data: {
+      lines: EstimateLineInput[];
+      discount: number;
+      terms?: string | null;
+      notes?: string | null;
+      sendForApproval?: boolean;
+      status?: "draft" | "pendingAdminApproval";
+    },
   ) =>
     request<BackendEstimate>(`/api/domain/estimates/${id}/revisions`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
-  decideEstimate: (id: string, decision: "approved" | "rejected" | "revision", note?: string) =>
+  decideEstimate: (
+    id: string,
+    decision: "approved" | "rejected" | "revision",
+    note?: string,
+    options?: { engineerId?: string; scheduledFor?: string },
+  ) =>
     request<BackendEstimate>(`/api/domain/estimates/${id}/decisions`, {
       method: "POST",
-      body: JSON.stringify({ decision, note }),
+      body: JSON.stringify({ decision, note, ...options }),
     }),
 
   assignJobStaff: (id: string, data: { userId: string; role: string; isLead: boolean }) =>

@@ -41,12 +41,26 @@ export default function Inspections() {
   const [recommendation, setRecommendation] = useState("");
   const [workDetails, setWorkDetails] = useState("");
   const [machineImage, setMachineImage] = useState<File | null>(null);
+  const [machineImages, setMachineImages] = useState<File[]>([]);
+  const [inventory, setInventory] = useState<import("@/lib/api").BackendInventoryItem[]>([]);
   const [recommendedItems, setRecommendedItems] = useState([
-    { title: "", description: "", priority: "medium" as "low" | "medium" | "high" | "critical", kind: "service" as "service" | "inventory" },
+    {
+      title: "",
+      description: "",
+      priority: "medium" as "low" | "medium" | "high" | "critical",
+      kind: "inventory" as "service" | "inventory",
+      inventoryItemId: "",
+      quantity: "1",
+    },
   ]);
   const [severity, setSeverity] = useState("medium");
   const [saving, setSaving] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
+
+  useEffect(() => {
+    void api.listInventory().then(setInventory).catch(() => setInventory([]));
+  }, []);
+
 
   const loadRequests = useCallback(async () => {
     setLoading(true);
@@ -73,7 +87,9 @@ export default function Inspections() {
     setRecommendation("");
     setWorkDetails("");
     setMachineImage(null);
-    setRecommendedItems([{ title: "", description: "", priority: "medium", kind: "service" }]);
+    setRecommendedItems([{ title: "", description: "", priority: "medium", kind: "inventory", inventoryItemId: "", quantity: "1" }]);
+    setMachineImages([]);
+    setMachineImage(null);
     setSeverity("medium");
     setExistingReport(null);
 
@@ -114,35 +130,49 @@ export default function Inspections() {
       toast({ title: "Recommendation required", description: "Please provide a recommendation.", variant: "destructive" });
       return;
     }
-    if (!existingReport && !machineImage) {
-      toast({ title: "Machine image required", description: "Attach a current image of the equipment before submitting.", variant: "destructive" });
+    const files = [...machineImages, ...(machineImage ? [machineImage] : [])];
+    if (!existingReport?.attachments?.length && files.length === 0) {
+      toast({ title: "Inspection images required", description: "Attach at least one inspection photo.", variant: "destructive" });
       return;
     }
     setSaving(true);
     try {
-      const uploaded = machineImage ? await api.uploadFile(machineImage) : null;
+      const uploadedIds: string[] = [];
+      for (const file of files) {
+        const uploaded = await api.uploadFile(file);
+        uploadedIds.push(uploaded.id);
+      }
       const report = await api.saveInspectionReport(active.id, {
         findings: [findings.trim(), workDetails.trim() ? `Work details:\n${workDetails.trim()}` : ""].filter(Boolean).join("\n\n"),
         recommendation: recommendation.trim(),
         severity,
+        attachmentFileIds: uploadedIds,
+        submit: true,
       });
-      if (uploaded) {
-        await api.attachInspectionFile(report.id, {
-          fileId: uploaded.id,
-          caption: `${active.equipmentName ?? "Equipment"} inspection image`,
-          kind: "image",
-        });
-      }
-      for (const item of recommendedItems.filter((entry) => entry.title.trim())) {
+      for (const item of recommendedItems.filter((entry) => entry.title.trim() || entry.inventoryItemId)) {
+        const inv = inventory.find((i) => i.id === item.inventoryItemId);
+        const qty = Number(item.quantity) || 1;
         await api.addInspectionRecommendation(report.id, {
-          title: `${item.kind === "inventory" ? "Inventory" : "Service"}: ${item.title.trim()}`,
-          description: item.description.trim() || item.title.trim(),
+          type: item.kind === "inventory" ? "part" : "service",
+          title: item.title.trim() || inv?.name || "Parts requirement",
+          description: item.description.trim() || item.title.trim() || inv?.name || "Required",
           priority: item.priority,
+          inventoryItemId: item.inventoryItemId || null,
+          quantity: qty,
+          estimatedCost: Number(inv?.sellingPrice ?? inv?.unitCost ?? 0) * qty,
         });
+        if (item.inventoryItemId && inv && inv.inStock - inv.reserved < qty) {
+          await api.createStockPurchaseRequest({
+            inventoryItemId: item.inventoryItemId,
+            quantity: qty - Math.max(0, inv.inStock - inv.reserved),
+            serviceRequestId: active.id,
+            note: `Shortage from Parts Requirement on ${active.reference}`,
+          }).catch(() => undefined);
+        }
       }
       toast({
-        title: "Inspection report saved",
-        description: "Request advanced to the Estimate stage.",
+        title: "Inspection report submitted",
+        description: "Ticket advanced to the Estimate stage.",
       });
       setActive(null);
       await loadRequests();
@@ -284,9 +314,36 @@ export default function Inspections() {
               </div>
 
               <div className="grid gap-2">
-                <Label>Current machine image {!existingReport ? <span className="text-destructive">*</span> : null}</Label>
-                <Input type="file" accept="image/*" capture="environment" onChange={(event) => setMachineImage(event.target.files?.[0] ?? null)} />
-                {machineImage ? <p className="text-xs text-muted-foreground">{machineImage.name} · {(machineImage.size / 1024).toFixed(0)} KB</p> : null}
+                <Label>Inspection images {!existingReport?.attachments?.length ? <span className="text-destructive">*</span> : null}</Label>
+                <Input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  capture="environment"
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files ?? []);
+                    setMachineImages(files);
+                    setMachineImage(files[0] ?? null);
+                  }}
+                />
+                {machineImages.length ? (
+                  <p className="text-xs text-muted-foreground">{machineImages.length} image(s) selected</p>
+                ) : null}
+                {existingReport?.attachments?.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {existingReport.attachments.map((att) => (
+                      <a
+                        key={att.id}
+                        className="text-xs text-primary underline"
+                        href={api.fileDownloadUrl(att.fileId)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {att.file?.originalName ?? att.fileId}
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
               </div>
 
               <div className="grid gap-2">
@@ -295,25 +352,90 @@ export default function Inspections() {
                   value={recommendation}
                   onChange={(e) => setRecommendation(e.target.value)}
                   rows={3}
-                  placeholder="What action do you recommend? E.g. replace compressor, calibrate sensor…"
+                  placeholder="What action do you recommend?"
                 />
               </div>
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label>Recommended services & inventory</Label>
-                  <Button type="button" size="sm" variant="outline" onClick={() => setRecommendedItems((items) => [...items, { title: "", description: "", priority: "medium", kind: "service" }])}><Plus className="mr-1 h-3.5 w-3.5" /> Add</Button>
+                  <Label>Parts Requirement</Label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setRecommendedItems((items) => [
+                        ...items,
+                        { title: "", description: "", priority: "medium", kind: "inventory", inventoryItemId: "", quantity: "1" },
+                      ])
+                    }
+                  >
+                    <Plus className="mr-1 h-3.5 w-3.5" /> Add
+                  </Button>
                 </div>
                 {recommendedItems.map((item, index) => (
                   <div key={index} className="space-y-2 rounded-lg border p-3">
-                    <div className="grid grid-cols-[120px_1fr_auto] gap-2">
-                      <Select value={item.kind} onValueChange={(kind: "service" | "inventory") => setRecommendedItems((items) => items.map((entry, i) => i === index ? { ...entry, kind } : entry))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="service">Service</SelectItem><SelectItem value="inventory">Inventory</SelectItem></SelectContent>
+                    <div className="grid grid-cols-[1fr_100px_auto] gap-2">
+                      <Select
+                        value={item.inventoryItemId || undefined}
+                        onValueChange={(inventoryItemId) => {
+                          const inv = inventory.find((i) => i.id === inventoryItemId);
+                          setRecommendedItems((items) =>
+                            items.map((entry, i) =>
+                              i === index
+                                ? {
+                                    ...entry,
+                                    inventoryItemId,
+                                    kind: "inventory",
+                                    title: inv?.name ?? entry.title,
+                                  }
+                                : entry,
+                            ),
+                          );
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select inventory item" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {inventory.map((inv) => (
+                            <SelectItem key={inv.id} value={inv.id}>
+                              {inv.name} ({inv.sku}) · avail {inv.inStock - inv.reserved}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
                       </Select>
-                      <Input value={item.title} onChange={(event) => setRecommendedItems((items) => items.map((entry, i) => i === index ? { ...entry, title: event.target.value } : entry))} placeholder={item.kind === "service" ? "Calibration / repair service" : "Part, SKU or consumable"} />
-                      <Button type="button" size="icon" variant="ghost" onClick={() => setRecommendedItems((items) => items.filter((_, i) => i !== index))} disabled={recommendedItems.length === 1}><Trash2 className="h-4 w-4" /></Button>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={item.quantity}
+                        onChange={(event) =>
+                          setRecommendedItems((items) =>
+                            items.map((entry, i) => (i === index ? { ...entry, quantity: event.target.value } : entry)),
+                          )
+                        }
+                        placeholder="Qty"
+                      />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => setRecommendedItems((items) => items.filter((_, i) => i !== index))}
+                        disabled={recommendedItems.length === 1}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
-                    <Textarea value={item.description} onChange={(event) => setRecommendedItems((items) => items.map((entry, i) => i === index ? { ...entry, description: event.target.value } : entry))} rows={2} placeholder="Reason, scope or quantity…" />
+                    <Textarea
+                      value={item.description}
+                      onChange={(event) =>
+                        setRecommendedItems((items) =>
+                          items.map((entry, i) => (i === index ? { ...entry, description: event.target.value } : entry)),
+                        )
+                      }
+                      rows={2}
+                      placeholder="Why needed…"
+                    />
                   </div>
                 ))}
               </div>

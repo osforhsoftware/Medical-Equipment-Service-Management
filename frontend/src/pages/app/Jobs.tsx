@@ -210,7 +210,14 @@ export default function Jobs() {
     if (!selected) return;
     try {
       await api.updateJob(selected.id, { status: "completed", progress: 100 });
-      toast({ title: "Service report generated", description: `${selected.reference}-report.pdf` });
+      const doc = await api.generateDocument("service-report", selected.id);
+      toast({
+        title: "Job completed",
+        description: "Service report PDF generated.",
+      });
+      if (doc.file?.id) {
+        window.open(api.fileDownloadUrl(doc.file.id), "_blank");
+      }
       setSelected(null);
       await loadJobs();
     } catch (err) {
@@ -226,7 +233,11 @@ export default function Jobs() {
     }
     setActionSaving(true);
     try {
-      const photos = await Promise.all(photoFiles.map(fileToDataUrl));
+      const photos = [];
+      for (const file of photoFiles) {
+        const uploaded = await api.uploadFile(file);
+        photos.push({ fileId: uploaded.id, filename: uploaded.originalName, mimeType: uploaded.mimeType });
+      }
       const result = await api.uploadJobPhotos(selected.id, photos);
       setSelected(result.job);
       toast({
@@ -246,19 +257,23 @@ export default function Jobs() {
     }
   };
 
-  const handleRequestParts = async () => {
+  const handleScopeChange = async () => {
     if (!selected || !partsNote.trim()) {
-      toast({ title: "Details required", description: "Describe the parts needed.", variant: "destructive" });
+      toast({ title: "Details required", description: "Describe the extra parts or scope change.", variant: "destructive" });
       return;
     }
     setActionSaving(true);
     try {
-      const result = await api.requestJobParts(selected.id, partsNote.trim());
-      setSelected(result.job);
-      toast({ title: "Parts requested", description: partsNote.trim() });
+      await api.addJobExtra(selected.id, {
+        description: partsNote.trim().slice(0, 120),
+        reason: partsNote.trim(),
+        quantity: 1,
+        unitPrice: 0,
+        taxRate: 0,
+      });
+      toast({ title: "Scope change submitted", description: "Routed for Admin/Estimator approval." });
       setPartsNote("");
       setPartsOpen(false);
-      await loadJobs();
       const acts = await api.getJobActivities(selected.id);
       setActivities(acts);
     } catch (err) {
@@ -512,7 +527,7 @@ export default function Jobs() {
                     <p className="text-xs font-medium text-muted-foreground">Field Actions</p>
                     <div className="grid grid-cols-2 gap-2">
                       <Action icon={Camera} label="Upload Photos" onClick={() => setPhotosOpen(true)} />
-                      <Action icon={PlusCircle} label="Request Parts" onClick={() => setPartsOpen(true)} />
+                      <Action icon={PlusCircle} label="Request Extra Scope" onClick={() => setPartsOpen(true)} />
                       <Action icon={FileSignature} label="Capture Signature" onClick={() => setSignatureOpen(true)} />
                       <Action icon={PackageMinus} label="Deduct Stock" onClick={() => void openStockDialog()} />
                     </div>
@@ -583,11 +598,11 @@ export default function Jobs() {
       {/* Request Parts */}
       <Dialog open={partsOpen} onOpenChange={setPartsOpen}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Request Parts</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Request Additional Parts / Scope Change</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-2">
-            <p className="text-sm text-muted-foreground">Describe additional parts needed. Job status will move to Parts Pending.</p>
+            <p className="text-sm text-muted-foreground">Creates a supplementary request for Admin/Estimator approval. Does not edit the approved estimate.</p>
             <Textarea
-              placeholder="Part name, SKU, quantity, notes…"
+              placeholder="Extra parts, quantity, or scope change reason…"
               value={partsNote}
               onChange={(e) => setPartsNote(e.target.value)}
               rows={4}
@@ -595,8 +610,8 @@ export default function Jobs() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setPartsOpen(false); setPartsNote(""); }}>Cancel</Button>
-            <Button onClick={handleRequestParts} disabled={actionSaving || !partsNote.trim()}>
-              {actionSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit Request"}
+            <Button onClick={handleScopeChange} disabled={actionSaving || !partsNote.trim()}>
+              {actionSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit for Approval"}
             </Button>
           </DialogFooter>
         </DialogContent>
