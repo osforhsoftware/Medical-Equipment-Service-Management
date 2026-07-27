@@ -156,6 +156,18 @@ export class DomainController {
       res.status(204).send();
     } catch (e) { next(e); }
   };
+  stockPurchaseRequests = async (req: Request, res: Response, next: NextFunction) => {
+    try { send(res, "Stock purchase requests fetched", await domainService.listStockPurchaseRequests(req.tenantId!, req.query.status as string | undefined)); } catch (e) { next(e); }
+  };
+  stockPurchaseRequestCreate = async (req: Request, res: Response, next: NextFunction) => {
+    try { send(res, "Stock purchase request created", await domainService.createStockPurchaseRequest(req.tenantId!, actor(req), req.body), 201); } catch (e) { next(e); }
+  };
+  stockPurchaseRequestConvert = async (req: Request, res: Response, next: NextFunction) => {
+    try { send(res, "Stock purchase request converted to PO", await domainService.convertStockPurchaseRequest(req.tenantId!, req.params.id, actor(req), req.body)); } catch (e) { next(e); }
+  };
+  finishTicket = async (req: Request, res: Response, next: NextFunction) => {
+    try { send(res, "Service ticket finished", await domainService.finishTicket(req.tenantId!, req.params.id, actor(req))); } catch (e) { next(e); }
+  };
 }
 
 export const domainController = new DomainController();

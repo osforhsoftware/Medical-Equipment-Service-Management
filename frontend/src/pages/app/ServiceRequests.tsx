@@ -309,15 +309,15 @@ export default function ServiceRequests() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Service Requests"
-        description="Coordinator-created requests tracked through the full service workflow."
+        title="Service Tickets"
+        description="End-to-end service tickets from intake through inspection, estimate, job, and billing."
         actions={
           canCreate ? (
             <Button
               onClick={() => { resetCreateForm(); setOpen(true); }}
               variant="brand"
             >
-              <Plus className="mr-1 h-4 w-4" /> New Request
+              <Plus className="mr-1 h-4 w-4" /> New Ticket
             </Button>
           ) : (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -382,7 +382,7 @@ export default function ServiceRequests() {
       <Dialog open={open} onOpenChange={(o) => { if (!o) resetCreateForm(); setOpen(o); }}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>New Service Request</DialogTitle>
+            <DialogTitle>New Service Ticket</DialogTitle>
             <DialogDescription>Created on behalf of a customer.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">

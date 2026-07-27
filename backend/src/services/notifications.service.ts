@@ -68,6 +68,13 @@ export class NotificationsService {
         `${item.name} below reorder level (${item.inStock}/${item.reorderLevel}).`,
         "inventory",
       );
+      await this.ensureUnreadNotification(
+        tenantId,
+        "stock",
+        `Low stock: ${item.name}`,
+        `${item.name} below reorder level (${item.inStock}/${item.reorderLevel}).`,
+        "admin",
+      );
     }
 
     const expiringAmcs = await prisma.amcContract.findMany({

@@ -44,6 +44,19 @@ export class InventoryController {
       res.status(204).send();
     } catch (err) { next(err); }
   }
+
+  async adjust(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await inventoryService.adjustStock(
+        req.params.id,
+        req.tenantId!,
+        req.user!.userId,
+        req.body.quantityDelta,
+        req.body.reason,
+      );
+      res.json(success("Stock adjusted successfully", data));
+    } catch (err) { next(err); }
+  }
 }
 
 export const inventoryController = new InventoryController();

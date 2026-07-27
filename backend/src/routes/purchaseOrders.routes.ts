@@ -12,8 +12,8 @@ const canManage = requireRole("admin", "inventory");
 
 router.get("/", canManage, purchaseOrdersController.getAll);
 router.get("/:id", canManage, purchaseOrdersController.getById);
-router.post("/", canManage, validate(createPurchaseOrderSchema), purchaseOrdersController.create);
-router.put("/:id", canManage, validate(updatePurchaseOrderSchema), purchaseOrdersController.update);
-router.delete("/:id", canManage, purchaseOrdersController.delete);
+router.post("/", requireRole("admin"), validate(createPurchaseOrderSchema), purchaseOrdersController.create);
+router.put("/:id", requireRole("admin"), validate(updatePurchaseOrderSchema), purchaseOrdersController.update);
+router.delete("/:id", requireRole("admin"), purchaseOrdersController.delete);
 
 export default router;

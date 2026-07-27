@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, PackageCheck, Loader2 } from "lucide-react";
+import { Plus, PackageCheck, Loader2, AlertTriangle, Boxes, Lock } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { StatCard } from "@/components/shared/StatCard";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
@@ -30,43 +31,56 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError } from "@/lib/api";
+import { ApiError, api, type BackendBranch, type BackendInventoryItem } from "@/lib/api";
 import { useBranch } from "@/context/BranchContext";
-import { api, type BackendBranch, type BackendInventoryItem } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { formatCurrency, formatCurrencyShort } from "@/lib/format";
-import { AlertTriangle, Boxes, Lock } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
 const CATEGORIES = ["Modules", "Sensors", "Consumables", "Boards", "Tools", "Other"];
+const UOM = ["pcs", "box", "meter", "set", "kit"];
+
+const emptyForm = {
+  sku: "",
+  name: "",
+  category: "Modules",
+  description: "",
+  branchId: "",
+  inStock: "0",
+  reorderLevel: "5",
+  unitCost: "0",
+  sellingPrice: "0",
+  deliveryCharge: "0",
+  deliveryChargeType: "flat" as "flat" | "perUnit",
+  unitOfMeasure: "pcs",
+  supplier: "",
+};
 
 export default function Inventory() {
   const { branchId } = useBranch();
+  const { user } = useAuth();
+  const canManage = user?.role === "admin" || user?.role === "inventory";
   const [items, setItems] = useState<BackendInventoryItem[]>([]);
   const [branches, setBranches] = useState<BackendBranch[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selected, setSelected] = useState<BackendInventoryItem | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    sku: "",
-    name: "",
-    category: "Modules",
-    branchId: "",
-    inStock: "0",
-    reserved: "0",
-    reorderLevel: "5",
-    unitCost: "0",
-    supplier: "",
-  });
+  const [adjustDelta, setAdjustDelta] = useState("0");
+  const [adjustReason, setAdjustReason] = useState("");
+  const [form, setForm] = useState(emptyForm);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.listInventory(branchId);
-      setItems(data);
+      setItems(await api.listInventory(branchId));
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load inventory";
-      toast({ title: "Error", description: message, variant: "destructive" });
+      toast({
+        title: "Error",
+        description: err instanceof ApiError ? err.message : "Failed to load inventory",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -91,39 +105,68 @@ export default function Inventory() {
 
   const openCreate = () => {
     setForm({
-      sku: "",
-      name: "",
-      category: "Modules",
+      ...emptyForm,
       branchId: branchId !== "all" ? branchId : branches[0]?.id ?? "",
-      inStock: "0",
-      reserved: "0",
-      reorderLevel: "5",
-      unitCost: "0",
-      supplier: "",
     });
+    setImageFiles([]);
     setDialogOpen(true);
   };
 
   const saveItem = async () => {
     setSaving(true);
     try {
+      const imageFileIds: string[] = [];
+      for (const file of imageFiles) {
+        const uploaded = await api.uploadFile(file);
+        imageFileIds.push(uploaded.id);
+      }
       await api.createInventoryItem({
         sku: form.sku.trim(),
         name: form.name.trim(),
         category: form.category,
+        description: form.description.trim() || null,
         branchId: form.branchId,
         inStock: Number(form.inStock) || 0,
-        reserved: Number(form.reserved) || 0,
         reorderLevel: Number(form.reorderLevel) || 0,
         unitCost: Number(form.unitCost) || 0,
+        sellingPrice: Number(form.sellingPrice) || 0,
+        deliveryCharge: Number(form.deliveryCharge) || 0,
+        deliveryChargeType: form.deliveryChargeType,
+        unitOfMeasure: form.unitOfMeasure,
         supplier: form.supplier.trim(),
+        imageFileIds,
       });
-      toast({ title: "Item added", description: `${form.name.trim()} was saved to inventory.` });
+      toast({ title: "Inventory item added", description: form.name.trim() });
       setDialogOpen(false);
       await loadItems();
     } catch (err) {
-      const message = err instanceof ApiError ? err.errors?.join(", ") || err.message : "Unable to save item";
-      toast({ title: "Save failed", description: message, variant: "destructive" });
+      toast({
+        title: "Save failed",
+        description: err instanceof ApiError ? err.errors?.join(", ") || err.message : "Unable to save item",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const adjustStock = async () => {
+    if (!selected || user?.role !== "admin") return;
+    setSaving(true);
+    try {
+      await api.adjustInventoryStock(selected.id, Number(adjustDelta), adjustReason.trim());
+      toast({ title: "Stock adjusted" });
+      setAdjustDelta("0");
+      setAdjustReason("");
+      await loadItems();
+      const refreshed = await api.listInventory(branchId);
+      setSelected(refreshed.find((i) => i.id === selected.id) ?? null);
+    } catch (err) {
+      toast({
+        title: "Adjustment failed",
+        description: err instanceof ApiError ? err.message : "Unable to adjust",
+        variant: "destructive",
+      });
     } finally {
       setSaving(false);
     }
@@ -132,11 +175,13 @@ export default function Inventory() {
   const columns: Column<BackendInventoryItem>[] = [
     {
       key: "name",
-      header: "Item",
+      header: "Inventory Item",
       render: (i) => (
         <div>
           <p className="font-medium">{i.name}</p>
-          <p className="font-mono text-xs text-muted-foreground">{i.sku} · {i.category}</p>
+          <p className="font-mono text-xs text-muted-foreground">
+            {i.sku} · {i.category} · {i.unitOfMeasure ?? "pcs"}
+          </p>
         </div>
       ),
     },
@@ -179,21 +224,23 @@ export default function Inventory() {
           </Badge>
         ),
     },
-    { key: "reorderLevel", header: "Reorder At", render: (i) => <span className="text-sm text-muted-foreground">{i.reorderLevel}</span> },
-    { key: "unitCost", header: "Unit Cost", render: (i) => <span className="text-sm">{formatCurrency(i.unitCost)}</span> },
+    { key: "sellingPrice", header: "Sell", render: (i) => <span className="text-sm">{formatCurrency(i.sellingPrice ?? 0)}</span> },
+    { key: "unitCost", header: "Cost", render: (i) => <span className="text-sm">{formatCurrency(i.unitCost)}</span> },
     { key: "supplier", header: "Supplier", render: (i) => <span className="text-sm text-muted-foreground">{i.supplier}</span> },
   ];
 
   return (
-    <RoleGuard roles={["admin", "inventory", "engineer"]}>
+    <RoleGuard roles={["admin", "inventory", "engineer", "inspector"]}>
       <div className="space-y-6">
         <PageHeader
-          title="Inventory"
-          description="Spare parts with reservation system — reserve before deduct."
+          title="Inventory Items"
+          description="Spare parts with cost, selling price, delivery charges, and system-managed reservations."
           actions={
-            <Button onClick={openCreate} disabled={branches.length === 0} variant="brand">
-              <Plus className="mr-1 h-4 w-4" /> Add Item
-            </Button>
+            canManage ? (
+              <Button onClick={openCreate} disabled={branches.length === 0} variant="brand">
+                <Plus className="mr-1 h-4 w-4" /> Add Item
+              </Button>
+            ) : undefined
           }
         />
         <div className="grid gap-4 sm:grid-cols-3">
@@ -203,7 +250,7 @@ export default function Inventory() {
         </div>
         {lowStock > 0 && (
           <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm text-warning-foreground">
-            <AlertTriangle className="h-4 w-4" /> {lowStock} item(s) at or below reorder level — create purchase orders to replenish.
+            <AlertTriangle className="h-4 w-4" /> {lowStock} item(s) at or below reorder level — raise a Stock Purchase Request.
           </div>
         )}
 
@@ -216,87 +263,169 @@ export default function Inventory() {
             data={items}
             columns={columns}
             searchKeys={["name", "sku", "category", "supplier"]}
-            searchPlaceholder="Search parts…"
-            emptyMessage="No inventory items yet. Add your first spare part."
+            searchPlaceholder="Search inventory items…"
+            emptyMessage="No inventory items yet."
             filters={[{ label: "Category", options: categoryOptions, predicate: (i, v) => i.category === v }]}
             onRowClick={setSelected}
           />
         )}
 
         <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-          <SheetContent className="sm:max-w-md">
+          <SheetContent className="sm:max-w-md overflow-y-auto">
             {selected && (
               <>
                 <SheetHeader>
                   <SheetTitle>{selected.name}</SheetTitle>
-                  <SheetDescription>{selected.sku} · {selected.category}</SheetDescription>
+                  <SheetDescription>
+                    {selected.sku} · {selected.category}
+                  </SheetDescription>
                 </SheetHeader>
                 <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
                   <Info label="In stock" value={String(selected.inStock)} />
                   <Info label="Reserved" value={String(selected.reserved)} />
                   <Info label="Reorder at" value={String(selected.reorderLevel)} />
+                  <Info label="UoM" value={selected.unitOfMeasure ?? "pcs"} />
                   <Info label="Unit cost" value={formatCurrency(selected.unitCost)} />
+                  <Info label="Selling price" value={formatCurrency(selected.sellingPrice ?? 0)} />
+                  <Info label="Delivery" value={`${formatCurrency(selected.deliveryCharge ?? 0)} (${selected.deliveryChargeType ?? "flat"})`} />
                   <Info label="Supplier" value={selected.supplier} />
                 </div>
+                {selected.description && <p className="mt-4 text-sm text-muted-foreground">{selected.description}</p>}
+                {user?.role === "admin" && (
+                  <div className="mt-6 space-y-3 rounded-lg border border-border p-3">
+                    <p className="text-sm font-medium">Force stock adjustment</p>
+                    <Input type="number" value={adjustDelta} onChange={(e) => setAdjustDelta(e.target.value)} placeholder="Delta (+/-)" />
+                    <Input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} placeholder="Reason (required)" />
+                    <Button size="sm" disabled={saving || !adjustReason.trim() || Number(adjustDelta) === 0} onClick={() => void adjustStock()}>
+                      Apply adjustment
+                    </Button>
+                  </div>
+                )}
               </>
             )}
           </SheetContent>
         </Sheet>
 
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader><DialogTitle>Add Inventory Item</DialogTitle></DialogHeader>
+          <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Add Inventory Item</DialogTitle>
+            </DialogHeader>
             <div className="grid gap-4 py-2">
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="sku">SKU</Label>
-                  <Input id="sku" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} className="font-mono" />
+                  <Label>SKU / Part Number</Label>
+                  <Input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} className="font-mono" />
                 </div>
                 <div className="grid gap-2">
                   <Label>Category</Label>
                   <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                      {CATEGORIES.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="item-name">Name</Label>
-                <Input id="item-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                <Label>Name</Label>
+                <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               <div className="grid gap-2">
-                <Label>Branch</Label>
-                <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
-                  <SelectContent>
-                    {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <Label>Description</Label>
+                <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>Branch</Label>
+                  <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {branches.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Unit of measure</Label>
+                  <Select value={form.unitOfMeasure} onValueChange={(v) => setForm({ ...form, unitOfMeasure: v })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {UOM.map((u) => (
+                        <SelectItem key={u} value={u}>
+                          {u}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="in-stock">In stock</Label>
-                  <Input id="in-stock" type="number" min={0} value={form.inStock} onChange={(e) => setForm({ ...form, inStock: e.target.value })} />
+                  <Label>Qty on hand</Label>
+                  <Input type="number" min={0} value={form.inStock} onChange={(e) => setForm({ ...form, inStock: e.target.value })} />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="reorder">Reorder at</Label>
-                  <Input id="reorder" type="number" min={0} value={form.reorderLevel} onChange={(e) => setForm({ ...form, reorderLevel: e.target.value })} />
+                  <Label>Reorder threshold</Label>
+                  <Input type="number" min={0} value={form.reorderLevel} onChange={(e) => setForm({ ...form, reorderLevel: e.target.value })} />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="cost">Unit cost</Label>
-                  <Input id="cost" type="number" min={0} value={form.unitCost} onChange={(e) => setForm({ ...form, unitCost: e.target.value })} />
+                  <Label>Cost price</Label>
+                  <Input type="number" min={0} value={form.unitCost} onChange={(e) => setForm({ ...form, unitCost: e.target.value })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="grid gap-2">
+                  <Label>Selling price</Label>
+                  <Input type="number" min={0} value={form.sellingPrice} onChange={(e) => setForm({ ...form, sellingPrice: e.target.value })} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Delivery charge</Label>
+                  <Input type="number" min={0} value={form.deliveryCharge} onChange={(e) => setForm({ ...form, deliveryCharge: e.target.value })} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Delivery type</Label>
+                  <Select
+                    value={form.deliveryChargeType}
+                    onValueChange={(v) => setForm({ ...form, deliveryChargeType: v as "flat" | "perUnit" })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="flat">Flat</SelectItem>
+                      <SelectItem value="perUnit">Per unit</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="supplier">Supplier</Label>
-                <Input id="supplier" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
+                <Label>Supplier</Label>
+                <Input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Product images</Label>
+                <Input type="file" accept="image/*" multiple onChange={(e) => setImageFiles(Array.from(e.target.files ?? []))} />
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={saveItem} disabled={saving || !form.branchId || !form.sku.trim() || !form.name.trim()}>
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => void saveItem()} disabled={saving || !form.branchId || !form.sku.trim() || !form.name.trim()}>
                 {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Save item
               </Button>

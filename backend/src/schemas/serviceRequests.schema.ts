@@ -13,7 +13,7 @@ export const createServiceRequestSchema = z.object({
 });
 
 export const updateServiceRequestSchema = z.object({
-  status: z.enum(["new", "inspection", "estimate", "approval", "inProgress", "completed", "invoiced"]).optional(),
+  status: z.enum(["new", "inspection", "estimate", "approval", "inProgress", "completed", "invoiced", "finished"]).optional(),
   priority: z.enum(["low", "medium", "high", "critical"]).optional(),
   assignedTo: z.string().nullable().optional(),
   assignedName: z.string().nullable().optional(),
@@ -27,6 +27,6 @@ export const assignServiceRequestSchema = z.object({
 });
 
 export const workflowServiceRequestSchema = z.object({
-  status: z.enum(["new", "inspection", "estimate", "approval", "inProgress", "completed", "invoiced"]),
+  status: z.enum(["new", "inspection", "estimate", "approval", "inProgress", "completed", "invoiced", "finished"]),
   note: z.string().trim().min(1, "Note is required").max(1000),
 });

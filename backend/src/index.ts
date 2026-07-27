@@ -49,6 +49,7 @@ app.use("/api/branches", branchesRoutes);
 app.use("/api/customers", customersRoutes);
 app.use("/api/equipment", equipmentRoutes);
 app.use("/api/service-requests", serviceRequestsRoutes);
+app.use("/api/service-tickets", serviceRequestsRoutes);
 app.use("/api/estimates", estimatesRoutes);
 app.use("/api/jobs", jobsRoutes);
 app.use("/api/inventory", inventoryRoutes);

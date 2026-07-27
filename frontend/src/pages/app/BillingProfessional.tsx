@@ -50,8 +50,16 @@ export default function BillingProfessional() {
   const generate = async () => {
     setSaving(true);
     try {
-      await api.createInvoiceFromJob(jobId, new Date(dueAt).toISOString(), "INR");
-      setGenerateOpen(false); setJobId(""); await load(); toast({ title: "Invoice generated from completed job" });
+      const invoice = await api.createInvoiceFromJob(jobId, new Date(dueAt).toISOString(), "INR");
+      const doc = await api.generateDocument("invoice", invoice.id);
+      if (invoice.serviceRequestId) {
+        await api.finishServiceTicket(invoice.serviceRequestId).catch(() => undefined);
+      }
+      setGenerateOpen(false);
+      setJobId("");
+      await load();
+      toast({ title: "Invoice generated", description: "PDF created and ticket marked finished when eligible." });
+      if (doc.file?.id) window.open(api.fileDownloadUrl(doc.file.id), "_blank");
     } catch (error) {
       toast({ title: "Invoice generation failed", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" });
     } finally { setSaving(false); }

@@ -2,6 +2,8 @@ import { estimatesRepository } from "@/repositories/estimates.repository";
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
 import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
+import { resolveTicketEventStatus } from "@/services/workflow/serviceTicketStateMachine";
+import { prisma } from "@/db/prisma";
 
 type CreateEstimateData = {
   serviceRequestId: string;
@@ -24,7 +26,7 @@ export class EstimatesService {
 
   async create(tenantId: string, data: CreateEstimateData) {
     const sr = await serviceRequestsRepository.findById(data.serviceRequestId, tenantId);
-    if (!sr) throw new AppError("Service request not found", 404);
+    if (!sr) throw new AppError("Service ticket not found", 404);
 
     const reference = await generateReference(tenantId, "EST", "estimate");
     const total = (Number(data.laborCost) || 0) + (Number(data.partsCost) || 0);
@@ -44,8 +46,19 @@ export class EstimatesService {
       validUntil: new Date(data.validUntil),
     });
 
-    if (sr.status === "inspection" || sr.status === "new") {
-      await serviceRequestsRepository.update(sr.id, tenantId, { status: "estimate" });
+    if (sr.status === "inspection" || sr.status === "estimate") {
+      const next = resolveTicketEventStatus(sr.status, "estimateCreated");
+      if (next !== sr.status) {
+        await prisma.serviceRequest.update({
+          where: { id: sr.id },
+          data: { status: next as never },
+        });
+      }
+    } else if (sr.status === "new") {
+      await prisma.serviceRequest.update({
+        where: { id: sr.id },
+        data: { status: "estimate" as never },
+      });
     }
 
     return estimate;
@@ -54,11 +67,14 @@ export class EstimatesService {
   async update(id: string, tenantId: string, data: Record<string, unknown>) {
     const existing = await this.getById(id, tenantId);
     if (data.status && data.status !== existing.status) {
-      const maySend = ["draft", "revision"].includes(existing.status) && data.status === "sent";
+      const maySend =
+        ["draft", "revision"].includes(existing.status) &&
+        (data.status === "sent" || data.status === "pendingAdminApproval");
       if (!maySend) {
         throw new AppError("Use the estimate decision endpoint for approval, rejection, or revision", 409);
       }
       data.sentAt = new Date();
+      if (data.status === "sent") data.status = "pendingAdminApproval";
     }
     if (["approved", "rejected"].includes(existing.status) && (data.laborCost != null || data.partsCost != null)) {
       throw new AppError("Decided estimates are immutable", 409);
@@ -71,7 +87,20 @@ export class EstimatesService {
     if (data.validUntil) {
       data.validUntil = new Date(data.validUntil as string);
     }
-    return estimatesRepository.update(id, tenantId, data);
+    const updated = await estimatesRepository.update(id, tenantId, data);
+    if (
+      existing.serviceRequestId &&
+      (data.status === "pendingAdminApproval" || data.status === "sent")
+    ) {
+      const sr = await prisma.serviceRequest.findFirst({ where: { id: existing.serviceRequestId, tenantId } });
+      if (sr) {
+        const next = resolveTicketEventStatus(sr.status, "estimatePendingApproval");
+        if (next !== sr.status) {
+          await prisma.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
+        }
+      }
+    }
+    return updated;
   }
 
   async delete(id: string, tenantId: string) {
@@ -81,4 +110,3 @@ export class EstimatesService {
 }
 
 export const estimatesService = new EstimatesService();
-

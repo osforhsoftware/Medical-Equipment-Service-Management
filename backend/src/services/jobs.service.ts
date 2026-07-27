@@ -7,6 +7,11 @@ import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
 import { prisma } from "@/db/prisma";
 import { Prisma } from "@prisma/client";
+import {
+  assertJobTransition,
+  resolveTicketEventStatus,
+} from "@/services/workflow/serviceTicketStateMachine";
+import { fileStorageService } from "@/services/fileStorage.service";
 
 const ASSIGNABLE_JOB_ROLES = ["coordinator", "engineer"];
 
@@ -124,7 +129,10 @@ export class JobsService {
         where: { tenantId, estimateId: estimate.id, jobId: null, status: "active" },
         data: { jobId: job.id },
       });
-      await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: "inProgress" } });
+      await tx.serviceRequest.update({
+        where: { id: sr.id },
+        data: { status: resolveTicketEventStatus(sr.status, "jobScheduled") as never },
+      });
       return job;
     });
   }
@@ -139,6 +147,10 @@ export class JobsService {
       throw new AppError("Engineers can only update job status and progress", 403);
     }
 
+    if (data.status && data.status !== existing.status) {
+      assertJobTransition(existing.status, String(data.status));
+    }
+
     if (data.engineerId) {
       const assignee = await this.resolveAssignee(String(data.engineerId), tenantId);
       data.engineer = assignee.name;
@@ -149,6 +161,8 @@ export class JobsService {
     }
 
     if (data.status === "completed" && existing.status !== "completed") {
+      const sig = await prisma.jobSignature.findUnique({ where: { jobId: id } });
+      if (!sig) throw new AppError("Customer sign-off is required before completing the job", 409);
       const updated = await prisma.$transaction(async (tx) => {
         const job = await tx.serviceJob.findFirst({
           where: { id, tenantId },
@@ -186,10 +200,13 @@ export class JobsService {
           });
         }
         if (job.serviceRequestId) {
-          await tx.serviceRequest.updateMany({
-            where: { id: job.serviceRequestId, tenantId },
-            data: { status: "completed" },
-          });
+          const sr = await tx.serviceRequest.findFirst({ where: { id: job.serviceRequestId, tenantId } });
+          if (sr) {
+            await tx.serviceRequest.update({
+              where: { id: sr.id },
+              data: { status: resolveTicketEventStatus(sr.status, "jobCompleted") as never },
+            });
+          }
         }
         if (job.equipmentId) {
           await tx.equipment.updateMany({
@@ -220,19 +237,53 @@ export class JobsService {
     tenantId: string,
     actorId: string,
     actorRole: string,
-    photos: { filename: string; mimeType: string; dataUrl: string }[],
+    photos: { filename?: string; mimeType?: string; dataUrl?: string; fileId?: string }[],
   ) {
     const job = await this.getById(id, tenantId, actorId, actorRole);
     const actor = await usersRepository.findById(actorId, tenantId);
     const actorName = actor?.name ?? actorId;
+    assertJobTransition(job.status === "scheduled" ? "scheduled" : job.status, job.status === "scheduled" ? "inProgress" : job.status);
 
-    const saved = await jobActionsRepository.addPhotos(
-      id,
-      photos.map((p) => ({ ...p, uploadedBy: actorName })),
-    );
+    const saved = [];
+    for (const photo of photos) {
+      let fileId = photo.fileId ?? null;
+      let dataUrl = "";
+      let filename = photo.filename ?? "photo.jpg";
+      let mimeType = photo.mimeType ?? "image/jpeg";
+      if (photo.fileId) {
+        const file = await prisma.storedFile.findFirst({ where: { id: photo.fileId, tenantId } });
+        if (!file) throw new AppError("Uploaded file not found", 404);
+        filename = file.originalName;
+        mimeType = file.mimeType;
+      } else if (photo.dataUrl) {
+        // Legacy path: persist data-URL into StoredFile
+        const match = /^data:([^;]+);base64,(.+)$/.exec(photo.dataUrl);
+        if (!match) throw new AppError("Invalid photo data URL", 422);
+        const buffer = Buffer.from(match[2], "base64");
+        const stored = await fileStorageService.saveBuffer(tenantId, actorId, {
+          buffer,
+          originalName: filename,
+          mimeType: match[1] || mimeType,
+        });
+        fileId = stored.id;
+        mimeType = stored.mimeType;
+      }
+      const row = await prisma.jobPhoto.create({
+        data: {
+          jobId: id,
+          filename,
+          mimeType,
+          dataUrl,
+          fileId,
+          uploadedBy: actorName,
+        },
+      });
+      saved.push(row);
+    }
 
     const progress = Math.min(job.progress + 15, 90);
     const status = job.status === "scheduled" ? "inProgress" : job.status;
+    if (status !== job.status) assertJobTransition(job.status, status);
     const updated = await jobsRepository.update(id, tenantId, { progress, status });
 
     await jobActionsRepository.addActivity(id, {
@@ -273,18 +324,49 @@ export class JobsService {
     tenantId: string,
     actorId: string,
     actorRole: string,
-    data: { customerName: string; signatureData?: string },
+    data: { customerName: string; signatureData?: string; fileId?: string },
   ) {
     const job = await this.getById(id, tenantId, actorId, actorRole);
     const actor = await usersRepository.findById(actorId, tenantId);
     const actorName = actor?.name ?? actorId;
 
-    const signature = await jobActionsRepository.upsertSignature(id, {
-      customerName: data.customerName,
-      signatureData: data.signatureData,
-      capturedBy: actorName,
+    let fileId = data.fileId ?? null;
+    let signatureData = data.signatureData;
+    if (!fileId && data.signatureData?.startsWith("data:")) {
+      const match = /^data:([^;]+);base64,(.+)$/.exec(data.signatureData);
+      if (match) {
+        const stored = await fileStorageService.saveBuffer(tenantId, actorId, {
+          buffer: Buffer.from(match[2], "base64"),
+          originalName: `signature-${id}.png`,
+          mimeType: match[1] || "image/png",
+        });
+        fileId = stored.id;
+        signatureData = undefined;
+      }
+    } else if (fileId) {
+      const file = await prisma.storedFile.findFirst({ where: { id: fileId, tenantId } });
+      if (!file) throw new AppError("Signature file not found", 404);
+    }
+
+    const signature = await prisma.jobSignature.upsert({
+      where: { jobId: id },
+      create: {
+        jobId: id,
+        customerName: data.customerName,
+        signatureData: signatureData ?? null,
+        fileId,
+        capturedBy: actorName,
+      },
+      update: {
+        customerName: data.customerName,
+        signatureData: signatureData ?? null,
+        fileId,
+        capturedBy: actorName,
+        capturedAt: new Date(),
+      },
     });
 
+    assertJobTransition(job.status, "review");
     const updated = await jobsRepository.update(id, tenantId, {
       status: "review",
       progress: Math.max(job.progress, 85),
@@ -324,7 +406,39 @@ export class JobsService {
       const unreservedNeeded = quantity - reservedToConsume;
       const freelyAvailable = item.inStock - item.reserved;
       if (item.inStock < quantity || freelyAvailable < unreservedNeeded) {
-        throw new AppError(`Insufficient available stock. Available: ${freelyAvailable + reservedToConsume}`, 409);
+        const shortage = quantity - (freelyAvailable + reservedToConsume);
+        await tx.stockPurchaseRequest.create({
+          data: {
+            tenantId,
+            inventoryItemId,
+            quantity: Math.max(shortage, quantity),
+            requestedBy: actorId,
+            jobId: id,
+            note: `Shortage while deducting stock for job`,
+          },
+        });
+        await tx.notification.createMany({
+          data: [
+            {
+              tenantId,
+              type: "stock",
+              title: "Stock purchase request",
+              body: `Shortage of ${item.name} (${item.sku}) on job`,
+              recipientRole: "inventory",
+            },
+            {
+              tenantId,
+              type: "stock",
+              title: "Stock purchase request",
+              body: `Shortage of ${item.name} (${item.sku}) on job`,
+              recipientRole: "admin",
+            },
+          ],
+        });
+        throw new AppError(
+          `Insufficient available stock. Available: ${freelyAvailable + reservedToConsume}. A stock purchase request was created.`,
+          409,
+        );
       }
 
       const stock = await tx.inventoryItem.update({

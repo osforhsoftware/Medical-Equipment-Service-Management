@@ -17,8 +17,10 @@ import Equipment from "./pages/app/Equipment.tsx";
 import ServiceRequests from "./pages/app/ServiceRequests.tsx";
 import Inspections from "./pages/app/Inspections.tsx";
 import Estimates from "./pages/app/Estimates.tsx";
+import EstimateBuilder from "./pages/app/EstimateBuilder.tsx";
 import Jobs from "./pages/app/Jobs.tsx";
 import Inventory from "./pages/app/Inventory.tsx";
+import StockPurchaseRequests from "./pages/app/StockPurchaseRequests.tsx";
 import Suppliers from "./pages/app/Suppliers.tsx";
 import PurchaseOrders from "./pages/app/PurchaseOrdersProfessional.tsx";
 import StockTransfers from "./pages/app/StockTransfers.tsx";
@@ -61,14 +63,17 @@ const App = () => (
               <Route index element={<ModuleGuard module="Dashboard"><Dashboard /></ModuleGuard>} />
               <Route path="customers" element={<ModuleGuard module="Customers"><Customers /></ModuleGuard>} />
               <Route path="equipment" element={<ModuleGuard module="Equipment"><Equipment /></ModuleGuard>} />
-              <Route path="service-requests" element={<ModuleGuard module="Service Requests"><ServiceRequests /></ModuleGuard>} />
+              <Route path="service-requests" element={<ModuleGuard module="Service Tickets"><ServiceRequests /></ModuleGuard>} />
+              <Route path="service-tickets" element={<ModuleGuard module="Service Tickets"><ServiceRequests /></ModuleGuard>} />
               <Route path="inspections" element={<ModuleGuard module="Inspections"><Inspections /></ModuleGuard>} />
               <Route path="estimates" element={<ModuleGuard module="Estimates"><Estimates /></ModuleGuard>} />
+              <Route path="estimates/:ticketId/build" element={<ModuleGuard module="Estimates"><EstimateBuilder /></ModuleGuard>} />
               <Route path="jobs" element={<ModuleGuard module="Service Jobs"><Jobs /></ModuleGuard>} />
               <Route path="projects" element={<ModuleGuard module="Projects"><Projects /></ModuleGuard>} />
               <Route path="projects/:id" element={<ModuleGuard module="Projects"><ProjectDetail /></ModuleGuard>} />
               <Route path="service-catalog" element={<ModuleGuard module="Service Catalog"><ServiceCatalog /></ModuleGuard>} />
-              <Route path="inventory" element={<ModuleGuard module="Inventory"><Inventory /></ModuleGuard>} />
+              <Route path="inventory" element={<ModuleGuard module="Inventory Items"><Inventory /></ModuleGuard>} />
+              <Route path="stock-purchase-requests" element={<ModuleGuard module="Stock Purchase Requests"><StockPurchaseRequests /></ModuleGuard>} />
               <Route path="suppliers" element={<ModuleGuard module="Suppliers"><Suppliers /></ModuleGuard>} />
               <Route path="purchase-orders" element={<ModuleGuard module="Purchase Orders"><PurchaseOrders /></ModuleGuard>} />
               <Route path="stock-transfers" element={<ModuleGuard module="Stock Transfers"><StockTransfers /></ModuleGuard>} />
