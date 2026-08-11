@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Plus, ShoppingCart, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -20,24 +21,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError } from "@/lib/api";
 import { api, type BackendPurchaseOrder } from "@/lib/api";
 import { defaultDatePlusDays, formatDate, formatCurrency } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 export default function PurchaseOrders() {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<BackendPurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [selected, setSelected] = useState<BackendPurchaseOrder | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     supplier: "",
@@ -53,8 +46,7 @@ export default function PurchaseOrders() {
       const data = await api.listPurchaseOrders();
       setOrders(data);
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load purchase orders";
-      toast({ title: "Error", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to load purchase orders" });
     } finally {
       setLoading(false);
     }
@@ -79,8 +71,7 @@ export default function PurchaseOrders() {
       setForm({ supplier: "", items: "1", total: "", expectedDate: defaultDatePlusDays(7), status: "draft" });
       await loadOrders();
     } catch (err) {
-      const message = err instanceof ApiError ? err.errors?.join(", ") || err.message : "Unable to save PO";
-      toast({ title: "Save failed", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Unable to save PO" });
     } finally {
       setSaving(false);
     }
@@ -142,31 +133,9 @@ export default function PurchaseOrders() {
                 predicate: (p, v) => p.status === v,
               },
             ]}
-            onRowClick={setSelected}
+            onRowClick={(order) => navigate(`/app/purchase-orders/${order.id}`)}
           />
         )}
-
-        <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-          <SheetContent className="sm:max-w-md">
-            {selected && (
-              <>
-                <SheetHeader>
-                  <div className="flex items-center gap-2">
-                    <SheetTitle>{selected.reference}</SheetTitle>
-                    <StatusBadge status={selected.status} />
-                  </div>
-                  <SheetDescription>{selected.supplier}</SheetDescription>
-                </SheetHeader>
-                <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                  <Info label="Items" value={String(selected.items)} />
-                  <Info label="Total" value={formatCurrency(selected.total)} />
-                  <Info label="Expected" value={formatDate(selected.expectedDate)} />
-                  <Info label="Created" value={formatDate(selected.createdAt)} />
-                </div>
-              </>
-            )}
-          </SheetContent>
-        </Sheet>
 
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent className="sm:max-w-md">
@@ -215,14 +184,5 @@ export default function PurchaseOrders() {
         </Dialog>
       </div>
     </RoleGuard>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border p-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-medium">{value}</p>
-    </div>
   );
 }

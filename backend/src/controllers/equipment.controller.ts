@@ -5,7 +5,7 @@ import { success } from "@/utils/response";
 export class EquipmentController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const filters = { branchId: req.query.branchId as string, customerId: req.query.customerId as string };
+      const filters = { customerId: req.query.customerId as string };
       const data = await equipmentService.getAll(req.tenantId!, filters);
       res.json(success("Equipment fetched successfully", data));
     } catch (err) { next(err); }

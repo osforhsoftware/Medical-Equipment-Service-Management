@@ -8,6 +8,7 @@ import { generateReference } from "@/utils/reference";
 import { prisma } from "@/db/prisma";
 import {
   assertTicketAdvance,
+  assertTicketReopen,
   resolveTicketEventStatus,
   type TicketEvent,
 } from "@/services/workflow/serviceTicketStateMachine";
@@ -20,6 +21,7 @@ type CreateServiceRequestData = {
   equipmentId?: string;
   equipmentIds?: string[];
   type: string;
+  typeOther?: string | null;
   priority: string;
   description: string;
   assignedTo?: string;
@@ -36,7 +38,44 @@ type UpdateServiceRequestData = {
   timelineNote?: string;
 };
 
+type ServiceRequestRecord = Awaited<ReturnType<typeof serviceRequestsRepository.findById>>;
+
 export class ServiceRequestsService {
+  /** Resolve legacy records where createdBy stored a user id instead of a display name. */
+  private async enrichCreatedBy<T extends { createdBy: string }>(
+    tenantId: string,
+    record: T,
+  ): Promise<T> {
+    const user = await usersRepository.findById(record.createdBy, tenantId);
+    if (!user) return record;
+    return { ...record, createdBy: user.name };
+  }
+
+  private async enrichCreatedByList<T extends { createdBy: string }>(
+    tenantId: string,
+    records: T[],
+  ): Promise<T[]> {
+    const ids = [...new Set(records.map((r) => r.createdBy))];
+    const users = await prisma.user.findMany({
+      where: { tenantId, id: { in: ids } },
+      select: { id: true, name: true },
+    });
+    if (users.length === 0) return records;
+    const names = new Map(users.map((u) => [u.id, u.name]));
+    return records.map((r) => ({
+      ...r,
+      createdBy: names.get(r.createdBy) ?? r.createdBy,
+    }));
+  }
+
+  private async enrichServiceRequest(
+    tenantId: string,
+    record: ServiceRequestRecord,
+  ): Promise<NonNullable<ServiceRequestRecord>> {
+    if (!record) throw new AppError("Service ticket not found", 404);
+    return this.enrichCreatedBy(tenantId, record);
+  }
+
   private assertActorAccess(
     request: { assignedTo: string | null },
     actorId?: string,
@@ -56,7 +95,16 @@ export class ServiceRequestsService {
     const assignee = await usersRepository.findById(assignedTo, tenantId);
     if (!assignee) throw new AppError("Staff user not found", 404);
     if (!assignee.isActive) throw new AppError("Assigned staff is not active", 400);
-    if (!ASSIGNABLE_STAFF_ROLES.includes(assignee.role)) {
+    const hasAssignableRole =
+      ASSIGNABLE_STAFF_ROLES.includes(assignee.role) ||
+      !!(await prisma.userRoleAssignment.findFirst({
+        where: {
+          tenantId,
+          userId: assignedTo,
+          role: { key: { in: ASSIGNABLE_STAFF_ROLES } },
+        },
+      }));
+    if (!hasAssignableRole) {
       throw new AppError("This role cannot be assigned work", 400);
     }
     return assignee;
@@ -80,23 +128,24 @@ export class ServiceRequestsService {
     });
   }
 
-  async getAll(tenantId: string, actorId: string, actorRole: string, filters?: { branchId?: string; status?: string }) {
+  async getAll(tenantId: string, actorId: string, actorRole: string, filters?: { status?: string }) {
     const restrictedRoles = ["inspector", "estimator", "engineer", "inventory", "billing"];
     const assignedToFilter = restrictedRoles.includes(actorRole) ? actorId : undefined;
-    return serviceRequestsRepository.findAll(tenantId, { ...filters, assignedTo: assignedToFilter });
+    const rows = await serviceRequestsRepository.findAll(tenantId, { ...filters, assignedTo: assignedToFilter });
+    return this.enrichCreatedByList(tenantId, rows);
   }
 
   async getById(id: string, tenantId: string, actorId?: string, actorRole?: string) {
     const sr = await serviceRequestsRepository.findById(id, tenantId);
     if (!sr) throw new AppError("Service ticket not found", 404);
     this.assertActorAccess(sr, actorId, actorRole);
-    return sr;
+    return this.enrichCreatedBy(tenantId, sr);
   }
 
   async getWithTimeline(id: string, tenantId: string) {
     const sr = await serviceRequestsRepository.findWithTimeline(id, tenantId);
     if (!sr) throw new AppError("Service ticket not found", 404);
-    return sr;
+    return this.enrichCreatedBy(tenantId, sr);
   }
 
   async getTimeline(id: string, tenantId: string, actorId?: string, actorRole?: string) {
@@ -147,6 +196,9 @@ export class ServiceRequestsService {
       data.assignedName = assignee.name;
     }
 
+    const typeOther = data.type === "Other" ? data.typeOther?.trim() || null : null;
+    const typeLabel = typeOther ? `Other (${typeOther})` : data.type;
+
     const sr = await serviceRequestsRepository.create(tenantId, {
       reference,
       customerId: data.customerId,
@@ -155,6 +207,7 @@ export class ServiceRequestsService {
       equipmentName: primaryEquipName,
       branchId,
       type: data.type as never,
+      typeOther,
       priority: data.priority as never,
       description: data.description,
       createdBy,
@@ -171,7 +224,7 @@ export class ServiceRequestsService {
       sr.id,
       createdBy,
       "Service ticket created",
-      `Type: ${data.type}, Priority: ${data.priority}`,
+      `Type: ${typeLabel}, Priority: ${data.priority}`,
     );
 
     if (data.assignedTo) {
@@ -189,7 +242,7 @@ export class ServiceRequestsService {
       data: { activeJobs: { increment: 1 } },
     });
 
-    return serviceRequestsRepository.findById(sr.id, tenantId);
+    return this.enrichServiceRequest(tenantId, await serviceRequestsRepository.findById(sr.id, tenantId));
   }
 
   async update(id: string, tenantId: string, actorId: string, actorRole: string, data: UpdateServiceRequestData) {
@@ -217,7 +270,10 @@ export class ServiceRequestsService {
 
     const hasUpdates = Object.keys(updateData).length > 0;
     const updated = hasUpdates
-      ? await serviceRequestsRepository.update(id, tenantId, updateData as never)
+      ? await this.enrichServiceRequest(
+          tenantId,
+          await serviceRequestsRepository.update(id, tenantId, updateData as never),
+        )
       : await this.getById(id, tenantId, actorId, actorRole);
 
     if ((!status || status === existing.status) && timelineNote) {
@@ -252,7 +308,7 @@ export class ServiceRequestsService {
       existing.equipmentName ?? "Equipment",
     );
 
-    return serviceRequestsRepository.findById(id, tenantId);
+    return this.enrichServiceRequest(tenantId, await serviceRequestsRepository.findById(id, tenantId));
   }
 
   async advanceWorkflow(
@@ -309,13 +365,67 @@ export class ServiceRequestsService {
       }
     }
 
-    const updated = await serviceRequestsRepository.update(id, tenantId, {
-      status: targetStatus as never,
-    });
+    const updated = await this.enrichServiceRequest(
+      tenantId,
+      await serviceRequestsRepository.update(id, tenantId, {
+        status: targetStatus as never,
+      }),
+    );
 
     const label = targetStatus.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase());
     await serviceRequestsRepository.addTimelineEvent(id, actorName, `Moved to ${label}`, note);
     await notificationsService.notifyWorkflowAdvanced(tenantId, existing.reference, targetStatus, actorName);
+
+    return updated;
+  }
+
+  /**
+   * Explicit audited reopen — the only allowed way to move backward in the lifecycle.
+   */
+  async reopen(
+    id: string,
+    tenantId: string,
+    actorId: string,
+    actorRole: string,
+    targetStatus: string,
+    note: string,
+  ) {
+    const existing = await this.getById(id, tenantId, actorId, actorRole);
+    assertTicketReopen(existing.status, targetStatus, actorRole);
+
+    const actor = await usersRepository.findById(actorId, tenantId);
+    const actorName = actor?.name ?? actorId;
+
+    const updated = await this.enrichServiceRequest(
+      tenantId,
+      await serviceRequestsRepository.update(id, tenantId, {
+        status: targetStatus as never,
+      }),
+    );
+
+    await serviceRequestsRepository.addTimelineEvent(
+      id,
+      actorName,
+      `Reopened to ${targetStatus}`,
+      note,
+    );
+    await notificationsService.notifyWorkflowAdvanced(
+      tenantId,
+      existing.reference,
+      targetStatus,
+      actorName,
+    );
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        actor: actorName,
+        role: actorRole,
+        action: "ticket.reopen",
+        entity: existing.reference,
+        ip: "workflow",
+      },
+    }).catch(() => undefined);
 
     return updated;
   }

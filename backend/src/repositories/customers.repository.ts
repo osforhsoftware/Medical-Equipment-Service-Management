@@ -2,9 +2,9 @@ import { prisma } from "@/db/prisma";
 import type { Customer, Prisma } from "@prisma/client";
 
 export class CustomersRepository {
-  async findAll(tenantId: string, branchId?: string): Promise<Customer[]> {
+  async findAll(tenantId: string): Promise<Customer[]> {
     return prisma.customer.findMany({
-      where: { tenantId, ...(branchId && branchId !== "all" ? { branchId } : {}) },
+      where: { tenantId },
       orderBy: { name: "asc" },
     });
   }

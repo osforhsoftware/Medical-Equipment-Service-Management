@@ -5,7 +5,7 @@ export const createInventorySchema = z.object({
   name: z.string().min(2, "Name is required").max(200),
   category: z.string().min(1, "Category is required").max(80),
   description: z.string().max(5000).optional().nullable(),
-  branchId: z.string().min(1, "Branch is required"),
+  branchId: z.string().min(1).optional(),
   inStock: z.coerce.number().int().min(0).optional().default(0),
   reorderLevel: z.coerce.number().int().min(0).optional().default(0),
   unitCost: z.coerce.number().min(0).optional().default(0),

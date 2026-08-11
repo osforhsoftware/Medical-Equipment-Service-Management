@@ -5,11 +5,10 @@ import { DataTable, type Column } from "@/components/shared/DataTable";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError } from "@/lib/api";
 import { api, type BackendAuditLog } from "@/lib/api";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 export default function AuditLogs() {
   const [logs, setLogs] = useState<BackendAuditLog[]>([]);
@@ -21,8 +20,7 @@ export default function AuditLogs() {
       const data = await api.listAuditLogs({ limit: 200 });
       setLogs(data);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Failed to load audit logs";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to load audit logs" });
     } finally {
       setLoading(false);
     }

@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { BranchProvider } from "@/context/BranchContext";
 import { SettingsProvider } from "@/context/SettingsContext";
+import { MobileLayout } from "@/components/mobile/MobileLayout";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { AppSidebar } from "./AppSidebar";
 import { Topbar } from "./Topbar";
 
 export function AppLayout() {
   const { user, loading } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   if (loading) {
     return (
@@ -22,8 +24,12 @@ export function AppLayout() {
   if (user.role === "customer") return <Navigate to="/portal" replace />;
 
   return (
-    <BranchProvider>
-      <SettingsProvider>
+    <SettingsProvider>
+      {isMobile ? (
+        <MobileLayout>
+          <Outlet />
+        </MobileLayout>
+      ) : (
         <div className="flex min-h-screen w-full bg-transparent">
           <AppSidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
           <div className="flex min-w-0 flex-1 flex-col">
@@ -35,7 +41,7 @@ export function AppLayout() {
             </main>
           </div>
         </div>
-      </SettingsProvider>
-    </BranchProvider>
+      )}
+    </SettingsProvider>
   );
 }

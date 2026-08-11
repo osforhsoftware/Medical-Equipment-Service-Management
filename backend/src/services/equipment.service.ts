@@ -21,7 +21,7 @@ type CreateEquipmentData = {
 };
 
 export class EquipmentService {
-  async getAll(tenantId: string, filters?: { branchId?: string; customerId?: string }) {
+  async getAll(tenantId: string, filters?: { customerId?: string }) {
     return equipmentRepository.findAll(tenantId, filters);
   }
 

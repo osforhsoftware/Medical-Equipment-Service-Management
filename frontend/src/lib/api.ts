@@ -68,6 +68,7 @@ export interface BackendUser {
   username: string;
   email: string;
   role: string;
+  roles?: string[];
   phone: string | null;
   isActive: boolean;
   branchId: string | null;
@@ -87,6 +88,8 @@ export interface CreateUserInput {
   email: string;
   password: string;
   role: string;
+  roles?: string[];
+  primaryRole?: string;
   phone?: string;
   isActive?: boolean;
   branchId?: string;
@@ -97,6 +100,8 @@ export interface UpdateUserInput {
   username?: string;
   email?: string;
   role?: string;
+  roles?: string[];
+  primaryRole?: string;
   phone?: string | null;
   isActive?: boolean;
   branchId?: string | null;
@@ -118,10 +123,14 @@ export interface BackendCustomer {
   tenantId: string;
   name: string;
   type: string;
+  typeOther?: string | null;
   contactPerson: string;
   email: string;
   phone: string;
+  address: string;
   city: string;
+  country: string;
+  licenseGst?: string | null;
   branchId: string;
   equipmentCount: number;
   activeJobs: number;
@@ -133,11 +142,15 @@ export interface BackendCustomer {
 export interface CreateCustomerInput {
   name: string;
   type: string;
+  typeOther?: string | null;
   contactPerson: string;
   email: string;
   phone: string;
+  address: string;
   city: string;
-  branchId: string;
+  country: string;
+  licenseGst?: string | null;
+  branchId?: string;
   status?: string;
 }
 
@@ -224,6 +237,7 @@ export interface BackendServiceRequest {
   equipmentName: string | null;
   branchId: string;
   type: string;
+  typeOther?: string | null;
   priority: string;
   status: string;
   description: string;
@@ -251,6 +265,7 @@ export interface CreateServiceRequestInput {
   equipmentId?: string;
   equipmentIds?: string[];
   type: string;
+  typeOther?: string | null;
   priority: string;
   description: string;
   assignedTo?: string;
@@ -360,6 +375,16 @@ export interface BackendInvoiceLine {
   lineTotal: string | number;
 }
 
+export type InvoiceLineInput = {
+  id?: string;
+  type?: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  taxRate?: number;
+  discount?: number;
+};
+
 export interface BackendInvoicePayment {
   id: string;
   amount: string | number;
@@ -367,6 +392,79 @@ export interface BackendInvoicePayment {
   reference?: string | null;
   note?: string | null;
   paidAt: string;
+}
+
+export type BillingQueueKey =
+  | "readyForBilling"
+  | "waitingVerification"
+  | "invoiceDraft"
+  | "waitingApproval"
+  | "invoiceSent"
+  | "pendingPayment"
+  | "partialPayment"
+  | "paid"
+  | "overdue"
+  | "closed";
+
+export interface BillingQueueRow {
+  queue: BillingQueueKey;
+  id: string;
+  jobId: string;
+  invoiceId: string | null;
+  priority: string;
+  serviceRequestRef: string;
+  serviceRequestId: string | null;
+  jobNumber: string;
+  customer: string;
+  customerId: string | null;
+  equipment: string;
+  serialNumber: string | null;
+  hospital: string;
+  engineer: string;
+  completionDate: string | null;
+  verificationStatus: string;
+  estimateAmount: number;
+  actualPartsCost: number;
+  labourCharges: number;
+  invoiceStatus: string | null;
+  invoiceRef: string | null;
+  paymentStatus: string;
+  total: number;
+  balanceDue: number;
+  paidTotal: number;
+}
+
+export interface BillingVerificationItem {
+  key: string;
+  label: string;
+  passed: boolean;
+}
+
+export interface BillingJobContext {
+  job: BackendServiceJob & {
+    billingVerifiedAt?: string | null;
+    billingVerifiedBy?: string | null;
+    completedAt?: string | null;
+    workLogs?: BackendJobWorkLog[];
+    signature?: { customerName: string } | null;
+    stockMovements?: { id: string; quantity: number; inventoryItem?: { name: string; unitCost: string | number } | null }[];
+    extras?: BackendJobExtra[];
+    invoices?: BackendInvoice[];
+    estimate?: BackendEstimate & { lineItems?: BackendEstimateLine[] };
+    serviceRequest?: BackendServiceRequest & {
+      inspectionReport?: {
+        findings?: string | null;
+        diagnosis?: string | null;
+        recommendations?: { description: string }[];
+      } | null;
+      timelineEvents?: BackendTimelineEvent[];
+    } | null;
+    equipment?: BackendEquipment | null;
+  };
+  verification: { allPassed: boolean; items: BillingVerificationItem[] };
+  invoice: BackendInvoice | null;
+  project: unknown;
+  costs: { estimateAmount: number; partsCost: number; labourCharges: number; discount: number };
 }
 
 export interface BackendAuditLog {
@@ -488,6 +586,7 @@ export interface BackendServiceJob {
   engineer: string;
   engineerId: string | null;
   type: string;
+  typeOther?: string | null;
   status: string;
   scheduledFor: string;
   progress: number;
@@ -571,6 +670,8 @@ export interface BackendInventoryItem {
   branchId: string;
   inStock: number;
   reserved: number;
+  /** Computed: inStock − reserved. Added in Phase 1; additive, non-breaking. */
+  available?: number;
   reorderLevel: number;
   unitCost: string | number;
   sellingPrice?: string | number;
@@ -589,7 +690,7 @@ export interface CreateInventoryInput {
   name: string;
   category: string;
   description?: string | null;
-  branchId: string;
+  branchId?: string;
   inStock?: number;
   reorderLevel?: number;
   unitCost?: number;
@@ -980,6 +1081,18 @@ export const api = {
 
   me: () => request<BackendUser>("/api/auth/me"),
 
+  forgotPassword: (email: string) =>
+    request<{ resetToken?: string } | null>("/api/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token: string, password: string) =>
+    request<null>("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    }),
+
   uploadFile: (file: File) => {
     const data = new FormData();
     data.append("file", file);
@@ -1008,10 +1121,11 @@ export const api = {
       method: "DELETE",
     }),
 
-  listBranches: () => request<BackendBranch[]>("/api/branches"),
+  listCustomers: () =>
+    request<BackendCustomer[]>("/api/customers"),
 
-  listCustomers: (branchId?: string) =>
-    request<BackendCustomer[]>(`/api/customers${queryString({ branchId })}`),
+  getCustomer: (id: string) =>
+    request<BackendCustomer>(`/api/customers/${id}`),
 
   createCustomer: (data: CreateCustomerInput) =>
     request<BackendCustomer>("/api/customers", {
@@ -1019,10 +1133,13 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  listEquipment: (params?: { branchId?: string; customerId?: string }) =>
+  listEquipment: (params?: { customerId?: string }) =>
     request<BackendEquipment[]>(
-      `/api/equipment${queryString({ branchId: params?.branchId, customerId: params?.customerId })}`,
+      `/api/equipment${queryString({ customerId: params?.customerId })}`,
     ),
+
+  getEquipment: (id: string) =>
+    request<BackendEquipment>(`/api/equipment/${id}`),
 
   getEquipmentByTag: (assetTag: string) =>
     request<BackendEquipment>(`/api/equipment/by-tag/${encodeURIComponent(assetTag)}`),
@@ -1033,10 +1150,13 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  listServiceRequests: (params?: { branchId?: string; status?: string }) =>
+  listServiceRequests: (params?: { status?: string }) =>
     request<BackendServiceRequest[]>(
-      `/api/service-requests${queryString({ branchId: params?.branchId, status: params?.status })}`,
+      `/api/service-requests${queryString({ status: params?.status })}`,
     ),
+
+  getServiceRequest: (id: string) =>
+    request<BackendServiceRequest>(`/api/service-requests/${id}`),
 
   getServiceRequestTimeline: (id: string) =>
     request<BackendTimelineEvent[]>(`/api/service-requests/${id}/timeline`),
@@ -1161,8 +1281,11 @@ export const api = {
   getJobActivities: (id: string) =>
     request<BackendJobActivity[]>(`/api/jobs/${id}/activities`),
 
-  listInventory: (branchId?: string) =>
-    request<BackendInventoryItem[]>(`/api/inventory${queryString({ branchId })}`),
+  listInventory: () =>
+    request<BackendInventoryItem[]>("/api/inventory"),
+
+  getInventoryItem: (id: string) =>
+    request<BackendInventoryItem>(`/api/inventory/${id}`),
 
   updateInventoryItem: (id: string, data: Partial<CreateInventoryInput>) =>
     request<BackendInventoryItem>(`/api/inventory/${id}`, {
@@ -1184,6 +1307,15 @@ export const api = {
 
   listStockPurchaseRequests: (status?: string) =>
     request<BackendStockPurchaseRequest[]>(`/api/domain/stock-purchase-requests${queryString({ status })}`),
+
+  getStockPurchaseRequest: async (id: string) => {
+    const rows = await request<BackendStockPurchaseRequest[]>(`/api/domain/stock-purchase-requests`);
+    const found = rows.find((row) => row.id === id);
+    if (!found) {
+      throw new ApiError("Stock purchase request not found", 404);
+    }
+    return found;
+  },
 
   createStockPurchaseRequest: (data: {
     inventoryItemId: string;
@@ -1259,8 +1391,8 @@ export const api = {
 
   getSettings: () => request<BackendSettings>("/api/settings"),
 
-  getDashboard: (branchId?: string) =>
-    request<DashboardData>(`/api/dashboard${queryString({ branchId })}`),
+  getDashboard: () =>
+    request<DashboardData>("/api/dashboard"),
 
   listNotifications: () => request<BackendNotification[]>("/api/notifications"),
 
@@ -1322,6 +1454,26 @@ export const api = {
   listInvoices: (status?: string) =>
     request<BackendInvoice[]>(`/api/billing${queryString({ status })}`),
 
+  getBillingQueue: (queue?: BillingQueueKey) =>
+    request<{ counts: Record<BillingQueueKey, number>; items: BillingQueueRow[] }>(
+      `/api/billing/queue${queryString({ queue })}`,
+    ),
+
+  getBillingJobContext: (jobId: string) =>
+    request<BillingJobContext>(`/api/billing/jobs/${jobId}/context`),
+
+  verifyBillingJob: (jobId: string) =>
+    request<{ id: string }>(`/api/billing/jobs/${jobId}/verify`, { method: "POST" }),
+
+  submitInvoiceApproval: (invoiceId: string) =>
+    request<BackendInvoice>(`/api/billing/${invoiceId}/submit-approval`, { method: "POST" }),
+
+  approveBillingInvoice: (invoiceId: string) =>
+    request<BackendInvoice>(`/api/billing/${invoiceId}/approve`, { method: "POST" }),
+
+  markBillingInvoiceSent: (invoiceId: string) =>
+    request<BackendInvoice>(`/api/billing/${invoiceId}/mark-sent`, { method: "POST" }),
+
   createInvoice: (data: Record<string, unknown>) =>
     request<BackendInvoice>("/api/billing", {
       method: "POST",
@@ -1330,7 +1482,7 @@ export const api = {
 
   getInvoice: (id: string) => request<BackendInvoice>(`/api/billing/${id}`),
 
-  updateInvoice: (id: string, data: Record<string, unknown>) =>
+  updateInvoice: (id: string, data: { dueAt?: string; lineItems?: InvoiceLineInput[] }) =>
     request<BackendInvoice>(`/api/billing/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
@@ -1380,6 +1532,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ decision, note, ...options }),
     }),
+
+  /** Customer-scoped portal aggregate (equipment, tickets, estimates, invoices). */
+  getCustomerPortal: () =>
+    request<{
+      customer: { id: string; name: string };
+      equipment: BackendEquipment[];
+      requests: BackendServiceRequest[];
+      estimates: BackendEstimate[];
+      invoices: BackendInvoice[];
+      documents: unknown[];
+    }>("/api/domain/portal"),
 
   assignJobStaff: (id: string, data: { userId: string; role: string; isLead: boolean }) =>
     request<BackendJobAssignment>(`/api/domain/jobs/${id}/assignments`, {

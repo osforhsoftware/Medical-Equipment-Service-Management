@@ -9,9 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, api, type BackendCatalogItem, type CatalogItemInput } from "@/lib/api";
+import { api, type BackendCatalogItem, type CatalogItemInput } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 const blank: CatalogItemInput = {
   code: "",
@@ -37,7 +37,7 @@ export default function ServiceCatalog() {
     try {
       setItems(await api.listServiceCatalog());
     } catch (error) {
-      toast({ title: "Unable to load service catalog", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" });
+      toast.apiError(error, { fallback: "Request failed" });
     } finally {
       setLoading(false);
     }
@@ -70,7 +70,7 @@ export default function ServiceCatalog() {
       await load();
       toast({ title: editing ? "Service updated" : "Service created" });
     } catch (error) {
-      toast({ title: "Save failed", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" });
+      toast.apiError(error, { fallback: "Request failed" });
     } finally {
       setSaving(false);
     }

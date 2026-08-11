@@ -9,9 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, api, type BackendJobActivity, type BackendJobExtra, type BackendJobWorkLog, type BackendServiceJob, type BackendUser } from "@/lib/api";
+import { api, type BackendJobActivity, type BackendJobExtra, type BackendJobWorkLog, type BackendServiceJob, type BackendUser } from "@/lib/api";
 import { formatCurrency, formatDateTime } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 export default function ProjectDetail() {
   const { id = "" } = useParams();
@@ -31,10 +31,12 @@ export default function ProjectDetail() {
     try {
       const [record, users, audit] = await Promise.all([api.getJob(id), api.listUsers({ isActive: true }), api.getJobActivities(id)]);
       setJob(record);
+      setLogs(record.workLogs ?? []);
+      setExtras(record.extras ?? []);
       setStaff(users.filter((user) => ["admin", "coordinator", "engineer", "inspector"].includes(user.role)));
       setActivities(audit);
     } catch (error) {
-      toast({ title: "Unable to load project", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" });
+      toast.apiError(error, { fallback: "Request failed" });
     } finally {
       setLoading(false);
     }
@@ -49,16 +51,17 @@ export default function ProjectDetail() {
       setAssignment({ userId: "", role: "engineer", isLead: false });
       toast({ title: "Staff assignment saved" });
     } catch (error) {
-      toast({ title: "Assignment failed", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" });
+      toast.apiError(error, { fallback: "Request failed" });
     } finally { setSaving(""); }
   };
 
   const addLog = async () => {
     setSaving("log");
     try {
+      const endedAt = work.endedAt ? new Date(work.endedAt).toISOString() : new Date().toISOString();
       const saved = await api.addJobWorkLog(id, {
         startedAt: new Date(work.startedAt).toISOString(),
-        endedAt: work.endedAt ? new Date(work.endedAt).toISOString() : null,
+        endedAt,
         workPerformed: work.workPerformed,
         testingResult: work.testingResult || null,
         calibrationResult: work.calibrationResult || null,
@@ -67,7 +70,7 @@ export default function ProjectDetail() {
       setWork({ startedAt: "", endedAt: "", workPerformed: "", testingResult: "", calibrationResult: "" });
       toast({ title: "Work log saved" });
     } catch (error) {
-      toast({ title: "Work log failed", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" });
+      toast.apiError(error, { fallback: "Request failed" });
     } finally { setSaving(""); }
   };
 
@@ -79,7 +82,7 @@ export default function ProjectDetail() {
       setExtra({ description: "", reason: "", quantity: 1, unitPrice: 0, taxRate: 0 });
       toast({ title: "Additional work submitted", description: "The item is pending estimator approval." });
     } catch (error) {
-      toast({ title: "Extra submission failed", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" });
+      toast.apiError(error, { fallback: "Request failed" });
     } finally { setSaving(""); }
   };
 
@@ -97,11 +100,11 @@ export default function ProjectDetail() {
           <Button className="w-full" onClick={assign} disabled={saving === "assign" || !assignment.userId}>{saving === "assign" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Add to team</Button>
         </CardContent></Card>
         <Card className="xl:col-span-2"><CardHeader><CardTitle className="text-base"><Clock3 className="mr-2 inline h-4 w-4" />Work log</CardTitle></CardHeader><CardContent className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2"><Field label="Started"><Input type="datetime-local" value={work.startedAt} onChange={(event) => setWork({ ...work, startedAt: event.target.value })} /></Field><Field label="Ended"><Input type="datetime-local" value={work.endedAt} onChange={(event) => setWork({ ...work, endedAt: event.target.value })} /></Field></div>
+          <div className="grid gap-3 sm:grid-cols-2"><Field label="Started"><Input type="datetime-local" value={work.startedAt} onChange={(event) => setWork({ ...work, startedAt: event.target.value })} /></Field><Field label="Ended (optional — defaults to now)"><Input type="datetime-local" value={work.endedAt} onChange={(event) => setWork({ ...work, endedAt: event.target.value })} /></Field></div>
           <Field label="Work performed"><Textarea value={work.workPerformed} onChange={(event) => setWork({ ...work, workPerformed: event.target.value })} /></Field>
           <div className="grid gap-3 sm:grid-cols-2"><Field label="Testing result"><Textarea value={work.testingResult} onChange={(event) => setWork({ ...work, testingResult: event.target.value })} /></Field><Field label="Calibration result"><Textarea value={work.calibrationResult} onChange={(event) => setWork({ ...work, calibrationResult: event.target.value })} /></Field></div>
           <Button onClick={addLog} disabled={saving === "log" || !work.startedAt || !work.workPerformed.trim()}>{saving === "log" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Save work log</Button>
-          {logs.map((log) => <div key={log.id} className="rounded-lg border p-3 text-sm"><p>{log.workPerformed}</p><p className="mt-1 text-xs text-muted-foreground">{formatDateTime(log.startedAt)} · {log.minutes} minutes</p></div>)}
+          {logs.map((log) => <div key={log.id} className="rounded-lg border p-3 text-sm"><p>{log.workPerformed}</p><p className="mt-1 text-xs text-muted-foreground">{formatDateTime(log.startedAt)}{log.endedAt ? ` – ${formatDateTime(log.endedAt)}` : ""} · {log.minutes} minutes</p></div>)}
         </CardContent></Card>
       </div>
       <Card><CardHeader><CardTitle className="text-base"><PackagePlus className="mr-2 inline h-4 w-4" />Additional work / parts</CardTitle></CardHeader><CardContent className="space-y-3">

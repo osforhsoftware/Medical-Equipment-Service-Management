@@ -21,6 +21,12 @@ export class StockTransfersService {
   }
 
   async create(tenantId: string, data: CreateStockTransferData) {
+    if (data.status === "inTransit" || data.status === "received") {
+      throw new AppError(
+        "Create transfers as pending, then use /api/domain/stock-transfers dispatch and receive endpoints",
+        409,
+      );
+    }
     const reference = await generateReference(tenantId, "TR", "stockTransfer");
     return stockTransfersRepository.create(tenantId, {
       reference,
@@ -33,6 +39,13 @@ export class StockTransfersService {
 
   async update(id: string, tenantId: string, data: Record<string, unknown>) {
     await this.getById(id, tenantId);
+    const blockedStatuses = ["inTransit", "received"];
+    if (typeof data.status === "string" && blockedStatuses.includes(data.status)) {
+      throw new AppError(
+        "Use /api/domain/stock-transfers/:id/dispatch and /receive to move stock. Legacy status updates cannot change inventory.",
+        409,
+      );
+    }
     return stockTransfersRepository.update(id, tenantId, data);
   }
 

@@ -255,7 +255,6 @@ async function main() {
         Notifications: ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
         "QR Tracking": ["admin", "coordinator", "inspector", "engineer", "inventory"],
         "Audit Logs": ["admin"],
-        Branches: ["admin"],
         Users: ["admin"],
         Settings: ["admin"],
       },
@@ -296,7 +295,9 @@ async function main() {
       contactPerson: "Dr. Rachel Adams",
       email: "rachel.adams@citygen.example",
       phone: "555-1001",
+      address: "100 Hospital Way",
       city: "New York",
+      country: "United States",
       branchKey: "hq" as const,
     },
     {
@@ -306,7 +307,9 @@ async function main() {
       contactPerson: "Tom Bradley",
       email: "tom.bradley@sunrise.example",
       phone: "555-1002",
+      address: "42 Sunrise Blvd",
       city: "Brooklyn",
+      country: "United States",
       branchKey: "hq" as const,
     },
     {
@@ -316,7 +319,9 @@ async function main() {
       contactPerson: "Linda Cho",
       email: "linda.cho@pacificdx.example",
       phone: "555-1003",
+      address: "900 Pacific Ave",
       city: "Los Angeles",
+      country: "United States",
       branchKey: "west" as const,
     },
     {
@@ -326,7 +331,9 @@ async function main() {
       contactPerson: "Dr. Omar Hassan",
       email: "omar.hassan@mri.example",
       phone: "555-1004",
+      address: "55 Research Park Dr",
       city: "Chicago",
+      country: "United States",
       branchKey: "midwest" as const,
     },
     {
@@ -336,7 +343,9 @@ async function main() {
       contactPerson: "Dr. Nina Park",
       email: "nina.park@brightsmile.example",
       phone: "555-1005",
+      address: "12 Smile Lane",
       city: "Queens",
+      country: "United States",
       branchKey: "hq" as const,
     },
   ];
@@ -355,7 +364,9 @@ async function main() {
           contactPerson: c.contactPerson,
           email: c.email,
           phone: c.phone,
+          address: c.address,
           city: c.city,
+          country: c.country,
           branchId: branches[c.branchKey].id,
           status: "active",
         },
@@ -801,7 +812,7 @@ async function main() {
         priority: r.priority,
         status: r.status,
         description: r.description,
-        createdBy: admin.id,
+        createdBy: admin.name,
         assignedTo: assignee?.id ?? null,
         assignedName: assignee?.name ?? null,
         slaDue: r.slaDue,
@@ -818,7 +829,7 @@ async function main() {
         priority: r.priority,
         status: r.status,
         description: r.description,
-        createdBy: admin.id,
+        createdBy: admin.name,
         assignedTo: assignee?.id ?? null,
         assignedName: assignee?.name ?? null,
         slaDue: r.slaDue,
@@ -1395,6 +1406,14 @@ async function main() {
           taxRate: 8,
           lineTotal: inv.amount,
         },
+      });
+    } else {
+      await prisma.invoiceLineItem.updateMany({
+        where: {
+          invoiceId: invoice.id,
+          description: { startsWith: "Service for JOB-" },
+        },
+        data: { description: `Service for ${job.reference}` },
       });
     }
 

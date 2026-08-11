@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { navGroups, navItems } from "@/config/nav";
 import { roleLabels } from "@/data/mock";
+import { getUserRoles, userCanAccessModule } from "@/lib/userRoles";
 
 interface AppSidebarProps {
   mobileOpen: boolean;
@@ -18,10 +19,7 @@ export function AppSidebar({ mobileOpen, onClose }: AppSidebarProps) {
   const { pathname } = useLocation();
   if (!user) return null;
 
-  const visible = navItems.filter((item) => {
-    const roles = rbacMatrix[item.label] ?? item.roles;
-    return roles.includes(user.role);
-  });
+  const visible = navItems.filter((item) => userCanAccessModule(user, item.label, rbacMatrix, item.roles));
 
   return (
     <>
@@ -30,7 +28,7 @@ export function AppSidebar({ mobileOpen, onClose }: AppSidebarProps) {
       )}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col overflow-hidden bg-sidebar text-sidebar-foreground shadow-2xl transition-transform duration-300 lg:static lg:translate-x-0 lg:shadow-none",
+          "no-print fixed inset-y-0 left-0 z-50 flex w-64 flex-col overflow-hidden bg-sidebar text-sidebar-foreground shadow-2xl transition-transform duration-300 lg:static lg:translate-x-0 lg:shadow-none",
           mobileOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -89,7 +87,9 @@ export function AppSidebar({ mobileOpen, onClose }: AppSidebarProps) {
             </div>
             <div className="min-w-0 leading-tight">
               <p className="truncate text-sm font-medium text-sidebar-accent-foreground">{user.name}</p>
-              <p className="truncate text-xs text-sidebar-foreground/60">{roleLabels[user.role]}</p>
+              <p className="truncate text-xs text-sidebar-foreground/60">
+                {getUserRoles(user).map((role) => roleLabels[role]).join(" · ")}
+              </p>
             </div>
           </div>
         </div>

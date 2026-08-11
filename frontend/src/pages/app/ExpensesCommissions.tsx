@@ -11,9 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, api, type BackendCommission, type BackendExpense, type BackendServiceJob } from "@/lib/api";
+import { api, type BackendCommission, type BackendExpense, type BackendServiceJob } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 export default function ExpensesCommissions() {
   const [expenses, setExpenses] = useState<BackendExpense[]>([]);
@@ -31,7 +31,7 @@ export default function ExpensesCommissions() {
     try {
       const [expenseRows, commissionRows, jobRows] = await Promise.all([api.listExpenses(), api.listCommissions(), api.listJobs()]);
       setExpenses(expenseRows); setCommissions(commissionRows); setJobs(jobRows);
-    } catch (error) { toast({ title: "Unable to load finance operations", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" }); }
+    } catch (error) { toast.apiError(error, { fallback: "Request failed" }); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -46,7 +46,7 @@ export default function ExpensesCommissions() {
     try {
       await api.createExpense({ ...expense, branchId: null, projectRef: expense.projectRef || null, jobId: expense.jobId || null, vendor: expense.vendor || null, receiptFileId: null });
       setExpenseOpen(false); setExpense({ projectRef: "", jobId: "", category: "", description: "", amount: 0, incurredAt: "", vendor: "" }); await load(); toast({ title: "Expense recorded" });
-    } catch (error) { toast({ title: "Expense save failed", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" }); }
+    } catch (error) { toast.apiError(error, { fallback: "Request failed" }); }
     finally { setSaving(false); }
   };
 
@@ -55,7 +55,7 @@ export default function ExpensesCommissions() {
     try {
       await api.createCommission(commission);
       setCommissionOpen(false); setCommission({ payeeName: "", basisAmount: 0, rate: 0 }); await load(); toast({ title: "Commission accrued" });
-    } catch (error) { toast({ title: "Commission save failed", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" }); }
+    } catch (error) { toast.apiError(error, { fallback: "Request failed" }); }
     finally { setSaving(false); }
   };
 

@@ -5,9 +5,9 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Progress } from "@/components/ui/progress";
-import { ApiError, api, type BackendServiceJob } from "@/lib/api";
+import { api, type BackendServiceJob } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 export default function Projects() {
   const navigate = useNavigate();
@@ -17,7 +17,7 @@ export default function Projects() {
   useEffect(() => {
     void api.listJobs()
       .then(setJobs)
-      .catch((error) => toast({ title: "Unable to load projects", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" }))
+      .catch((error) => toast.apiError(error, { fallback: "Request failed" }))
       .finally(() => setLoading(false));
   }, []);
 

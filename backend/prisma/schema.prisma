@@ -100,12 +100,13 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  roleAssignments UserRoleAssignment[]
-  jobAssignments  JobAssignment[]
-  workLogs        JobWorkLog[]
-  uploadedFiles   StoredFile[]         @relation("FileUploader")
-  qrScans         QrScan[]
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  roleAssignments     UserRoleAssignment[]
+  jobAssignments      JobAssignment[]
+  workLogs            JobWorkLog[]
+  uploadedFiles       StoredFile[]         @relation("FileUploader")
+  qrScans             QrScan[]
+  passwordResetTokens PasswordResetToken[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -113,6 +114,22 @@ model User {
   @@index([email])
   @@index([username])
   @@map("users")
+}
+
+// ── PasswordResetToken (Phase 1 — awaiting migration approval) ───────────────
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 enum UserRole {
@@ -191,11 +208,15 @@ model Customer {
   id             String       @id @default(cuid())
   tenantId       String       @map("tenant_id")
   name           String
-  type           CustomerType
+  type           String
+  typeOther      String?      @map("type_other")
   contactPerson  String       @map("contact_person")
   email          String
   phone          String
+  address        String       @default("")
   city           String
+  country        String       @default("")
+  licenseGst     String?      @map("license_gst")
   branchId       String       @map("branch_id")
   equipmentCount Int          @default(0) @map("equipment_count")
   activeJobs     Int          @default(0) @map("active_jobs")
@@ -214,14 +235,6 @@ model Customer {
   @@index([tenantId])
   @@index([branchId])
   @@map("customers")
-}
-
-enum CustomerType {
-  Hospital
-  Clinic
-  DiagnosticLab @map("Diagnostic Lab")
-  Research
-  Dental
 }
 
 enum EntityStatus {
@@ -315,6 +328,7 @@ model ServiceRequest {
   equipmentName String?       @map("equipment_name")
   branchId      String        @map("branch_id")
   type          ServiceType
+  typeOther     String?       @map("type_other")
   priority      Priority
   status        ServiceStatus @default(new)
   description   String        @default("")
@@ -450,6 +464,7 @@ enum ServiceType {
   Calibration
   Inspection
   Installation
+  Other
 }
 
 enum Priority {
@@ -609,11 +624,15 @@ model ServiceJob {
   engineer         String
   engineerId       String?     @map("engineer_id")
   type             ServiceType
+  typeOther        String?     @map("type_other")
   status           JobStatus   @default(scheduled)
   scheduledFor     DateTime    @map("scheduled_for")
-  progress         Int         @default(0)
-  createdAt        DateTime    @default(now()) @map("created_at")
-  updatedAt        DateTime    @updatedAt @map("updated_at")
+  progress           Int         @default(0)
+  billingVerifiedAt  DateTime?   @map("billing_verified_at")
+  billingVerifiedBy  String?     @map("billing_verified_by")
+  completedAt        DateTime?   @map("completed_at")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
 
   tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   serviceRequest  ServiceRequest?     @relation(fields: [serviceRequestId], references: [id], onDelete: SetNull)
@@ -717,7 +736,7 @@ model JobPhoto {
   filename   String
   mimeType   String   @map("mime_type")
   /// Legacy compatibility only. New media is stored through StoredFile.
-  dataUrl    String   @default("") @map("data_url") @db.Text
+  dataUrl    String   @map("data_url") @db.Text
   fileId     String?  @map("file_id")
   uploadedBy String   @map("uploaded_by")
   createdAt  DateTime @default(now()) @map("created_at")
@@ -1146,6 +1165,9 @@ model Invoice {
   balanceDue       Decimal       @default(0) @map("balance_due") @db.Decimal(12, 2)
   currency         String        @default("USD")
   status           InvoiceStatus @default(draft)
+  approvedAt       DateTime?     @map("approved_at")
+  approvedBy       String?       @map("approved_by")
+  sentAt           DateTime?     @map("sent_at")
   issuedAt         DateTime      @default(now()) @map("issued_at")
   dueAt            DateTime      @map("due_at")
   createdAt        DateTime      @default(now()) @map("created_at")
@@ -1400,9 +1422,12 @@ model Commission {
 
 enum InvoiceStatus {
   draft
+  pendingApproval
+  approved
   sent
   paid
   overdue
+  closed
 }
 
 // ── Notification ──────────────────────────────────────────────────────────────

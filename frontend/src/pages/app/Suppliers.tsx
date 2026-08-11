@@ -23,9 +23,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError } from "@/lib/api";
 import { api, type BackendSupplier } from "@/lib/api";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 type FormState = { name: string; contact: string; email: string; phone: string; category: string; rating: string };
 const emptyForm: FormState = { name: "", contact: "", email: "", phone: "", category: "", rating: "0" };
@@ -44,8 +43,7 @@ export default function Suppliers() {
       const data = await api.listSuppliers();
       setSuppliers(data);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Failed to load suppliers";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to load suppliers" });
     } finally {
       setLoading(false);
     }
@@ -69,8 +67,7 @@ export default function Suppliers() {
       setForm(emptyForm);
       await load();
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Unable to save supplier";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      toast.apiError(err, { fallback: "Unable to save supplier" });
     } finally {
       setSaving(false);
     }
@@ -84,8 +81,7 @@ export default function Suppliers() {
       setDeleteTarget(null);
       await load();
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Unable to delete";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      toast.apiError(err, { fallback: "Unable to delete" });
     }
   };
 

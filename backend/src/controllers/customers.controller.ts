@@ -5,7 +5,7 @@ import { success } from "@/utils/response";
 export class CustomersController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await customersService.getAll(req.tenantId!, req.query.branchId as string);
+      const data = await customersService.getAll(req.tenantId!);
       res.json(success("Customers fetched successfully", data));
     } catch (err) { next(err); }
   }

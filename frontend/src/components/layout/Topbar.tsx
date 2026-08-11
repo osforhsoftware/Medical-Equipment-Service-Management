@@ -4,13 +4,6 @@ import { Bell, LogOut, Menu, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -21,17 +14,14 @@ import {
 import { MesmsLogo } from "@/components/shared/MesmsLogo";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { useAuth } from "@/context/AuthContext";
-import { useBranch } from "@/context/BranchContext";
-import { api, type BackendBranch } from "@/lib/api";
+import { api } from "@/lib/api";
 import { NOTIFICATIONS_UPDATED } from "@/lib/notifications-events";
 import { roleLabels } from "@/data/mock";
 
 export function Topbar({ onMenu }: { onMenu: () => void }) {
   const { user, logout } = useAuth();
-  const { branchId, setBranchId } = useBranch();
   const navigate = useNavigate();
   const [unread, setUnread] = useState(0);
-  const [branches, setBranches] = useState<BackendBranch[]>([]);
 
   const loadUnreadCount = async () => {
     try {
@@ -45,7 +35,6 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
   useEffect(() => {
     if (!user) return;
     void loadUnreadCount();
-    void api.listBranches().then(setBranches).catch(() => { /* ignore */ });
 
     const onUpdated = () => {
       void loadUnreadCount();
@@ -53,10 +42,11 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
     window.addEventListener(NOTIFICATIONS_UPDATED, onUpdated);
     return () => window.removeEventListener(NOTIFICATIONS_UPDATED, onUpdated);
   }, [user]);
+
   if (!user) return null;
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/70 bg-card/75 px-4 shadow-sm backdrop-blur-xl lg:px-6">
+    <header className="no-print sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/70 bg-card/75 px-4 shadow-sm backdrop-blur-xl lg:px-6">
       <button onClick={onMenu} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-primary lg:hidden" aria-label="Open navigation">
         <Menu className="h-5 w-5" />
       </button>
@@ -68,19 +58,6 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
 
       <div className="ml-auto flex items-center gap-2">
         <MesmsLogo size="sm" className="mr-1 hidden md:block" />
-        <Select value={branchId} onValueChange={setBranchId}>
-          <SelectTrigger className="hidden w-44 sm:flex">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {branches.map((b) => (
-              <SelectItem key={b.id} value={b.id}>
-                {b.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
 
         <ThemeToggle />
 

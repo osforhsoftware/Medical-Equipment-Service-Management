@@ -7,9 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/AuthContext";
-import { ApiError, api, type BackendEstimate } from "@/lib/api";
+import { api, type BackendEstimate } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 export default function PortalEstimates() {
   const { user } = useAuth();
@@ -19,22 +19,25 @@ export default function PortalEstimates() {
   const [note, setNote] = useState("");
 
   useEffect(() => {
-    void api.listEstimates()
-      .then((rows) => setItems(rows.filter((estimate) => !user?.customerId || estimate.customerId === user.customerId)))
-      .catch((error) => toast({ title: "Unable to load estimates", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" }))
+    if (!user) { setLoading(false); return; }
+    void api.getCustomerPortal()
+      .then((portal) => setItems(portal.estimates))
+      .catch((error) => toast.apiError(error, { fallback: "Request failed" }))
       .finally(() => setLoading(false));
-  }, [user?.customerId]);
+  }, [user]);
 
   const act = async (id: string, decision: "approved" | "rejected" | "revision") => {
     setSaving(id);
     try {
       const updated = await api.decideEstimate(id, decision, note || undefined);
-      setItems((current) => current.map((estimate) => estimate.id === id ? updated : estimate));
+      setItems((current) => current.map((estimate) => (estimate.id === id ? updated : estimate)));
       setNote("");
       toast({ title: `Estimate ${decision}` });
     } catch (error) {
-      toast({ title: "Decision failed", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" });
-    } finally { setSaving(""); }
+      toast.apiError(error, { fallback: "Request failed" });
+    } finally {
+      setSaving("");
+    }
   };
 
   return (
@@ -44,7 +47,7 @@ export default function PortalEstimates() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {items.map((e) => {
-          const actionable = e.status === "sent" || e.status === "revision";
+          const actionable = e.status === "sent" || e.status === "revision" || e.status === "pendingAdminApproval";
           return (
             <Card key={e.id} className="overflow-hidden shadow-card hover:border-primary/20 hover:shadow-elevated">
               <div className="h-1 bg-gradient-to-r from-accent via-primary to-info" />
@@ -72,29 +75,22 @@ export default function PortalEstimates() {
                   <div className="space-y-2 pt-1">
                     <Textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Optional decision or revision note" rows={2} />
                     <div className="flex flex-wrap gap-2">
-                    <Button size="sm" disabled={saving === e.id} className="flex-1 bg-success text-success-foreground hover:bg-success/90" onClick={() => void act(e.id, "approved")}>
-                      <Check className="mr-1 h-4 w-4" /> Approve
-                    </Button>
-                    <Button size="sm" disabled={saving === e.id} variant="outline" className="flex-1" onClick={() => void act(e.id, "revision")}>
-                      <MessageSquare className="mr-1 h-4 w-4" /> Request Revision
-                    </Button>
-                    <Button size="sm" disabled={saving === e.id} variant="outline" className="flex-1 text-destructive hover:text-destructive" onClick={() => void act(e.id, "rejected")}>
-                      <X className="mr-1 h-4 w-4" /> Reject
-                    </Button>
+                      <Button size="sm" disabled={saving === e.id} className="flex-1 bg-success text-success-foreground hover:bg-success/90" onClick={() => void act(e.id, "approved")}>
+                        <Check className="mr-1 h-4 w-4" /> Approve
+                      </Button>
+                      <Button size="sm" disabled={saving === e.id} variant="outline" className="flex-1" onClick={() => void act(e.id, "revision")}>
+                        <MessageSquare className="mr-1 h-4 w-4" /> Request Revision
+                      </Button>
+                      <Button size="sm" disabled={saving === e.id} variant="destructive" className="flex-1" onClick={() => void act(e.id, "rejected")}>
+                        <X className="mr-1 h-4 w-4" /> Reject
+                      </Button>
                     </div>
                   </div>
-                ) : (
-                  <p className="rounded-lg bg-muted/50 p-2.5 text-center text-xs text-muted-foreground">
-                    {e.status === "approved" && "You approved this estimate. Work is scheduled."}
-                    {e.status === "rejected" && "You rejected this estimate."}
-                    {e.status === "draft" && "Awaiting submission from the service team."}
-                  </p>
-                )}
+                ) : null}
               </CardContent>
             </Card>
           );
         })}
-        {items.length === 0 && <p className="text-sm text-muted-foreground">No estimates yet.</p>}
       </div>
     </div>
   );

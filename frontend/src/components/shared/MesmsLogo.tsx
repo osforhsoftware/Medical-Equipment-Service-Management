@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-/** MESMS.png is 300×272 (~1.1:1). Size by height only so nothing is cropped. */
+/** Brand mark in /public. Drop MESMS.png there to override the default SVG. */
 const sizeClasses = {
   xs: "h-8",
   sm: "h-9",
@@ -18,7 +18,7 @@ interface MesmsLogoProps {
 export function MesmsLogo({ className, size = "md" }: MesmsLogoProps) {
   return (
     <img
-      src="/MESMS.png"
+      src="/MESMS.svg"
       alt="MESMS — Medical Equipment Service Management"
       className={cn("w-auto shrink-0 object-contain object-left", sizeClasses[size], className)}
     />

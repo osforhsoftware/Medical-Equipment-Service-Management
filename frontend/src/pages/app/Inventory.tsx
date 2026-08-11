@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Plus, PackageCheck, Loader2, AlertTriangle, Boxes, Lock } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -23,29 +24,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError, api, type BackendBranch, type BackendInventoryItem } from "@/lib/api";
-import { useBranch } from "@/context/BranchContext";
+import { ApiError, api, type BackendInventoryItem } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { formatCurrency, formatCurrencyShort } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { INVENTORY_CATEGORY_OPTIONS } from "@/lib/fixedOptions";
+import { toast } from "@/lib/toast";
 
-const CATEGORIES = ["Modules", "Sensors", "Consumables", "Boards", "Tools", "Other"];
 const UOM = ["pcs", "box", "meter", "set", "kit"];
+
+function buildCategoryOptions(items: BackendInventoryItem[], addedCategories: string[]) {
+  const base = INVENTORY_CATEGORY_OPTIONS.filter((o) => o.value !== "Other");
+  const other = INVENTORY_CATEGORY_OPTIONS.find((o) => o.value === "Other")!;
+  const known = new Set(base.map((o) => o.value));
+  const extras = [...new Set([...items.map((i) => i.category), ...addedCategories])]
+    .filter((c) => c && !known.has(c) && c !== "Other")
+    .sort()
+    .map((c) => ({ value: c, label: c }));
+  return [...base, ...extras, other];
+}
 
 const emptyForm = {
   sku: "",
   name: "",
   category: "Modules",
+  categoryOther: "",
   description: "",
-  branchId: "",
   inStock: "0",
   reorderLevel: "5",
   unitCost: "0",
@@ -57,24 +61,21 @@ const emptyForm = {
 };
 
 export default function Inventory() {
-  const { branchId } = useBranch();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const canManage = user?.role === "admin" || user?.role === "inventory";
   const [items, setItems] = useState<BackendInventoryItem[]>([]);
-  const [branches, setBranches] = useState<BackendBranch[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [selected, setSelected] = useState<BackendInventoryItem | null>(null);
   const [saving, setSaving] = useState(false);
-  const [adjustDelta, setAdjustDelta] = useState("0");
-  const [adjustReason, setAdjustReason] = useState("");
   const [form, setForm] = useState(emptyForm);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [addedCategories, setAddedCategories] = useState<string[]>([]);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
     try {
-      setItems(await api.listInventory(branchId));
+      setItems(await api.listInventory());
     } catch (err) {
       toast({
         title: "Error",
@@ -84,32 +85,48 @@ export default function Inventory() {
     } finally {
       setLoading(false);
     }
-  }, [branchId]);
+  }, []);
 
   useEffect(() => {
     void loadItems();
   }, [loadItems]);
 
-  useEffect(() => {
-    void api.listBranches().then(setBranches).catch(() => setBranches([]));
-  }, []);
-
   const lowStock = items.filter((i) => i.inStock <= i.reorderLevel).length;
   const reserved = items.reduce((s, i) => s + i.reserved, 0);
   const totalValue = items.reduce((s, i) => s + i.inStock * Number(i.unitCost), 0);
 
-  const categoryOptions = useMemo(() => {
-    const fromData = [...new Set(items.map((i) => i.category))];
-    return [...new Set([...CATEGORIES, ...fromData])].map((c) => ({ label: c, value: c }));
-  }, [items]);
+  const categorySelectOptions = useMemo(
+    () => buildCategoryOptions(items, addedCategories),
+    [items, addedCategories],
+  );
+
+  const categoryFilterOptions = useMemo(
+    () => categorySelectOptions.filter((o) => o.value !== "Other").map((o) => ({ label: o.label, value: o.value })),
+    [categorySelectOptions],
+  );
 
   const openCreate = () => {
-    setForm({
-      ...emptyForm,
-      branchId: branchId !== "all" ? branchId : branches[0]?.id ?? "",
-    });
+    setForm(emptyForm);
     setImageFiles([]);
     setDialogOpen(true);
+  };
+
+  const resolvedCategory = form.category === "Other" ? "" : form.category;
+
+  const addCategory = () => {
+    const name = form.categoryOther.trim();
+    if (!name) return;
+
+    const existing = categorySelectOptions.find((o) => o.value.toLowerCase() === name.toLowerCase());
+    if (existing && existing.value !== "Other") {
+      setForm({ ...form, category: existing.value, categoryOther: "" });
+      toast({ title: "Category selected", description: `"${existing.label}" is already in the list.` });
+      return;
+    }
+
+    setAddedCategories((current) => [...new Set([...current, name])]);
+    setForm({ ...form, category: name, categoryOther: "" });
+    toast({ title: "Category added", description: `"${name}" is now available in the dropdown.` });
   };
 
   const saveItem = async () => {
@@ -123,9 +140,8 @@ export default function Inventory() {
       await api.createInventoryItem({
         sku: form.sku.trim(),
         name: form.name.trim(),
-        category: form.category,
+        category: resolvedCategory,
         description: form.description.trim() || null,
-        branchId: form.branchId,
         inStock: Number(form.inStock) || 0,
         reorderLevel: Number(form.reorderLevel) || 0,
         unitCost: Number(form.unitCost) || 0,
@@ -143,28 +159,6 @@ export default function Inventory() {
       toast({
         title: "Save failed",
         description: err instanceof ApiError ? err.errors?.join(", ") || err.message : "Unable to save item",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const adjustStock = async () => {
-    if (!selected || user?.role !== "admin") return;
-    setSaving(true);
-    try {
-      await api.adjustInventoryStock(selected.id, Number(adjustDelta), adjustReason.trim());
-      toast({ title: "Stock adjusted" });
-      setAdjustDelta("0");
-      setAdjustReason("");
-      await loadItems();
-      const refreshed = await api.listInventory(branchId);
-      setSelected(refreshed.find((i) => i.id === selected.id) ?? null);
-    } catch (err) {
-      toast({
-        title: "Adjustment failed",
-        description: err instanceof ApiError ? err.message : "Unable to adjust",
         variant: "destructive",
       });
     } finally {
@@ -237,14 +231,14 @@ export default function Inventory() {
           description="Spare parts with cost, selling price, delivery charges, and system-managed reservations."
           actions={
             canManage ? (
-              <Button onClick={openCreate} disabled={branches.length === 0} variant="brand">
+              <Button onClick={openCreate} variant="brand">
                 <Plus className="mr-1 h-4 w-4" /> Add Item
               </Button>
             ) : undefined
           }
         />
         <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard label="SKUs in Branch" value={String(items.length)} icon={Boxes} accent="primary" />
+          <StatCard label="Total SKUs" value={String(items.length)} icon={Boxes} accent="primary" />
           <StatCard label="Reserved Units" value={String(reserved)} icon={Lock} accent="accent" />
           <StatCard label="Stock Value" value={formatCurrencyShort(totalValue)} icon={PackageCheck} accent="success" />
         </div>
@@ -265,46 +259,10 @@ export default function Inventory() {
             searchKeys={["name", "sku", "category", "supplier"]}
             searchPlaceholder="Search inventory items…"
             emptyMessage="No inventory items yet."
-            filters={[{ label: "Category", options: categoryOptions, predicate: (i, v) => i.category === v }]}
-            onRowClick={setSelected}
+            filters={[{ label: "Category", options: categoryFilterOptions, predicate: (i, v) => i.category === v }]}
+            onRowClick={(item) => navigate(`/app/inventory/${item.id}`)}
           />
         )}
-
-        <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-          <SheetContent className="sm:max-w-md overflow-y-auto">
-            {selected && (
-              <>
-                <SheetHeader>
-                  <SheetTitle>{selected.name}</SheetTitle>
-                  <SheetDescription>
-                    {selected.sku} · {selected.category}
-                  </SheetDescription>
-                </SheetHeader>
-                <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                  <Info label="In stock" value={String(selected.inStock)} />
-                  <Info label="Reserved" value={String(selected.reserved)} />
-                  <Info label="Reorder at" value={String(selected.reorderLevel)} />
-                  <Info label="UoM" value={selected.unitOfMeasure ?? "pcs"} />
-                  <Info label="Unit cost" value={formatCurrency(selected.unitCost)} />
-                  <Info label="Selling price" value={formatCurrency(selected.sellingPrice ?? 0)} />
-                  <Info label="Delivery" value={`${formatCurrency(selected.deliveryCharge ?? 0)} (${selected.deliveryChargeType ?? "flat"})`} />
-                  <Info label="Supplier" value={selected.supplier} />
-                </div>
-                {selected.description && <p className="mt-4 text-sm text-muted-foreground">{selected.description}</p>}
-                {user?.role === "admin" && (
-                  <div className="mt-6 space-y-3 rounded-lg border border-border p-3">
-                    <p className="text-sm font-medium">Force stock adjustment</p>
-                    <Input type="number" value={adjustDelta} onChange={(e) => setAdjustDelta(e.target.value)} placeholder="Delta (+/-)" />
-                    <Input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} placeholder="Reason (required)" />
-                    <Button size="sm" disabled={saving || !adjustReason.trim() || Number(adjustDelta) === 0} onClick={() => void adjustStock()}>
-                      Apply adjustment
-                    </Button>
-                  </div>
-                )}
-              </>
-            )}
-          </SheetContent>
-        </Sheet>
 
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
@@ -319,20 +277,50 @@ export default function Inventory() {
                 </div>
                 <div className="grid gap-2">
                   <Label>Category</Label>
-                  <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
+                  <Select
+                    value={form.category}
+                    onValueChange={(v) =>
+                      setForm({ ...form, category: v, categoryOther: v === "Other" ? form.categoryOther : "" })
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {CATEGORIES.map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {c}
+                      {categorySelectOptions.map((c) => (
+                        <SelectItem key={c.value} value={c.value}>
+                          {c.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
+              {form.category === "Other" && (
+                <div className="grid gap-2 rounded-lg border border-dashed border-border p-3">
+                  <Label htmlFor="inventory-category-other">Add new category</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="inventory-category-other"
+                      value={form.categoryOther}
+                      onChange={(e) => setForm({ ...form, categoryOther: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addCategory();
+                        }
+                      }}
+                      placeholder="e.g. Cables, Adapters"
+                    />
+                    <Button type="button" variant="outline" disabled={!form.categoryOther.trim()} onClick={addCategory}>
+                      Add
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Added categories appear in the dropdown above for this and future items.
+                  </p>
+                </div>
+              )}
               <div className="grid gap-2">
                 <Label>Name</Label>
                 <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
@@ -341,37 +329,20 @@ export default function Inventory() {
                 <Label>Description</Label>
                 <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Branch</Label>
-                  <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select branch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {branches.map((b) => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>Unit of measure</Label>
-                  <Select value={form.unitOfMeasure} onValueChange={(v) => setForm({ ...form, unitOfMeasure: v })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {UOM.map((u) => (
-                        <SelectItem key={u} value={u}>
-                          {u}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="grid gap-2">
+                <Label>Unit of measure</Label>
+                <Select value={form.unitOfMeasure} onValueChange={(v) => setForm({ ...form, unitOfMeasure: v })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {UOM.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {u}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="grid gap-2">
@@ -425,7 +396,10 @@ export default function Inventory() {
               <Button variant="outline" onClick={() => setDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={() => void saveItem()} disabled={saving || !form.branchId || !form.sku.trim() || !form.name.trim()}>
+              <Button
+                onClick={() => void saveItem()}
+                disabled={saving || !form.sku.trim() || !form.name.trim() || !resolvedCategory}
+              >
                 {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Save item
               </Button>
@@ -434,14 +408,5 @@ export default function Inventory() {
         </Dialog>
       </div>
     </RoleGuard>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border p-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-medium">{value}</p>
-    </div>
   );
 }

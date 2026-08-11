@@ -12,6 +12,12 @@ import {
   resolveTicketEventStatus,
 } from "@/services/workflow/serviceTicketStateMachine";
 import { fileStorageService } from "@/services/fileStorage.service";
+import {
+  closeAllOpenWorkLogs,
+  closeWorkLog,
+  resolveWorkLogUserId,
+  startWorkLog,
+} from "@/services/jobWorkLog.helpers";
 
 const ASSIGNABLE_JOB_ROLES = ["coordinator", "engineer"];
 
@@ -24,6 +30,28 @@ type CreateJobData = {
 };
 
 export class JobsService {
+  private async syncWorkLogForStatusChange(
+    tenantId: string,
+    jobId: string,
+    job: { engineerId: string | null },
+    actorId: string | undefined,
+    previousStatus: string,
+    nextStatus: string,
+  ) {
+    const userId = resolveWorkLogUserId(job, actorId);
+    if (!userId || previousStatus === nextStatus) return;
+
+    if (nextStatus === "inProgress" && (previousStatus === "scheduled" || previousStatus === "partsPending")) {
+      await startWorkLog(prisma, tenantId, jobId, userId, "Field work started");
+      return;
+    }
+    if (nextStatus === "partsPending" || nextStatus === "review") {
+      const note =
+        nextStatus === "partsPending" ? "Work paused — parts pending" : "Work paused — awaiting review";
+      await closeWorkLog(prisma, tenantId, jobId, userId, note);
+    }
+  }
+
   private async resolveAssignee(engineerId: string, tenantId: string) {
     const assignee = await usersRepository.findById(engineerId, tenantId);
     if (!assignee) throw new AppError("Staff user not found", 404);
@@ -108,6 +136,7 @@ export class JobsService {
           engineer: assignee.name,
           engineerId: assignee.id,
           type: sr.type,
+          typeOther: sr.typeOther,
           status: (data.status ?? "scheduled") as never,
           scheduledFor: new Date(data.scheduledFor),
           progress: data.progress ?? 0,
@@ -214,7 +243,11 @@ export class JobsService {
             data: { lastServiceDate: new Date(), condition: "operational" },
           });
         }
-        return tx.serviceJob.update({ where: { id }, data: { ...data, progress: 100 } as never });
+        await closeAllOpenWorkLogs(tx, tenantId, id, "Job completed");
+        return tx.serviceJob.update({
+          where: { id },
+          data: { ...data, progress: 100, completedAt: new Date() } as never,
+        });
       });
       await notificationsService.notifyJobUpdated(tenantId, existing.reference, "completed");
       return updated;
@@ -222,6 +255,14 @@ export class JobsService {
 
     const updated = await jobsRepository.update(id, tenantId, data);
     if (data.status && data.status !== existing.status) {
+      await this.syncWorkLogForStatusChange(
+        tenantId,
+        id,
+        existing,
+        actorId,
+        existing.status,
+        String(data.status),
+      );
       await notificationsService.notifyJobUpdated(tenantId, existing.reference, String(data.status));
     }
     return updated;
@@ -286,6 +327,10 @@ export class JobsService {
     if (status !== job.status) assertJobTransition(job.status, status);
     const updated = await jobsRepository.update(id, tenantId, { progress, status });
 
+    if (status === "inProgress" && job.status === "scheduled") {
+      await startWorkLog(prisma, tenantId, id, actorId, "Field work started");
+    }
+
     await jobActionsRepository.addActivity(id, {
       actor: actorName,
       action: "Uploaded photos",
@@ -309,6 +354,8 @@ export class JobsService {
       status: "partsPending",
       progress: Math.max(job.progress, 40),
     });
+
+    await closeWorkLog(prisma, tenantId, id, actorId, "Work paused — parts pending");
 
     await jobActionsRepository.addActivity(id, {
       actor: actorName,
@@ -371,6 +418,8 @@ export class JobsService {
       status: "review",
       progress: Math.max(job.progress, 85),
     });
+
+    await closeWorkLog(prisma, tenantId, id, actorId, "Customer sign-off captured");
 
     await jobActionsRepository.addActivity(id, {
       actor: actorName,
@@ -497,6 +546,9 @@ export class JobsService {
           status: job.status === "scheduled" ? "inProgress" : job.status,
         },
       });
+      if (job.status === "scheduled") {
+        await startWorkLog(tx, tenantId, id, actorId, "Field work started");
+      }
       return { job: updated, deduction, movement };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }

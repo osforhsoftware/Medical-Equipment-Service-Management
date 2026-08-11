@@ -18,6 +18,7 @@ export interface AppUser {
   username: string;
   email: string;
   role: Role;
+  roles?: Role[];
   phone?: string | null;
   isActive: boolean;
   branchId?: string;
@@ -37,11 +38,14 @@ export interface Customer {
   id: string;
   tenantId: string;
   name: string;
-  type: "Hospital" | "Clinic" | "Diagnostic Lab" | "Research" | "Dental";
+  type: string;
   contactPerson: string;
   email: string;
   phone: string;
+  address: string;
   city: string;
+  country: string;
+  licenseGst?: string | null;
   branchId: string;
   equipmentCount: number;
   activeJobs: number;
@@ -86,7 +90,7 @@ export interface ServiceRequest {
   equipmentId: string;
   equipmentName: string;
   branchId: string;
-  type: "Repair" | "Maintenance" | "Calibration" | "Inspection" | "Installation";
+  type: "Repair" | "Maintenance" | "Calibration" | "Inspection" | "Installation" | "Other";
   priority: "low" | "medium" | "high" | "critical";
   status: ServiceStatus;
   description: string;

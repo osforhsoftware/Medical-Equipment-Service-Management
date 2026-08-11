@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { HardDrive, Loader2, Plus, QrCode } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -21,20 +22,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { useBranch } from "@/context/BranchContext";
-import { ApiError } from "@/lib/api";
-import {
   api,
   type BackendCustomer,
   type BackendEquipment,
 } from "@/lib/api";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 const EQUIPMENT_CATEGORIES = [
   "Imaging",
@@ -44,13 +36,6 @@ const EQUIPMENT_CATEGORIES = [
   "Surgical",
   "Monitoring",
   "Other",
-] as const;
-
-const AMC_OPTIONS = [
-  { value: "active", label: "Active" },
-  { value: "expiring", label: "Expiring" },
-  { value: "expired", label: "Expired" },
-  { value: "none", label: "None" },
 ] as const;
 
 const CONDITION_OPTIONS = [
@@ -90,11 +75,9 @@ type FormState = {
   category: string;
   serialNumber: string;
   customerId: string;
-  branchId: string;
   location: string;
   installDate: string;
   warrantyEnd: string;
-  amcStatus: string;
   condition: string;
   lastServiceDate: string;
 };
@@ -107,47 +90,42 @@ const emptyForm = (): FormState => ({
   category: "Imaging",
   serialNumber: "",
   customerId: "",
-  branchId: "",
   location: "",
   installDate: todayInputValue(),
   warrantyEnd: defaultWarrantyEnd(),
-  amcStatus: "none",
   condition: "operational",
   lastServiceDate: "",
 });
 
 export default function EquipmentPage() {
-  const { branchId } = useBranch();
+  const navigate = useNavigate();
   const [equipment, setEquipment] = useState<BackendEquipment[]>([]);
   const [customers, setCustomers] = useState<BackendCustomer[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [selected, setSelected] = useState<BackendEquipment | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
 
   const loadEquipment = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.listEquipment({ branchId });
+      const data = await api.listEquipment();
       setEquipment(data);
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load equipment";
-      toast({ title: "Error", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to load equipment" });
     } finally {
       setLoading(false);
     }
-  }, [branchId]);
+  }, []);
 
   const loadCustomers = useCallback(async () => {
     try {
-      const data = await api.listCustomers(branchId);
+      const data = await api.listCustomers();
       setCustomers(data.filter((c) => c.status === "active"));
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load customers";
-      toast({ title: "Error", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to load customers" });
     }
-  }, [branchId]);
+  }, []);
 
   useEffect(() => {
     void loadEquipment();
@@ -162,17 +140,14 @@ export default function EquipmentPage() {
     setForm({
       ...emptyForm(),
       customerId: firstCustomer?.id ?? "",
-      branchId: firstCustomer?.branchId ?? (branchId !== "all" ? branchId : ""),
     });
     setDialogOpen(true);
   };
 
   const onCustomerChange = (customerId: string) => {
-    const customer = customers.find((c) => c.id === customerId);
     setForm((prev) => ({
       ...prev,
       customerId,
-      branchId: customer?.branchId ?? prev.branchId,
     }));
   };
 
@@ -187,11 +162,9 @@ export default function EquipmentPage() {
         category: form.category,
         serialNumber: form.serialNumber.trim(),
         customerId: form.customerId,
-        branchId: form.branchId || undefined,
         location: form.location.trim(),
         installDate: form.installDate,
         warrantyEnd: form.warrantyEnd,
-        amcStatus: form.amcStatus,
         condition: form.condition,
         ...(form.lastServiceDate ? { lastServiceDate: form.lastServiceDate } : {}),
       });
@@ -203,11 +176,7 @@ export default function EquipmentPage() {
       await loadEquipment();
       await loadCustomers();
     } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.errors?.join(", ") || err.message
-          : "Unable to register equipment";
-      toast({ title: "Save failed", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Unable to register equipment" });
     } finally {
       setSaving(false);
     }
@@ -254,11 +223,6 @@ export default function EquipmentPage() {
       key: "condition",
       header: "Condition",
       render: (e) => <StatusBadge status={formatCondition(e.condition)} />,
-    },
-    {
-      key: "amcStatus",
-      header: "AMC",
-      render: (e) => <StatusBadge status={e.amcStatus} />,
     },
     {
       key: "lastServiceDate",
@@ -313,11 +277,6 @@ export default function EquipmentPage() {
               options: CONDITION_OPTIONS.map((o) => ({ label: o.label, value: o.value })),
               predicate: (e, v) => e.condition === v,
             },
-            {
-              label: "AMC",
-              options: AMC_OPTIONS.map((o) => ({ label: o.label, value: o.value })),
-              predicate: (e, v) => e.amcStatus === v,
-            },
             ...(customerFilterOptions.length > 0
               ? [
                   {
@@ -333,38 +292,9 @@ export default function EquipmentPage() {
               predicate: (e, v) => e.category === v,
             },
           ]}
-          onRowClick={setSelected}
+          onRowClick={(e) => navigate(`/app/equipment/${e.id}`)}
         />
       )}
-
-      <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-md">
-          {selected && (
-            <>
-              <SheetHeader>
-                <div className="flex items-center gap-2">
-                  <SheetTitle>{selected.name}</SheetTitle>
-                  <StatusBadge status={formatCondition(selected.condition)} />
-                </div>
-                <SheetDescription>
-                  {selected.assetTag} · {selected.customerName}
-                </SheetDescription>
-              </SheetHeader>
-              <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                <Info label="Manufacturer" value={selected.manufacturer} />
-                <Info label="Model" value={selected.model} />
-                <Info label="Category" value={selected.category} />
-                <Info label="Serial no." value={selected.serialNumber} />
-                <Info label="Location" value={selected.location} />
-                <Info label="AMC" value={selected.amcStatus} />
-                <Info label="Installed" value={formatDate(selected.installDate)} />
-                <Info label="Warranty ends" value={formatDate(selected.warrantyEnd)} />
-                <Info label="Last service" value={formatDate(selected.lastServiceDate)} />
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
@@ -486,7 +416,7 @@ export default function EquipmentPage() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label>Condition</Label>
                 <Select value={form.condition} onValueChange={(value) => setForm({ ...form, condition: value })}>
@@ -495,21 +425,6 @@ export default function EquipmentPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {CONDITION_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>AMC status</Label>
-                <Select value={form.amcStatus} onValueChange={(value) => setForm({ ...form, amcStatus: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AMC_OPTIONS.map((o) => (
                       <SelectItem key={o.value} value={o.value}>
                         {o.label}
                       </SelectItem>
@@ -542,15 +457,6 @@ export default function EquipmentPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border p-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-medium capitalize">{value}</p>
     </div>
   );
 }

@@ -2,6 +2,8 @@ import { Navigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import type { Role } from "@/data/types";
+import { userCanAccessModule, userHasAnyRole } from "@/lib/userRoles";
+import { navItems } from "@/config/nav";
 
 function AccessDenied({ role }: { role: Role }) {
   return (
@@ -18,7 +20,7 @@ function AccessDenied({ role }: { role: Role }) {
 export function RoleGuard({ roles, children }: { roles: readonly Role[]; children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
-  if (!roles.includes(user.role)) return <AccessDenied role={user.role} />;
+  if (!userHasAnyRole(user, roles)) return <AccessDenied role={user.role} />;
   return <>{children}</>;
 }
 
@@ -30,7 +32,7 @@ export function ModuleGuard({ module, children }: { module: string; children: Re
   if (!user) return <Navigate to="/login" replace />;
   if (loading) return <div className="py-12 text-center text-sm text-muted-foreground">Loading permissions…</div>;
 
-  const roles = rbacMatrix[module] ?? [];
-  if (!roles.includes(user.role)) return <AccessDenied role={user.role} />;
+  const fallbackRoles = navItems.find((item) => item.label === module)?.roles;
+  if (!userCanAccessModule(user, module, rbacMatrix, fallbackRoles)) return <AccessDenied role={user.role} />;
   return <>{children}</>;
 }

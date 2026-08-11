@@ -25,7 +25,7 @@ import {
 } from "@/lib/api";
 import { useSettings } from "@/context/SettingsContext";
 import { defaultDatePlusDays, formatCurrency } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 const newLine = (taxRate = 0, partial?: Partial<EstimateLineInput>): EstimateLineInput => ({
   type: "service",

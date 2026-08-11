@@ -15,10 +15,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError } from "@/lib/api";
 import { api, type BackendInvoice } from "@/lib/api";
 import { formatCurrency, formatCurrencyShort } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 type FormState = {
   reference: string;
@@ -51,8 +50,7 @@ export default function Billing() {
       const data = await api.listInvoices();
       setInvoices(data);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Failed to load invoices";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to load invoices" });
     } finally {
       setLoading(false);
     }
@@ -80,8 +78,7 @@ export default function Billing() {
       setForm(emptyForm);
       await load();
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Unable to save invoice";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      toast.apiError(err, { fallback: "Unable to save invoice" });
     } finally {
       setSaving(false);
     }

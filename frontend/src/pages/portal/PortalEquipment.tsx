@@ -4,9 +4,9 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/context/AuthContext";
-import { ApiError, api, type BackendEquipment } from "@/lib/api";
+import { api, type BackendEquipment } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 export default function PortalEquipment() {
   const { user } = useAuth();
@@ -14,12 +14,12 @@ export default function PortalEquipment() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user?.customerId) { setLoading(false); return; }
-    void api.listEquipment({ customerId: user.customerId })
-      .then(setMine)
-      .catch((error) => toast({ title: "Unable to load equipment", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" }))
+    if (!user) { setLoading(false); return; }
+    void api.getCustomerPortal()
+      .then((portal) => setMine(portal.equipment))
+      .catch((error) => toast.apiError(error, { fallback: "Request failed" }))
       .finally(() => setLoading(false));
-  }, [user?.customerId]);
+  }, [user]);
 
   return (
     <div className="space-y-6">
@@ -40,32 +40,16 @@ export default function PortalEquipment() {
                     <p className="text-xs text-muted-foreground">{e.manufacturer} · {e.model}</p>
                   </div>
                 </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <span className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 font-mono text-xs">
-                <QrCode className="h-3 w-3" /> {e.assetTag}
-              </span>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Location</span>
-                <span className="font-medium">{e.location}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Condition</span>
                 <StatusBadge status={e.condition} />
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">AMC</span>
-                <StatusBadge status={e.amcStatus} />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Last service</span>
-                <span className="font-medium">{e.lastServiceDate ? formatDate(e.lastServiceDate) : "Not recorded"}</span>
-              </div>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-muted-foreground">
+              <p className="flex items-center gap-1.5"><QrCode className="h-3.5 w-3.5" /> {e.assetTag}</p>
+              <p>Serial: {e.serialNumber}</p>
+              <p>Last service: {formatDate(e.lastServiceDate)}</p>
             </CardContent>
           </Card>
         ))}
-        {!loading && mine.length === 0 ? <p className="text-sm text-muted-foreground">No equipment is linked to this customer account.</p> : null}
       </div>
     </div>
   );

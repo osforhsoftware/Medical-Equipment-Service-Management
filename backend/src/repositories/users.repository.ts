@@ -13,7 +13,14 @@ export class UsersRepository {
     return prisma.user.findMany({
       where: {
         tenantId,
-        ...(filters?.role ? { role: filters.role as User["role"] } : {}),
+        ...(filters?.role
+          ? {
+              OR: [
+                { role: filters.role as User["role"] },
+                { roleAssignments: { some: { role: { key: filters.role } } } },
+              ],
+            }
+          : {}),
         ...(filters?.isActive !== undefined ? { isActive: filters.isActive } : {}),
       },
       orderBy: [{ role: "asc" }, { name: "asc" }],

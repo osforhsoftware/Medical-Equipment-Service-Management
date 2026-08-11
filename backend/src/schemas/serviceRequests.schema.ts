@@ -1,16 +1,27 @@
 import { z } from "zod";
 
-export const createServiceRequestSchema = z.object({
-  customerId: z.string().min(1, "Customer is required"),
-  equipmentId: z.string().optional(),
-  equipmentIds: z.array(z.string()).optional(),
-  type: z.enum(["Repair", "Maintenance", "Calibration", "Inspection", "Installation"]),
-  priority: z.enum(["low", "medium", "high", "critical"]),
-  description: z.string().trim().min(10, "Description must be at least 10 characters").max(500),
-  assignedTo: z.string().min(1).optional(),
-  assignedName: z.string().optional(),
-  slaDue: z.string().optional(),
-});
+export const createServiceRequestSchema = z
+  .object({
+    customerId: z.string().min(1, "Customer is required"),
+    equipmentId: z.string().optional(),
+    equipmentIds: z.array(z.string()).optional(),
+    type: z.enum(["Repair", "Maintenance", "Calibration", "Inspection", "Installation", "Other"]),
+    typeOther: z.string().trim().max(100).optional().nullable(),
+    priority: z.enum(["low", "medium", "high", "critical"]),
+    description: z.string().trim().min(10, "Description must be at least 10 characters").max(500),
+    assignedTo: z.string().min(1).optional(),
+    assignedName: z.string().optional(),
+    slaDue: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.type === "Other" && !data.typeOther?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["typeOther"],
+        message: "Please specify the service type",
+      });
+    }
+  });
 
 export const updateServiceRequestSchema = z.object({
   status: z.enum(["new", "inspection", "estimate", "approval", "inProgress", "completed", "invoiced", "finished"]).optional(),
@@ -29,4 +40,9 @@ export const assignServiceRequestSchema = z.object({
 export const workflowServiceRequestSchema = z.object({
   status: z.enum(["new", "inspection", "estimate", "approval", "inProgress", "completed", "invoiced", "finished"]),
   note: z.string().trim().min(1, "Note is required").max(1000),
+});
+
+export const reopenServiceRequestSchema = z.object({
+  status: z.enum(["new", "inspection", "estimate", "approval", "inProgress", "completed", "invoiced"]),
+  note: z.string().trim().min(1, "Reopen reason is required").max(1000),
 });

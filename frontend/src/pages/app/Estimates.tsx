@@ -1,18 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Check, Eye, FileText, Loader2, MessageSquare, Plus, Send, X } from "lucide-react";
+import { Eye, FileText, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ProfessionalDocument } from "@/components/shared/ProfessionalDocument";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -22,37 +18,26 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError, api, type BackendEstimate, type BackendServiceRequest, type BackendUser } from "@/lib/api";
-import { useBranch } from "@/context/BranchContext";
-import { useAuth } from "@/context/AuthContext";
+import { ApiError, api, type BackendEstimate, type BackendServiceRequest } from "@/lib/api";
 import { formatDate, formatCurrency } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 export default function Estimates() {
   const navigate = useNavigate();
-  const { branchId } = useBranch();
-  const { user } = useAuth();
   const [estimates, setEstimates] = useState<BackendEstimate[]>([]);
   const [requests, setRequests] = useState<BackendServiceRequest[]>([]);
-  const [engineers, setEngineers] = useState<BackendUser[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<BackendEstimate | null>(null);
   const [preview, setPreview] = useState<BackendEstimate | null>(null);
-  const [decisionNote, setDecisionNote] = useState("");
-  const [engineerId, setEngineerId] = useState("");
-  const [saving, setSaving] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [est, sr, users] = await Promise.all([
+      const [est, sr] = await Promise.all([
         api.listEstimates(),
-        api.listServiceRequests({ branchId }),
-        api.listUsers({ role: "engineer", isActive: true }).catch(() => []),
+        api.listServiceRequests(),
       ]);
       setEstimates(est);
       setRequests(sr.filter((r) => ["inspection", "estimate", "approval", "new"].includes(r.status)));
-      setEngineers(users);
     } catch (err) {
       toast({
         title: "Error",
@@ -62,7 +47,7 @@ export default function Estimates() {
     } finally {
       setLoading(false);
     }
-  }, [branchId]);
+  }, []);
 
   useEffect(() => {
     void loadData();
@@ -72,32 +57,6 @@ export default function Estimates() {
     () => requests.filter((r) => ["inspection", "estimate", "approval", "new"].includes(r.status)),
     [requests],
   );
-
-  const act = async (estimate: BackendEstimate, action: "approved" | "rejected" | "revision") => {
-    if (action === "approved" && ["admin", "coordinator"].includes(user?.role ?? "") && !engineerId) {
-      toast({ title: "Engineer required", description: "Select a service engineer to auto-assign the job.", variant: "destructive" });
-      return;
-    }
-    setSaving(true);
-    try {
-      await api.decideEstimate(estimate.id, action, decisionNote || undefined, {
-        engineerId: action === "approved" ? engineerId : undefined,
-      });
-      setSelected(null);
-      setDecisionNote("");
-      setEngineerId("");
-      await loadData();
-      toast({ title: `Estimate ${action}` });
-    } catch (error) {
-      toast({
-        title: "Workflow update failed",
-        description: error instanceof ApiError ? error.message : "Request failed",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const openPreview = async (estimate: BackendEstimate) => {
     try {
@@ -222,86 +181,9 @@ export default function Estimates() {
                 predicate: (e, v) => e.status === v,
               },
             ]}
-            onRowClick={setSelected}
+            onRowClick={(e) => navigate(`/app/estimates/${e.id}`)}
           />
         )}
-
-        <Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-          <DialogContent className="sm:max-w-lg">
-            {selected && (
-              <>
-                <DialogHeader>
-                  <div className="flex items-center gap-2">
-                    <DialogTitle>{selected.reference}</DialogTitle>
-                    <StatusBadge status={selected.status} />
-                  </div>
-                </DialogHeader>
-                <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                  <Info label="Ticket" value={selected.requestRef} />
-                  <Info label="Revision" value={String(selected.revision)} />
-                  <Info label="Labor" value={formatCurrency(selected.laborCost)} />
-                  <Info label="Parts" value={formatCurrency(selected.partsCost)} />
-                  <Info label="Total" value={formatCurrency(selected.total)} />
-                  <Info label="Valid until" value={formatDate(selected.validUntil)} />
-                </div>
-                {["pendingAdminApproval", "sent", "revision"].includes(selected.status) &&
-                ["admin", "coordinator"].includes(user?.role ?? "") ? (
-                  <div className="grid gap-2">
-                    <Label>Assign service engineer (required to approve)</Label>
-                    <Select value={engineerId} onValueChange={setEngineerId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select engineer" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {engineers.map((eng) => (
-                          <SelectItem key={eng.id} value={eng.id}>
-                            {eng.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : null}
-                <div className="grid gap-2">
-                  <Label>Decision note</Label>
-                  <Textarea value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)} />
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" onClick={() => void openPreview(selected)}>
-                    <Eye className="mr-1 h-4 w-4" /> Preview
-                  </Button>
-                  {selected.serviceRequestId ? (
-                    <Button variant="outline" asChild>
-                      <Link to={`/app/estimates/${selected.serviceRequestId}/build`}>
-                        <Plus className="mr-1 h-4 w-4" /> Open Builder
-                      </Link>
-                    </Button>
-                  ) : null}
-                  {["pendingAdminApproval", "sent", "revision"].includes(selected.status) ? (
-                    <>
-                      <Button className="bg-success text-success-foreground" onClick={() => void act(selected, "approved")} disabled={saving}>
-                        <Check className="mr-1 h-4 w-4" /> Approve
-                      </Button>
-                      <Button variant="outline" onClick={() => void act(selected, "revision")} disabled={saving}>
-                        <MessageSquare className="mr-1 h-4 w-4" /> Revision
-                      </Button>
-                      <Button variant="outline" className="text-destructive" onClick={() => void act(selected, "rejected")} disabled={saving}>
-                        <X className="mr-1 h-4 w-4" /> Reject
-                      </Button>
-                    </>
-                  ) : null}
-                  {selected.status === "draft" && selected.serviceRequestId ? (
-                    <Button asChild>
-                      <Link to={`/app/estimates/${selected.serviceRequestId}/build`}>
-                        <Send className="mr-1 h-4 w-4" /> Continue in Builder
-                      </Link>
-                    </Button>
-                  ) : null}
-                </div>
-              </>
-            )}
-          </DialogContent>
-        </Dialog>
 
         <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
           <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto p-0">
@@ -321,14 +203,5 @@ export default function Estimates() {
         </Dialog>
       </div>
     </RoleGuard>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border p-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-medium">{value}</p>
-    </div>
   );
 }

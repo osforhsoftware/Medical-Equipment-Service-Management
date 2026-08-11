@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 272" role="img" aria-label="MESMS">
+  <defs>
+    <linearGradient id="mesms-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d4a8f"/>
+      <stop offset="55%" stop-color="#1565b8"/>
+      <stop offset="100%" stop-color="#1ba3b8"/>
+    </linearGradient>
+    <linearGradient id="mesms-accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7dd3fc"/>
+      <stop offset="100%" stop-color="#5eead4"/>
+    </linearGradient>
+  </defs>
+  <rect width="300" height="272" rx="36" fill="url(#mesms-bg)"/>
+  <circle cx="150" cy="98" r="54" fill="rgba(255,255,255,0.12)"/>
+  <path d="M150 58v80M110 98h80" stroke="#fff" stroke-width="14" stroke-linecap="round"/>
+  <rect x="118" y="148" width="64" height="44" rx="10" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.35)" stroke-width="3"/>
+  <path d="M132 170h36M132 180h24" stroke="url(#mesms-accent)" stroke-width="5" stroke-linecap="round"/>
+  <text x="150" y="238" text-anchor="middle" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="700" letter-spacing="2">MESMS</text>
+</svg>

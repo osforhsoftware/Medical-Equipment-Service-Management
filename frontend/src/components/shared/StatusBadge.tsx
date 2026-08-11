@@ -36,12 +36,14 @@ const statusMap: Record<string, Tone> = {
   down: "destructive",
   // estimates / invoices / po
   draft: "muted",
-  sent: "info",
+  pendingApproval: "warning",
   approved: "success",
+  sent: "info",
   rejected: "destructive",
   revision: "warning",
   paid: "success",
   overdue: "destructive",
+  closed: "muted",
   received: "success",
   partial: "warning",
   cancelled: "muted",
@@ -50,6 +52,8 @@ const statusMap: Record<string, Tone> = {
   scheduled: "info",
   "parts-pending": "warning",
   review: "accent",
+  verified: "success",
+  passed: "info",
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {

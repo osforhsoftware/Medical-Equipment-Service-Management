@@ -9,12 +9,11 @@ const withEquipmentItems = {
 export class ServiceRequestsRepository {
   async findAll(
     tenantId: string,
-    filters?: { branchId?: string; status?: string; assignedTo?: string }
+    filters?: { status?: string; assignedTo?: string }
   ) {
     return prisma.serviceRequest.findMany({
       where: {
         tenantId,
-        ...(filters?.branchId && filters.branchId !== "all" ? { branchId: filters.branchId } : {}),
         ...(filters?.status ? { status: filters.status as ServiceRequest["status"] } : {}),
         ...(filters?.assignedTo ? { assignedTo: filters.assignedTo } : {}),
       },

@@ -27,7 +27,6 @@ import {
   QrCode,
   Receipt,
   Search,
-  ShieldAlert,
   ShoppingCart,
   Timer,
   UserCheck,
@@ -42,17 +41,14 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/context/AuthContext";
-import { useBranch } from "@/context/BranchContext";
-import {
-  ApiError,
-  api,
+import { api,
   type DashboardData,
   type DashboardQueueItem,
 } from "@/lib/api";
 import { formatCurrency, formatDate, formatDateTime, formatJobStatus } from "@/lib/format";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 const JOB_STATUS_ACTIONS = [
@@ -99,7 +95,6 @@ function roleQuickActions(role: Role): QuickAction[] {
       return [
         { label: "Pending Bills", to: "/app/billing", icon: Receipt },
         { label: "Estimates", to: "/app/estimates", icon: FileText },
-        { label: "AMC Contracts", to: "/app/amc", icon: ShieldAlert },
         { label: "Reports", to: "/app/reports", icon: IndianRupee },
       ];
     case "coordinator":
@@ -160,7 +155,7 @@ function overviewCards(role: Role, data: DashboardData) {
         { label: "Pending Bills", value: String(stats.pendingInvoices), icon: Receipt, accent: "primary" as const },
         { label: "Overdue Payments", value: String(stats.overdueInvoices), icon: AlertTriangle, accent: "destructive" as const },
         { label: "Revenue (MTD)", value: stats.revenueMtdLabel, icon: IndianRupee, accent: "success" as const, trend: data.trends.revenue },
-        { label: "Expiring AMC", value: String(stats.expiringAmc), icon: ShieldAlert, accent: "warning" as const },
+        { label: "Pending Estimates", value: String(stats.pendingEstimates), icon: FileText, accent: "warning" as const },
       ];
     case "coordinator":
       return [
@@ -232,7 +227,6 @@ function QueueRow({
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const { branchId } = useBranch();
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -243,16 +237,15 @@ export default function Dashboard() {
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      const overview = await api.getDashboard(branchId);
+      const overview = await api.getDashboard();
       setData(overview);
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load dashboard";
-      toast({ title: "Error", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to load dashboard" });
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [branchId]);
+  }, []);
 
   useEffect(() => {
     void loadDashboard();
@@ -273,8 +266,7 @@ export default function Dashboard() {
       });
       await loadDashboard();
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Could not update job status";
-      toast({ title: "Update failed", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Could not update job status" });
     } finally {
       setUpdatingJobId(null);
     }
@@ -674,22 +666,6 @@ export default function Dashboard() {
             </Card>
           )}
 
-          {(role === "admin" || role === "coordinator") && data.stats.expiringAmc > 0 && (
-            <Card className="border-destructive/20 bg-destructive/5 shadow-card">
-              <CardHeader className="flex flex-row items-center gap-2 pb-2">
-                <ShieldAlert className="h-4 w-4 text-destructive" />
-                <CardTitle className="text-base">AMC Watchlist</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  {data.stats.expiringAmc} contract{data.stats.expiringAmc === 1 ? "" : "s"} expiring within 30 days.
-                </p>
-                <Button variant="ghost" size="sm" className="mt-2 px-0" onClick={() => navigate("/app/amc")}>
-                  Review AMC <ArrowRight className="ml-1 h-3.5 w-3.5" />
-                </Button>
-              </CardContent>
-            </Card>
-          )}
         </div>
       </div>
     </div>

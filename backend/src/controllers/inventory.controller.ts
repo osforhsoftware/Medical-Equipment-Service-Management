@@ -5,7 +5,7 @@ import { success } from "@/utils/response";
 export class InventoryController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await inventoryService.getAll(req.tenantId!, req.query.branchId as string);
+      const data = await inventoryService.getAll(req.tenantId!);
       res.json(success("Inventory fetched successfully", data));
     } catch (err) { next(err); }
   }

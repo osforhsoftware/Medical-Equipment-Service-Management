@@ -4,9 +4,9 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/context/AuthContext";
-import { ApiError, api, type BackendServiceRequest } from "@/lib/api";
+import { api, type BackendServiceRequest } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 export default function PortalHistory() {
   const { user } = useAuth();
@@ -14,11 +14,12 @@ export default function PortalHistory() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    void api.listServiceRequests()
-      .then((rows) => setHistory(rows.filter((request) => request.customerId === user?.customerId)))
-      .catch((error) => toast({ title: "Unable to load service history", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" }))
+    if (!user) { setLoading(false); return; }
+    void api.getCustomerPortal()
+      .then((portal) => setHistory(portal.requests))
+      .catch((error) => toast.apiError(error, { fallback: "Request failed" }))
       .finally(() => setLoading(false));
-  }, [user?.customerId]);
+  }, [user]);
 
   return (
     <div className="space-y-6">
@@ -40,7 +41,9 @@ export default function PortalHistory() {
             </div>
           </div>
         ))}
-        {!loading && history.length === 0 ? <p className="p-8 text-center text-sm text-muted-foreground">No service records found.</p> : null}
+        {!loading && history.length === 0 ? (
+          <p className="p-6 text-sm text-muted-foreground">No service history yet.</p>
+        ) : null}
       </Card>
     </div>
   );

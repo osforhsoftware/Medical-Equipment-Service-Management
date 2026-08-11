@@ -8,11 +8,11 @@ export const DEMO_BRANCHES = [
 ] as const;
 
 export const DEMO_CUSTOMERS = [
-  { key: "c1", name: "St. Mary's Hospital", type: "Hospital" as const, contactPerson: "Dr. Ellen Park", email: "facilities@stmarys.org", phone: "+1 512-555-2010", city: "Austin", branchKey: "b1", equipmentCount: 42, activeJobs: 3, status: "active" as const },
-  { key: "c2", name: "Brighton Diagnostics", type: "DiagnosticLab" as const, contactPerson: "Omar Reyes", email: "ops@brightondx.com", phone: "+1 214-555-3320", city: "Dallas", branchKey: "b2", equipmentCount: 18, activeJobs: 1, status: "active" as const },
-  { key: "c3", name: "Lakeside Dental Group", type: "Dental" as const, contactPerson: "Tina Holt", email: "admin@lakesidedental.com", phone: "+1 713-555-4412", city: "Houston", branchKey: "b3", equipmentCount: 9, activeJobs: 0, status: "active" as const },
-  { key: "c4", name: "Vista Research Institute", type: "Research" as const, contactPerson: "Dr. Yuki Sato", email: "lab@vistari.org", phone: "+1 512-555-5510", city: "Austin", branchKey: "b1", equipmentCount: 27, activeJobs: 2, status: "active" as const },
-  { key: "c5", name: "Cedar Family Clinic", type: "Clinic" as const, contactPerson: "Rosa Mendez", email: "front@cedarclinic.com", phone: "+1 214-555-6600", city: "Dallas", branchKey: "b2", equipmentCount: 6, activeJobs: 0, status: "inactive" as const },
+  { key: "c1", name: "St. Mary's Hospital", type: "Hospital" as const, contactPerson: "Dr. Ellen Park", email: "facilities@stmarys.org", phone: "+1 512-555-2010", address: "1200 Medical Center Dr", city: "Austin", country: "United States", branchKey: "b1", equipmentCount: 42, activeJobs: 3, status: "active" as const },
+  { key: "c2", name: "Brighton Diagnostics", type: "DiagnosticLab" as const, contactPerson: "Omar Reyes", email: "ops@brightondx.com", phone: "+1 214-555-3320", address: "450 Lab Parkway", city: "Dallas", country: "United States", branchKey: "b2", equipmentCount: 18, activeJobs: 1, status: "active" as const },
+  { key: "c3", name: "Lakeside Dental Group", type: "Dental" as const, contactPerson: "Tina Holt", email: "admin@lakesidedental.com", phone: "+1 713-555-4412", address: "88 Lakeside Ave", city: "Houston", country: "United States", branchKey: "b3", equipmentCount: 9, activeJobs: 0, status: "active" as const },
+  { key: "c4", name: "Vista Research Institute", type: "Research" as const, contactPerson: "Dr. Yuki Sato", email: "lab@vistari.org", phone: "+1 512-555-5510", address: "210 Research Blvd", city: "Austin", country: "United States", branchKey: "b1", equipmentCount: 27, activeJobs: 2, status: "active" as const },
+  { key: "c5", name: "Cedar Family Clinic", type: "Clinic" as const, contactPerson: "Rosa Mendez", email: "front@cedarclinic.com", phone: "+1 214-555-6600", address: "15 Cedar St", city: "Dallas", country: "United States", branchKey: "b2", equipmentCount: 6, activeJobs: 0, status: "inactive" as const },
 ];
 
 export const DEMO_EQUIPMENT = [

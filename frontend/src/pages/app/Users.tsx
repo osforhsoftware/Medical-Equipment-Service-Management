@@ -5,6 +5,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -34,14 +35,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/context/AuthContext";
-import { ApiError } from "@/lib/api";
-import { api, type BackendBranch, type BackendDomainRole, type BackendUser } from "@/lib/api";
+import { api, type BackendUser } from "@/lib/api";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 const staffRoles: Role[] = ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing", "customer"];
 const filterRoles: (Role | "all")[] = ["all", "admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
+const multiAssignableRoles: Role[] = ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
 
 type FormState = {
   name: string;
@@ -49,7 +50,8 @@ type FormState = {
   email: string;
   phone: string;
   password: string;
-  role: Role;
+  selectedRoles: Role[];
+  primaryRole: Role;
   isActive: boolean;
 };
 
@@ -59,15 +61,32 @@ const emptyForm: FormState = {
   email: "",
   phone: "",
   password: "",
-  role: "coordinator",
+  selectedRoles: ["coordinator"],
+  primaryRole: "coordinator",
   isActive: true,
 };
+
+function userMatchesRoleFilter(user: BackendUser, roleFilter: Role): boolean {
+  const roles = user.roles?.length ? user.roles : [user.role];
+  return roles.includes(roleFilter);
+}
+
+function toggleRoleSelection(current: Role[], role: Role): Role[] {
+  if (role === "customer") {
+    return current.includes("customer") ? [] : ["customer"];
+  }
+
+  const withoutCustomer = current.filter((entry) => entry !== "customer");
+  if (withoutCustomer.includes(role)) {
+    const next = withoutCustomer.filter((entry) => entry !== role);
+    return next.length ? next : withoutCustomer;
+  }
+  return [...withoutCustomer, role];
+}
 
 export default function UsersPage() {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<BackendUser[]>([]);
-  const [domainRoles, setDomainRoles] = useState<BackendDomainRole[]>([]);
-  const [branches, setBranches] = useState<BackendBranch[]>([]);
   const [loading, setLoading] = useState(true);
   const [roleFilter, setRoleFilter] = useState<Role | "all">("all");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -75,23 +94,14 @@ export default function UsersPage() {
   const [editing, setEditing] = useState<BackendUser | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
-  const [additionalRoleId, setAdditionalRoleId] = useState("");
-  const [roleBranchId, setRoleBranchId] = useState("all");
 
   const loadUsers = async () => {
     setLoading(true);
     try {
-      const [data, roles, branchRows] = await Promise.all([
-        api.listUsers(),
-        api.listDomainRoles(),
-        api.listBranches(),
-      ]);
+      const data = await api.listUsers();
       setUsers(data);
-      setDomainRoles(roles);
-      setBranches(branchRows);
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load users";
-      toast({ title: "Error", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to load users" });
     } finally {
       setLoading(false);
     }
@@ -103,66 +113,78 @@ export default function UsersPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setAdditionalRoleId("");
-    setRoleBranchId("all");
     setForm(emptyForm);
     setDialogOpen(true);
   };
 
   const openEdit = (target: BackendUser) => {
+    const selectedRoles = (target.roles?.length ? target.roles : [target.role]) as Role[];
     setEditing(target);
-    setAdditionalRoleId("");
-    setRoleBranchId("all");
     setForm({
       name: target.name,
       username: target.username,
       email: target.email,
       phone: target.phone ?? "",
       password: "",
-      role: target.role as Role,
+      selectedRoles,
+      primaryRole: target.role as Role,
       isActive: target.isActive,
     });
     setDialogOpen(true);
   };
 
+  const updateSelectedRoles = (role: Role, checked: boolean) => {
+    setForm((prev) => {
+      const nextRoles = checked
+        ? toggleRoleSelection(prev.selectedRoles, role)
+        : prev.selectedRoles.filter((entry) => entry !== role);
+      const safeRoles = nextRoles.length ? nextRoles : prev.selectedRoles;
+      const primaryRole = safeRoles.includes(prev.primaryRole) ? prev.primaryRole : safeRoles[0];
+      return { ...prev, selectedRoles: safeRoles, primaryRole };
+    });
+  };
+
   const saveUser = async () => {
+    if (form.selectedRoles.length === 0) {
+      toast.warning("Please select at least one role");
+      return;
+    }
+
     setSaving(true);
     try {
+      const payload = {
+        name: form.name,
+        username: form.username,
+        email: form.email,
+        phone: form.phone || null,
+        role: form.primaryRole,
+        roles: form.selectedRoles,
+        primaryRole: form.primaryRole,
+        isActive: form.isActive,
+      };
+
       if (editing) {
         await api.updateUser(editing.id, {
-          name: form.name,
-          username: form.username,
-          email: form.email,
-          phone: form.phone || null,
-          role: form.role,
-          isActive: form.isActive,
+          ...payload,
           ...(form.password ? { password: form.password } : {}),
         });
-        if (additionalRoleId) {
-          await api.assignDomainRole({
-            userId: editing.id,
-            roleId: additionalRoleId,
-            branchId: roleBranchId === "all" ? null : roleBranchId,
-          });
-        }
-        toast({ title: "User updated", description: `${form.name} was updated successfully.` });
+        toast.success("User updated successfully", {
+          description: `${form.name} was updated successfully.`,
+        });
       } else {
         await api.createUser({
-          name: form.name,
-          username: form.username,
-          email: form.email,
+          ...payload,
           phone: form.phone || undefined,
           password: form.password,
-          role: form.role,
-          isActive: form.isActive,
         });
-        toast({ title: "User created", description: `${form.name} can now sign in.` });
+        toast.success("User added successfully", {
+          description: `${form.name} can now sign in.`,
+        });
       }
       setDialogOpen(false);
       await loadUsers();
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Unable to save user";
-      toast({ title: "Save failed", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Unable to save user" });
     } finally {
       setSaving(false);
     }
@@ -172,23 +194,27 @@ export default function UsersPage() {
     if (!deleteTarget) return;
     try {
       await api.deleteUser(deleteTarget.id);
-      toast({ title: "User deleted", description: `${deleteTarget.name} was removed.` });
+      toast.success("User deleted successfully", {
+        description: `${deleteTarget.name} was removed.`,
+      });
       setDeleteTarget(null);
       await loadUsers();
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Unable to delete user";
-      toast({ title: "Delete failed", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Unable to delete item" });
     }
   };
 
-  const filtered = roleFilter === "all" ? users : users.filter((u) => u.role === roleFilter);
+  const filtered =
+    roleFilter === "all" ? users : users.filter((user) => userMatchesRoleFilter(user, roleFilter));
+
+  const isCustomerOnly = form.selectedRoles.length === 1 && form.selectedRoles[0] === "customer";
 
   return (
     <RoleGuard roles={["admin"]}>
       <div className="space-y-6">
         <PageHeader
           title="User Management"
-          description="Create and manage staff accounts. Assign roles, phone numbers, and active status."
+          description="Create and manage staff accounts. Assign one or more job roles per person — e.g. Service Coordinator + Estimate Staff."
           actions={
             <Button onClick={openCreate} variant="brand">
               <Plus className="mr-1 h-4 w-4" /> Add User
@@ -196,7 +222,6 @@ export default function UsersPage() {
           }
         />
 
-        {/* Role filter tabs */}
         <div className="flex flex-wrap gap-2">
           {filterRoles.map((r) => (
             <button
@@ -226,68 +251,76 @@ export default function UsersPage() {
                     <tr className="border-b border-border bg-primary/[0.045] text-left">
                       <th className="px-4 py-3 font-medium">User</th>
                       <th className="px-4 py-3 font-medium">Contact</th>
-                      <th className="px-4 py-3 font-medium">Role</th>
+                      <th className="px-4 py-3 font-medium">Job Roles</th>
                       <th className="px-4 py-3 font-medium">Status</th>
                       <th className="px-4 py-3 text-right font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((u) => (
-                      <tr key={u.id} className="border-b border-border last:border-0 transition-colors hover:bg-secondary/30">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <div
-                              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white"
-                              style={{ backgroundColor: `hsl(${u.avatarColor})` }}
-                            >
-                              {u.name.charAt(0).toUpperCase()}
+                    {filtered.map((u) => {
+                      const displayRoles = (u.roles?.length ? u.roles : [u.role]) as Role[];
+                      return (
+                        <tr key={u.id} className="border-b border-border last:border-0 transition-colors hover:bg-secondary/30">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white"
+                                style={{ backgroundColor: `hsl(${u.avatarColor})` }}
+                              >
+                                {u.name.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="font-medium">{u.name}</p>
+                                <p className="text-xs text-muted-foreground font-mono">{u.username}</p>
+                                {currentUser?.id === u.id && (
+                                  <Badge variant="secondary" className="mt-0.5 text-[10px]">You</Badge>
+                                )}
+                              </div>
                             </div>
-                            <div>
-                              <p className="font-medium">{u.name}</p>
-                              <p className="text-xs text-muted-foreground font-mono">{u.username}</p>
-                              {currentUser?.id === u.id && (
-                                <Badge variant="secondary" className="mt-0.5 text-[10px]">You</Badge>
-                              )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="text-sm">{u.email}</p>
+                            {u.phone && (
+                              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                                <Phone className="h-3 w-3" /> {u.phone}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-1">
+                              {displayRoles.map((role) => (
+                                <Badge
+                                  key={role}
+                                  variant={role === u.role ? "outline" : "secondary"}
+                                  title={role === u.role ? "Primary login role" : undefined}
+                                >
+                                  {roleLabels[role] ?? role}
+                                </Badge>
+                              ))}
                             </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <p className="text-sm">{u.email}</p>
-                          {u.phone && (
-                            <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <Phone className="h-3 w-3" /> {u.phone}
-                            </p>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-1">
-                            <Badge variant="outline">{roleLabels[u.role as Role] ?? u.role}</Badge>
-                            {domainRoles.filter((role) => role.assignments?.some((assignment) => assignment.userId === u.id)).map((role) => (
-                              <Badge key={role.id} variant="secondary">{role.name}</Badge>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={u.isActive ? "active" : "inactive"} />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex justify-end gap-2">
-                            <Button variant="outline" size="sm" onClick={() => openEdit(u)}>
-                              <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="text-destructive hover:text-destructive"
-                              disabled={currentUser?.id === u.id}
-                              onClick={() => setDeleteTarget(u)}
-                            >
-                              <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge status={u.isActive ? "active" : "inactive"} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex justify-end gap-2">
+                              <Button variant="outline" size="sm" onClick={() => openEdit(u)}>
+                                <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-destructive hover:text-destructive"
+                                disabled={currentUser?.id === u.id}
+                                onClick={() => setDeleteTarget(u)}
+                              >
+                                <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {filtered.length === 0 && (
                       <tr>
                         <td colSpan={5} className="py-10 text-center text-sm text-muted-foreground">
@@ -304,7 +337,7 @@ export default function UsersPage() {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserCog className="h-5 w-5" /> {editing ? "Edit User" : "Add User"}
@@ -345,37 +378,58 @@ export default function UsersPage() {
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="role">Role</Label>
-              <Select value={form.role} onValueChange={(value) => setForm({ ...form, role: value as Role })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {staffRoles.map((role) => (
-                    <SelectItem key={role} value={role}>
-                      {roleLabels[role]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+
+            <div className="space-y-3 rounded-lg border border-border p-3">
+              <div>
+                <p className="text-sm font-medium">Job roles</p>
+                <p className="text-xs text-muted-foreground">
+                  Select all roles this staff member can perform. Example: Service Coordinator + Estimate Staff.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {multiAssignableRoles.map((role) => (
+                  <label key={role} className="flex items-center gap-2 rounded-md border border-border/70 px-3 py-2 text-sm">
+                    <Checkbox
+                      checked={form.selectedRoles.includes(role)}
+                      onCheckedChange={(checked) => updateSelectedRoles(role, checked === true)}
+                    />
+                    <span>{roleLabels[role]}</span>
+                  </label>
+                ))}
+              </div>
+              <label className="flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm">
+                <Checkbox
+                  checked={form.selectedRoles.includes("customer")}
+                  onCheckedChange={(checked) => updateSelectedRoles("customer", checked === true)}
+                />
+                <span>{roleLabels.customer} (portal only — cannot combine with staff roles)</span>
+              </label>
             </div>
-            {editing ? (
-              <div className="space-y-3 rounded-lg border border-border p-3">
-                <div>
-                  <p className="text-sm font-medium">Additional role assignment</p>
-                  <p className="text-xs text-muted-foreground">Assign another tenant role, optionally scoped to a branch.</p>
-                </div>
-                <Select value={additionalRoleId} onValueChange={setAdditionalRoleId}>
-                  <SelectTrigger><SelectValue placeholder="Select additional role" /></SelectTrigger>
-                  <SelectContent>{domainRoles.map((role) => <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>)}</SelectContent>
+
+            {!isCustomerOnly && form.selectedRoles.length > 1 ? (
+              <div className="grid gap-2">
+                <Label htmlFor="primaryRole">Primary login role</Label>
+                <Select
+                  value={form.primaryRole}
+                  onValueChange={(value) => setForm({ ...form, primaryRole: value as Role })}
+                >
+                  <SelectTrigger id="primaryRole">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {form.selectedRoles.map((role) => (
+                      <SelectItem key={role} value={role}>
+                        {roleLabels[role]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
-                <Select value={roleBranchId} onValueChange={setRoleBranchId}>
-                  <SelectTrigger><SelectValue placeholder="All branches" /></SelectTrigger>
-                  <SelectContent><SelectItem value="all">All branches</SelectItem>{branches.map((branch) => <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>)}</SelectContent>
-                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Used for the profile label and default dashboard view. All selected roles still grant module access.
+                </p>
               </div>
             ) : null}
+
             <div className="grid gap-2">
               <Label htmlFor="password">{editing ? "New password (optional)" : "Password"}</Label>
               <Input
@@ -401,7 +455,7 @@ export default function UsersPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={saveUser} disabled={saving}>
+            <Button onClick={saveUser} disabled={saving || form.selectedRoles.length === 0}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {editing ? "Save changes" : "Create user"}
             </Button>

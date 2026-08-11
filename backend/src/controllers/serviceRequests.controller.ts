@@ -5,7 +5,7 @@ import { success } from "@/utils/response";
 export class ServiceRequestsController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const filters = { branchId: req.query.branchId as string, status: req.query.status as string };
+      const filters = { status: req.query.status as string };
       const data = await serviceRequestsService.getAll(req.tenantId!, req.user!.userId, req.user!.role, filters);
       res.json(success("Service requests fetched successfully", data));
     } catch (err) { next(err); }
@@ -75,6 +75,21 @@ export class ServiceRequestsController {
         note,
       );
       res.json(success("Workflow advanced successfully", data));
+    } catch (err) { next(err); }
+  }
+
+  async reopen(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { status, note } = req.body as { status: string; note: string };
+      const data = await serviceRequestsService.reopen(
+        req.params.id,
+        req.tenantId!,
+        req.user!.userId,
+        req.user!.role,
+        status,
+        note,
+      );
+      res.json(success("Ticket reopened successfully", data));
     } catch (err) { next(err); }
   }
 

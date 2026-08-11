@@ -22,6 +22,12 @@ export class PurchaseOrdersService {
   }
 
   async create(tenantId: string, data: CreatePurchaseOrderData) {
+    if (data.status === "received" || data.status === "partial") {
+      throw new AppError(
+        "Create purchase orders as draft/sent, then receive via POST /api/domain/purchase-orders/:id/receipts",
+        409,
+      );
+    }
     const reference = await generateReference(tenantId, "PO", "purchaseOrder");
     return purchaseOrdersRepository.create(tenantId, {
       reference,
@@ -35,6 +41,13 @@ export class PurchaseOrdersService {
 
   async update(id: string, tenantId: string, data: Record<string, unknown>) {
     await this.getById(id, tenantId);
+    const blockedStatuses = ["received", "partial"];
+    if (typeof data.status === "string" && blockedStatuses.includes(data.status)) {
+      throw new AppError(
+        "Use POST /api/domain/purchase-orders/:id/receipts to receive stock. Legacy status updates cannot change inventory.",
+        409,
+      );
+    }
     if (data.expectedDate) {
       data.expectedDate = new Date(data.expectedDate as string);
     }

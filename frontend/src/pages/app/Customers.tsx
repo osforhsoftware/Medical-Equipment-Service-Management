@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { Building2, Loader2, Mail, MapPin, Phone, Plus, User } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Building2, Loader2, Plus } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -20,90 +21,81 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { useBranch } from "@/context/BranchContext";
-import { ApiError } from "@/lib/api";
-import { api, type BackendBranch, type BackendCustomer } from "@/lib/api";
-import { toast } from "@/hooks/use-toast";
+import { api, type BackendCustomer } from "@/lib/api";
+import { CUSTOMER_TYPE_OPTIONS, formatFixedOption } from "@/lib/fixedOptions";
+import { toast } from "@/lib/toast";
 
-const CUSTOMER_TYPES = [
-  { value: "Hospital", label: "Hospital" },
-  { value: "Clinic", label: "Clinic" },
-  { value: "DiagnosticLab", label: "Diagnostic Lab" },
-  { value: "Research", label: "Research" },
-  { value: "Dental", label: "Dental" },
-] as const;
-
-function formatCustomerType(type: string) {
-  return CUSTOMER_TYPES.find((t) => t.value === type)?.label ?? type;
+function formatCustomerType(type: string, typeOther?: string | null) {
+  return formatFixedOption(CUSTOMER_TYPE_OPTIONS, type, typeOther);
 }
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+function customerTypeValue(c: BackendCustomer) {
+  if (c.type === "Other" && c.typeOther?.trim()) return c.typeOther.trim();
+  return c.type;
+}
+
+function buildTypeOptions(customers: BackendCustomer[], addedTypes: string[]) {
+  const base = CUSTOMER_TYPE_OPTIONS.filter((o) => o.value !== "Other");
+  const other = CUSTOMER_TYPE_OPTIONS.find((o) => o.value === "Other")!;
+  const known = new Set(base.map((o) => o.value));
+  const extras = [
+    ...new Set([
+      ...customers.map(customerTypeValue),
+      ...addedTypes,
+    ]),
+  ]
+    .filter((t) => t && !known.has(t) && t !== "Other")
+    .sort()
+    .map((t) => ({ value: t, label: t }));
+  return [...base, ...extras, other];
 }
 
 type FormState = {
   name: string;
   type: string;
+  typeOther: string;
   contactPerson: string;
   email: string;
   phone: string;
+  address: string;
   city: string;
-  branchId: string;
+  country: string;
+  licenseGst: string;
   status: string;
 };
 
 const emptyForm: FormState = {
   name: "",
   type: "Hospital",
+  typeOther: "",
   contactPerson: "",
   email: "",
   phone: "",
+  address: "",
   city: "",
-  branchId: "",
+  country: "",
+  licenseGst: "",
   status: "active",
 };
 
 export default function Customers() {
-  const { branchId } = useBranch();
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState<BackendCustomer[]>([]);
-  const [branches, setBranches] = useState<BackendBranch[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [selected, setSelected] = useState<BackendCustomer | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [addedTypes, setAddedTypes] = useState<string[]>([]);
 
   const loadCustomers = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.listCustomers(branchId);
+      const data = await api.listCustomers();
       setCustomers(data);
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load customers";
-      toast({ title: "Error", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to load customers" });
     } finally {
       setLoading(false);
-    }
-  }, [branchId]);
-
-  const loadBranches = useCallback(async () => {
-    try {
-      const data = await api.listBranches();
-      setBranches(data);
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load branches";
-      toast({ title: "Error", description: message, variant: "destructive" });
     }
   }, []);
 
@@ -111,40 +103,66 @@ export default function Customers() {
     void loadCustomers();
   }, [loadCustomers]);
 
-  useEffect(() => {
-    void loadBranches();
-  }, [loadBranches]);
+  const typeSelectOptions = useMemo(
+    () => buildTypeOptions(customers, addedTypes),
+    [customers, addedTypes],
+  );
+
+  const typeFilterOptions = useMemo(
+    () => typeSelectOptions.filter((o) => o.value !== "Other").map((o) => ({ label: o.label, value: o.value })),
+    [typeSelectOptions],
+  );
+
+  const resolvedType = form.type === "Other" ? "" : form.type;
 
   const openCreate = () => {
-    setForm({
-      ...emptyForm,
-      branchId: branchId !== "all" ? branchId : branches[0]?.id ?? "",
-    });
+    setForm(emptyForm);
     setDialogOpen(true);
   };
 
+  const addType = () => {
+    const name = form.typeOther.trim();
+    if (!name) return;
+
+    const existing = typeSelectOptions.find((o) => o.value.toLowerCase() === name.toLowerCase());
+    if (existing && existing.value !== "Other") {
+      setForm({ ...form, type: existing.value, typeOther: "" });
+      toast.info("Type selected", { description: `"${existing.label}" is already in the list.` });
+      return;
+    }
+
+    setAddedTypes((current) => [...new Set([...current, name])]);
+    setForm({ ...form, type: name, typeOther: "" });
+    toast.success("Type added", { description: `"${name}" is now available in the dropdown.` });
+  };
+
   const saveCustomer = async () => {
+    if (!resolvedType) {
+      toast.warning("Please select or add a customer type");
+      return;
+    }
     setSaving(true);
     try {
       await api.createCustomer({
         name: form.name.trim(),
-        type: form.type,
+        type: resolvedType,
+        typeOther: null,
         contactPerson: form.contactPerson.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
+        address: form.address.trim(),
         city: form.city.trim(),
-        branchId: form.branchId,
+        country: form.country.trim(),
+        licenseGst: form.licenseGst.trim() || null,
         status: form.status,
       });
-      toast({ title: "Customer created", description: `${form.name.trim()} was added successfully.` });
+      toast.success("Customer created successfully", {
+        description: `${form.name.trim()} was added successfully.`,
+      });
       setDialogOpen(false);
       await loadCustomers();
     } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.errors?.join(", ") || err.message
-          : "Unable to save customer";
-      toast({ title: "Save failed", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Unable to save customer" });
     } finally {
       setSaving(false);
     }
@@ -169,12 +187,17 @@ export default function Customers() {
     {
       key: "type",
       header: "Type",
-      render: (c) => <span className="text-sm">{formatCustomerType(c.type)}</span>,
+      render: (c) => <span className="text-sm">{formatCustomerType(customerTypeValue(c), c.type === "Other" ? c.typeOther : null)}</span>,
     },
     {
       key: "city",
-      header: "City",
-      render: (c) => <span className="text-sm text-muted-foreground">{c.city}</span>,
+      header: "Site",
+      render: (c) => (
+        <div className="text-sm text-muted-foreground">
+          <p>{[c.city, c.country].filter(Boolean).join(", ") || "—"}</p>
+          {c.address ? <p className="text-xs truncate max-w-[180px]">{c.address}</p> : null}
+        </div>
+      ),
     },
     {
       key: "email",
@@ -203,22 +226,13 @@ export default function Customers() {
     },
   ];
 
-  const typeOptions = CUSTOMER_TYPES.map((t) => ({ label: t.label, value: t.value }));
-
-  const branchName = (id: string) => branches.find((b) => b.id === id)?.name ?? "—";
-  const selectedBranch = selected ? branches.find((b) => b.id === selected.branchId) : null;
-
   return (
     <div className="space-y-6">
       <PageHeader
         title="Customers"
         description="Hospitals, clinics, labs and facilities you service."
         actions={
-          <Button
-            onClick={openCreate}
-            disabled={branches.length === 0}
-            variant="brand"
-          >
+          <Button onClick={openCreate} variant="brand">
             <Plus className="mr-1 h-4 w-4" /> Add Customer
           </Button>
         }
@@ -232,14 +246,14 @@ export default function Customers() {
         <DataTable
           data={customers}
           columns={columns}
-          searchKeys={["name", "contactPerson", "email", "city"]}
+          searchKeys={["name", "contactPerson", "email", "city", "country", "address", "licenseGst"]}
           searchPlaceholder="Search customers…"
           emptyMessage="No customers yet. Add your first customer to get started."
           filters={[
             {
               label: "Type",
-              options: typeOptions,
-              predicate: (c, v) => c.type === v,
+              options: typeFilterOptions,
+              predicate: (c, v) => customerTypeValue(c) === v,
             },
             {
               label: "Status",
@@ -250,58 +264,9 @@ export default function Customers() {
               predicate: (c, v) => c.status === v,
             },
           ]}
-          onRowClick={setSelected}
+          onRowClick={(c) => navigate(`/app/customers/${c.id}`)}
         />
       )}
-
-      <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-md">
-          {selected && (
-            <>
-              <SheetHeader>
-                <div className="flex items-center gap-2">
-                  <SheetTitle>{selected.name}</SheetTitle>
-                  <StatusBadge status={selected.status as "active" | "inactive"} />
-                </div>
-                <SheetDescription>
-                  {formatCustomerType(selected.type)} · {selected.city}
-                </SheetDescription>
-              </SheetHeader>
-
-              <div className="mt-5 space-y-5 text-sm">
-                <div className="grid grid-cols-2 gap-3">
-                  <Info label="Equipment" value={String(selected.equipmentCount)} />
-                  <Info label="Active jobs" value={String(selected.activeJobs)} />
-                  <Info label="Type" value={formatCustomerType(selected.type)} />
-                  <Info label="Branch" value={branchName(selected.branchId)} />
-                </div>
-
-                <div>
-                  <p className="mb-2 text-xs font-medium text-muted-foreground">Contact</p>
-                  <div className="space-y-2 rounded-lg border border-border p-3">
-                    <DetailRow icon={User} label="Contact person" value={selected.contactPerson} />
-                    <DetailRow icon={Mail} label="Email" value={selected.email} />
-                    <DetailRow icon={Phone} label="Phone" value={selected.phone} />
-                    <DetailRow icon={MapPin} label="City" value={selected.city} />
-                    {selectedBranch && (
-                      <DetailRow
-                        icon={Building2}
-                        label="Branch office"
-                        value={`${selectedBranch.name} · ${selectedBranch.city}`}
-                      />
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <Info label="Added" value={formatDate(selected.createdAt)} />
-                  <Info label="Last updated" value={formatDate(selected.updatedAt)} />
-                </div>
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-lg">
@@ -323,12 +288,17 @@ export default function Customers() {
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label>Type</Label>
-                <Select value={form.type} onValueChange={(value) => setForm({ ...form, type: value })}>
+                <Select
+                  value={form.type}
+                  onValueChange={(value) =>
+                    setForm({ ...form, type: value, typeOther: value === "Other" ? form.typeOther : "" })
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {CUSTOMER_TYPES.map((t) => (
+                    {typeSelectOptions.map((t) => (
                       <SelectItem key={t.value} value={t.value}>
                         {t.label}
                       </SelectItem>
@@ -349,6 +319,31 @@ export default function Customers() {
                 </Select>
               </div>
             </div>
+            {form.type === "Other" && (
+              <div className="grid gap-2 rounded-lg border border-dashed border-border p-3">
+                <Label htmlFor="customer-type-other">Add new type</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="customer-type-other"
+                    value={form.typeOther}
+                    onChange={(e) => setForm({ ...form, typeOther: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addType();
+                      }
+                    }}
+                    placeholder="e.g. Nursing Home, Pharmacy"
+                  />
+                  <Button type="button" variant="outline" disabled={!form.typeOther.trim()} onClick={addType}>
+                    Add
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Added types appear in the dropdown above for this and future customers.
+                </p>
+              </div>
+            )}
             <div className="grid gap-2">
               <Label htmlFor="contact-person">Contact person</Label>
               <Input
@@ -379,6 +374,15 @@ export default function Customers() {
                 />
               </div>
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="site-address">Site address</Label>
+              <Input
+                id="site-address"
+                value={form.address}
+                onChange={(e) => setForm({ ...form, address: e.target.value })}
+                placeholder="1200 Medical Center Dr"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="city">City</Label>
@@ -390,62 +394,49 @@ export default function Customers() {
                 />
               </div>
               <div className="grid gap-2">
-                <Label>Branch</Label>
-                <Select value={form.branchId} onValueChange={(value) => setForm({ ...form, branchId: value })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select branch" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {branches.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="country">Country</Label>
+                <Input
+                  id="country"
+                  value={form.country}
+                  onChange={(e) => setForm({ ...form, country: e.target.value })}
+                  placeholder="United States"
+                />
               </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="license-gst">License / GST number</Label>
+              <Input
+                id="license-gst"
+                value={form.licenseGst}
+                onChange={(e) => setForm({ ...form, licenseGst: e.target.value })}
+                placeholder="Optional — GST, trade license, or local tax ID"
+              />
+              <p className="text-xs text-muted-foreground">
+                Optional. Use whichever ID applies for this country (GST, license, VAT, etc.).
+              </p>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={saveCustomer} disabled={saving || !form.branchId}>
+            <Button
+              onClick={saveCustomer}
+              disabled={
+                saving ||
+                !form.name.trim() ||
+                !resolvedType ||
+                !form.address.trim() ||
+                !form.city.trim() ||
+                !form.country.trim()
+              }
+            >
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Save customer
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border p-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-medium">{value}</p>
-    </div>
-  );
-}
-
-function DetailRow({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof User;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-start gap-2.5">
-      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-      <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="font-medium break-words">{value}</p>
-      </div>
     </div>
   );
 }

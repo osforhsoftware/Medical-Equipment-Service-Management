@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { jobsByType, revenueTrend } from "@/data/mock";
 import { formatCurrency } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 const COLORS = ["hsl(var(--primary))", "hsl(var(--accent))", "hsl(var(--success))", "hsl(var(--warning))", "hsl(var(--info))"];
 
@@ -26,7 +26,6 @@ const reports = [
   "Revenue by Customer",
   "Equipment Downtime Analysis",
   "Inventory Consumption",
-  "AMC Renewal Forecast",
   "Engineer Productivity",
 ];
 

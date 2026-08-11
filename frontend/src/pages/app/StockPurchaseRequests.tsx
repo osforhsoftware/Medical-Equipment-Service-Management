@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Loader2, ShoppingCart } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -17,9 +18,10 @@ import { RoleGuard } from "@/components/auth/RoleGuard";
 import { ApiError, api, type BackendStockPurchaseRequest } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { defaultDatePlusDays, formatDate } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 export default function StockPurchaseRequests() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const canConvert = user?.role === "admin" || user?.role === "inventory";
   const [rows, setRows] = useState<BackendStockPurchaseRequest[]>([]);
@@ -126,6 +128,7 @@ export default function StockPurchaseRequests() {
             columns={columns}
             searchKeys={["note"]}
             emptyMessage="No stock purchase requests."
+            onRowClick={(r) => navigate(`/app/stock-purchase-requests/${r.id}`)}
           />
         )}
 

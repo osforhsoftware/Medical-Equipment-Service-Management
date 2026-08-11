@@ -7,7 +7,6 @@ import { auditMutation } from "@/middleware/audit";
 
 // Routes
 import authRoutes from "@/routes/auth.routes";
-import branchesRoutes from "@/routes/branches.routes";
 import customersRoutes from "@/routes/customers.routes";
 import equipmentRoutes from "@/routes/equipment.routes";
 import serviceRequestsRoutes from "@/routes/serviceRequests.routes";
@@ -45,7 +44,6 @@ app.get("/api/health", (_req, res) => {
 // ── API Routes ────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/users", usersRoutes);
-app.use("/api/branches", branchesRoutes);
 app.use("/api/customers", customersRoutes);
 app.use("/api/equipment", equipmentRoutes);
 app.use("/api/service-requests", serviceRequestsRoutes);

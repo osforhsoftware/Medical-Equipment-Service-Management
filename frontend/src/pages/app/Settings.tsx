@@ -21,14 +21,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ApiError, type DemoSeedStatus } from "@/lib/api";
+import { type DemoSeedStatus } from "@/lib/api";
 import { useSettings } from "@/context/SettingsContext";
 import { RBAC_MODULES, RBAC_ROLES, buildDefaultRbacMatrix } from "@/config/defaultRbac";
 import { navItems } from "@/config/nav";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
 import { api } from "@/lib/api";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 const DEMO_MODULE_ROWS: { label: string; countKey: keyof DemoSeedStatus["counts"] }[] = [
   { label: "Customers", countKey: "customers" },
@@ -47,7 +47,6 @@ const DEMO_MODULE_ROWS: { label: string; countKey: keyof DemoSeedStatus["counts"
 ];
 
 const AUTOMATION_KEYS = [
-  { key: "amcRenewalReminders" as const, title: "AMC renewal reminders", desc: "Notify 30 days before contract expiry" },
   { key: "lowStockAlerts" as const, title: "Low-stock alerts", desc: "Alert when items hit reorder level" },
   { key: "autoReserveOnApproval" as const, title: "Auto-reserve on approval", desc: "Reserve inventory when estimate is approved" },
   { key: "autoGenerateReport" as const, title: "Auto-generate service report", desc: "Create PDF report on job completion" },
@@ -87,16 +86,17 @@ export default function Settings() {
 
   const handleSeedDemo = async () => {
     setSeedingDemo(true);
+    const loadingId = toast.loading("Seeding demo data...");
     try {
       const status = await api.seedDemoData();
       setDemoStatus(status);
-      toast({
-        title: "Demo data seeded",
+      toast.success("Demo data seeded", {
+        id: loadingId,
         description: "Sample records are now available across all modules.",
+        force: true,
       });
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Unable to seed demo data";
-      toast({ title: "Seed failed", description: message, variant: "destructive" });
+      toast.apiError(err, { id: loadingId, fallback: "Unable to seed demo data", force: true });
     } finally {
       setSeedingDemo(false);
     }
@@ -104,16 +104,17 @@ export default function Settings() {
 
   const handleRemoveDemo = async () => {
     setRemovingDemo(true);
+    const loadingId = toast.loading("Removing demo data...");
     try {
       const status = await api.removeDemoData();
       setDemoStatus(status);
-      toast({
-        title: "Demo data removed",
+      toast.success("Demo data removed", {
+        id: loadingId,
         description: "All seeded sample records have been deleted.",
+        force: true,
       });
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Unable to remove demo data";
-      toast({ title: "Remove failed", description: message, variant: "destructive" });
+      toast.apiError(err, { id: loadingId, fallback: "Unable to remove demo data", force: true });
     } finally {
       setRemovingDemo(false);
     }
@@ -154,10 +155,9 @@ export default function Settings() {
       }
       updateLocal(updated);
       setLogoFile(null);
-      toast({ title: "Organization saved", description: "Company details updated." });
+      toast.success("Organization saved", { description: "Company details updated." });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unable to save";
-      toast({ title: "Save failed", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Unable to save organization settings" });
     } finally {
       setSavingOrg(false);
     }
@@ -169,10 +169,9 @@ export default function Settings() {
     try {
       const updated = await api.updateSettings({ [key]: value });
       updateLocal(updated);
-      toast({ title: "Automation updated", description: "Setting saved to the database." });
+      toast.success("Automation updated", { description: "Setting saved to the database." });
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Unable to save setting";
-      toast({ title: "Update failed", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Unable to save setting" });
     } finally {
       setTogglingKey(null);
     }
@@ -194,10 +193,9 @@ export default function Settings() {
       const updated = await api.updateSettings({ rbacMatrix });
       updateLocal(updated);
       await refresh();
-      toast({ title: "Permissions saved", description: "Role permissions updated for all users." });
+      toast.success("Permissions saved", { description: "Role permissions updated for all users." });
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Unable to save permissions";
-      toast({ title: "Save failed", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Unable to save permissions" });
     } finally {
       setSavingRbac(false);
     }
@@ -350,11 +348,6 @@ export default function Settings() {
                   <Badge variant={demoStatus?.seeded ? "default" : "secondary"}>
                     {demoStatus?.seeded ? "Demo data active" : "No demo data"}
                   </Badge>
-                  {demoStatus?.seeded ? (
-                    <span className="text-xs text-muted-foreground">
-                      {demoStatus.counts.branches} branches seeded
-                    </span>
-                  ) : null}
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {DEMO_MODULE_ROWS.map((row) => (

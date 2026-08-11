@@ -7,10 +7,10 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
-import { ApiError, api, type BackendEquipment, type BackendEstimate, type BackendServiceRequest } from "@/lib/api";
+import { api, type BackendEquipment, type BackendEstimate, type BackendServiceRequest } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { formatCurrency } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 export default function PortalDashboard() {
   const { user } = useAuth();
@@ -21,16 +21,20 @@ export default function PortalDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user?.customerId) { setLoading(false); return; }
-    void Promise.all([api.listEquipment({ customerId: user.customerId }), api.listServiceRequests(), api.listEstimates()])
-      .then(([equipment, requests, estimates]) => {
-        setMyEquipment(equipment);
-        setMyRequests(requests.filter((request) => request.customerId === user.customerId));
-        setPendingEstimates(estimates.filter((estimate) => estimate.customerId === user.customerId && ["sent", "revision"].includes(estimate.status)));
+    if (!user) { setLoading(false); return; }
+    void api.getCustomerPortal()
+      .then((portal) => {
+        setMyEquipment(portal.equipment);
+        setMyRequests(portal.requests);
+        setPendingEstimates(
+          portal.estimates.filter((estimate) =>
+            ["sent", "revision", "pendingAdminApproval"].includes(estimate.status),
+          ),
+        );
       })
-      .catch((error) => toast({ title: "Unable to load portal overview", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" }))
+      .catch((error) => toast.apiError(error, { fallback: "Request failed" }))
       .finally(() => setLoading(false));
-  }, [user?.customerId]);
+  }, [user]);
 
   return (
     <div className="space-y-6">
@@ -42,7 +46,7 @@ export default function PortalDashboard() {
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="My Equipment" value={String(myEquipment.length)} icon={HardDrive} accent="primary" />
-        <StatCard label="Active Requests" value={String(myRequests.filter((r) => !["completed", "invoiced"].includes(r.status)).length)} icon={FileClock} accent="accent" />
+        <StatCard label="Active Requests" value={String(myRequests.filter((r) => !["completed", "invoiced", "finished"].includes(r.status)).length)} icon={FileClock} accent="accent" />
         <StatCard label="Estimates to Review" value={String(pendingEstimates.length)} icon={ShieldCheck} accent="warning" />
       </div>
 
