@@ -413,7 +413,7 @@ model ServiceTicketChangeRequest {
   serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
   job            ServiceJob?    @relation(fields: [jobId], references: [id], onDelete: SetNull)
 
-  @@index([tenantId, serviceRequestId, status])
+  @@index([tenantId, serviceRequestId, status], map: "stcr_tenant_sr_status_idx")
   @@map("service_ticket_change_requests")
 }
 
