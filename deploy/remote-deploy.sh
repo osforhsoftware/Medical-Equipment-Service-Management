@@ -159,7 +159,7 @@ pm2 delete mesms-api 2>/dev/null || true
 pm2 start dist/src/index.js \
   --name mesms-api \
   --cwd "$APP_DIR/backend" \
-  --node-args="-r tsconfig-paths/register"
+  --node-args="-r dotenv/config -r tsconfig-paths/register"
 pm2 save
 
 echo "=== Nginx: write/reload site 'mems' only ==="
