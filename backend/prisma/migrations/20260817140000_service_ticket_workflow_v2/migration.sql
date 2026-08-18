@@ -24,7 +24,7 @@ CREATE TABLE `service_ticket_change_requests` (
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` DATETIME(3) NOT NULL,
   PRIMARY KEY (`id`),
-  INDEX `service_ticket_change_requests_tenant_id_service_request_id_status_idx`(`tenant_id`, `service_request_id`, `status`),
+  INDEX `stcr_tenant_sr_status_idx`(`tenant_id`, `service_request_id`, `status`),
   CONSTRAINT `service_ticket_change_requests_tenant_id_fkey` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `service_ticket_change_requests_service_request_id_fkey` FOREIGN KEY (`service_request_id`) REFERENCES `service_requests`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `service_ticket_change_requests_job_id_fkey` FOREIGN KEY (`job_id`) REFERENCES `service_jobs`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
