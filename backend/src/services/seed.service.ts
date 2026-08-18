@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "@/db/prisma";
 import { env } from "@/config/env";
+import { taxonomyService } from "@/services/taxonomy.service";
 import {
   DEMO_AUDIT_LOGS,
   DEMO_BRANCHES,
@@ -149,6 +150,8 @@ export class SeedService {
     const branchIds: Record<string, string> = {};
     const customerIds: Record<string, string> = {};
     const equipmentIds: Record<string, string> = {};
+
+    await taxonomyService.ensureDefaults(tenantId);
 
     await prisma.$transaction(async (tx) => {
       for (const branch of DEMO_BRANCHES) {

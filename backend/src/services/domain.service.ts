@@ -3,9 +3,12 @@ import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
 import {
   assertEstimateDecisionAllowed,
+  normalizeTicketStatus,
   resolveTicketEventStatus,
 } from "@/services/workflow/serviceTicketStateMachine";
 import { generateReference } from "@/utils/reference";
+import { ESTIMATE_STAFF_APPROVER_ROLES } from "@/config/apiAccess";
+import { userHasAnyRoleKey } from "@/utils/userRoles";
 
 type Actor = { userId: string; role: string };
 type JsonObject = Record<string, unknown>;
@@ -201,7 +204,12 @@ export class DomainService {
       if (!estimate) throw new AppError("Estimate not found", 404);
       assertEstimateDecisionAllowed(estimate.status);
 
-      const isStaffApprover = ["admin", "coordinator"].includes(actor.role);
+      const isStaffApprover = await userHasAnyRoleKey(
+        actor.userId,
+        tenantId,
+        actor.role,
+        ESTIMATE_STAFF_APPROVER_ROLES,
+      );
       if (actor.role === "customer") {
         const user = await tx.user.findFirst({ where: { id: actor.userId, tenantId } });
         if (!user?.customerId || user.customerId !== estimate.customerId) {
@@ -226,7 +234,7 @@ export class DomainService {
         }
       }
       if (input.decision === "approved" && !isStaffApprover && actor.role !== "estimator") {
-        throw new AppError("Only admin or coordinator can approve estimates for job scheduling", 403);
+        throw new AppError("Only admin, coordinator, inspection staff, or service staff can approve estimates", 403);
       }
       if (input.decision === "approved" && isStaffApprover && !input.engineerId) {
         throw new AppError("engineerId is required when approving an estimate", 422);
@@ -251,8 +259,16 @@ export class DomainService {
                 ? "estimateRejected"
                 : "estimatePendingApproval";
           const next = resolveTicketEventStatus(sr.status, event);
-          if (next !== sr.status) {
-            await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
+          if (next !== normalizeTicketStatus(sr.status)) {
+            await tx.serviceRequest.update({
+              where: { id: sr.id },
+              data: {
+                status: next as never,
+                ...(status === "approved" && input.engineerId
+                  ? { assignedEngineerId: input.engineerId }
+                  : {}),
+              },
+            });
           }
         }
       }
@@ -420,8 +436,11 @@ export class DomainService {
               where: { tenantId, estimateId, jobId: null, status: { in: ["active", "shortage"] } },
               data: { jobId: job.id },
             });
-            const next = resolveTicketEventStatus(sr.status === "approval" ? "approval" : sr.status, "jobScheduled");
-            await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
+            const next = resolveTicketEventStatus(
+              normalizeTicketStatus(sr?.status ?? "pending_approval"),
+              "jobScheduled",
+            );
+            await tx.serviceRequest.update({ where: { id: sr!.id }, data: { status: next as never } });
             await tx.notification.create({
               data: {
                 tenantId,
@@ -836,7 +855,7 @@ export class DomainService {
       if (!job?.estimate || job.estimate.status !== "approved") {
         throw new AppError("Completed job with an approved estimate is required", 409);
       }
-      if (!job.billingVerifiedAt) {
+      if (!input.skipBillingVerification && !job.billingVerifiedAt) {
         throw new AppError("Billing verification must be completed before generating an invoice", 409);
       }
       const existing = await tx.invoice.findFirst({ where: { tenantId, jobId: job.id, status: { not: "closed" } } });
@@ -955,7 +974,10 @@ export class DomainService {
 
       if (fullyPaid) {
         if (invoice.serviceRequestId && invoice.serviceRequest?.status === "invoiced") {
-          const next = resolveTicketEventStatus("invoiced", "ticketFinished");
+          const next = resolveTicketEventStatus(
+            normalizeTicketStatus(invoice.serviceRequest.status),
+            "ticketClosed",
+          );
           await tx.serviceRequest.update({
             where: { id: invoice.serviceRequestId },
             data: { status: next as never },
@@ -1458,7 +1480,7 @@ export class DomainService {
     const sr = await prisma.serviceRequest.findFirst({ where: { id: serviceRequestId, tenantId } });
     if (!sr) throw new AppError("Service ticket not found", 404);
     if (sr.status !== "invoiced") throw new AppError("Ticket must be invoiced before finishing", 409);
-    const next = resolveTicketEventStatus(sr.status, "ticketFinished");
+    const next = resolveTicketEventStatus(normalizeTicketStatus(sr.status), "ticketClosed");
     return prisma.serviceRequest.update({
       where: { id: serviceRequestId },
       data: { status: next as never },

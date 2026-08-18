@@ -1,5 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
+import { z } from "zod";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import {
   DetailInfoGrid,
   DetailSection,
@@ -9,10 +14,16 @@ import { RoleGuard } from "@/components/auth/RoleGuard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/AuthContext";
 import { api, ApiError, type BackendInventoryItem } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
 import { toast } from "@/lib/toast";
+
+const adjustSchema = z.object({
+  adjustDelta: z.string().refine((v) => v.trim() !== "" && Number(v) !== 0, "Enter a non-zero adjustment."),
+  adjustReason: fieldRules.requiredString("Reason"),
+});
 
 export default function InventoryDetail() {
   const { id = "" } = useParams();
@@ -25,6 +36,21 @@ export default function InventoryDetail() {
   const [adjustReason, setAdjustReason] = useState("");
   const [saving, setSaving] = useState(false);
   const tab = searchParams.get("tab") ?? "overview";
+  const adjustRef = useRef<HTMLDivElement>(null);
+  const {
+    errors,
+    shouldShow,
+    validateAll,
+    handleBlur,
+    handleChange,
+    applyApiErrors,
+    reset: resetValidation,
+  } = useFormValidation({
+    fieldOrder: ["adjustDelta", "adjustReason"],
+    schema: adjustSchema,
+  });
+
+  const formValues = () => ({ adjustDelta, adjustReason });
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -49,15 +75,19 @@ export default function InventoryDetail() {
 
   const adjustStock = async () => {
     if (!item) return;
+    if (!validateAll(formValues(), undefined, adjustRef.current)) return;
     setSaving(true);
     try {
       const updated = await api.adjustInventoryStock(item.id, Number(adjustDelta), adjustReason.trim());
       setItem(updated);
       setAdjustDelta("");
       setAdjustReason("");
+      resetValidation();
       toast({ title: "Stock adjusted" });
     } catch (err) {
-      toast.apiError(err, { fallback: "Adjustment failed" });
+      if (!applyApiErrors(err, adjustRef.current)) {
+        toast.apiError(err, { fallback: "Adjustment failed" });
+      }
     } finally {
       setSaving(false);
     }
@@ -138,19 +168,61 @@ export default function InventoryDetail() {
             <CardHeader className="pb-3"><CardTitle className="text-base">Actions</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               {user?.role === "admin" ? (
-                <>
-                  <p className="text-sm font-medium">Force stock adjustment</p>
-                  <Input type="number" value={adjustDelta} onChange={(e) => setAdjustDelta(e.target.value)} placeholder="Delta (+/-)" />
-                  <Input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} placeholder="Reason (required)" />
-                  <Button
-                    size="sm"
-                    className="w-full"
-                    disabled={saving || !adjustReason.trim() || Number(adjustDelta) === 0}
-                    onClick={() => void adjustStock()}
-                  >
-                    Apply adjustment
-                  </Button>
-                </>
+                <form
+                  noValidate
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void adjustStock();
+                  }}
+                >
+                  <div ref={adjustRef} className="space-y-3">
+                    <p className="text-sm font-medium">Force stock adjustment</p>
+                    <div className="grid gap-2" data-field="adjustDelta">
+                      <Label htmlFor="adjust-delta" className={shouldShow("adjustDelta") ? "text-destructive" : undefined}>
+                        Delta (+/-)
+                        <RequiredMark />
+                      </Label>
+                      <Input
+                        id="adjust-delta"
+                        name="adjustDelta"
+                        type="number"
+                        value={adjustDelta}
+                        placeholder="Delta (+/-)"
+                        className={fieldErrorClass(shouldShow("adjustDelta"))}
+                        {...fieldAria("adjustDelta", shouldShow("adjustDelta") ? errors.adjustDelta : null)}
+                        onChange={(e) => {
+                          setAdjustDelta(e.target.value);
+                          handleChange("adjustDelta", { adjustDelta: e.target.value, adjustReason });
+                        }}
+                        onBlur={() => handleBlur("adjustDelta", formValues())}
+                      />
+                      {shouldShow("adjustDelta") && <FormFieldError field="adjustDelta" message={errors.adjustDelta} />}
+                    </div>
+                    <div className="grid gap-2" data-field="adjustReason">
+                      <Label htmlFor="adjust-reason" className={shouldShow("adjustReason") ? "text-destructive" : undefined}>
+                        Reason
+                        <RequiredMark />
+                      </Label>
+                      <Input
+                        id="adjust-reason"
+                        name="adjustReason"
+                        value={adjustReason}
+                        placeholder="Reason (required)"
+                        className={fieldErrorClass(shouldShow("adjustReason"))}
+                        {...fieldAria("adjustReason", shouldShow("adjustReason") ? errors.adjustReason : null)}
+                        onChange={(e) => {
+                          setAdjustReason(e.target.value);
+                          handleChange("adjustReason", { adjustDelta, adjustReason: e.target.value });
+                        }}
+                        onBlur={() => handleBlur("adjustReason", formValues())}
+                      />
+                      {shouldShow("adjustReason") && <FormFieldError field="adjustReason" message={errors.adjustReason} />}
+                    </div>
+                    <Button type="submit" size="sm" className="w-full" disabled={saving}>
+                      Apply adjustment
+                    </Button>
+                  </div>
+                </form>
               ) : (
                 <p className="text-sm text-muted-foreground">Stock adjustments require admin access.</p>
               )}

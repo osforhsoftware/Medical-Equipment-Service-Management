@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { MobileHeader } from "@/components/mobile/MobileHeader";
 import { MobileSearchBar } from "@/components/mobile/MobileSearchBar";
@@ -7,10 +8,11 @@ import { FilterPills } from "@/components/mobile/FilterPills";
 import { ServiceJobCard, type ServiceJobCardData } from "@/components/mobile/ServiceJobCard";
 import { WorkflowTimeline } from "@/components/mobile/WorkflowTimeline";
 import { useMobilePullRefresh, useMobileUnreadCount } from "@/components/mobile/MobileLayout";
+import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { api, type BackendServiceJob } from "@/lib/api";
-import { formatJobStatus } from "@/lib/format";
-import { toast } from "@/lib/toast";
+import { formatJobStatus, toApiJobStatus } from "@/lib/format";
 
 const FILTER_OPTIONS = [
   { value: "all", label: "All" },
@@ -45,70 +47,55 @@ export default function MobileJobs() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const unread = useMobileUnreadCount();
-  const [jobs, setJobs] = useState<BackendServiceJob[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
   const initialFilter = searchParams.get("filter");
   const [filter, setFilter] = useState(
     initialFilter && FILTER_OPTIONS.some((o) => o.value === initialFilter) ? initialFilter : "all",
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await api.listJobs();
-      setJobs(data);
-    } catch (err) {
-      toast.apiError(err, { fallback: "Failed to load jobs" });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const statusParam = filter === "all" || filter === "overdue" ? undefined : toApiJobStatus(filter);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const jobsQuery = useInfiniteQuery({
+    queryKey: ["jobs", "mobile", { status: statusParam, search: debouncedSearch || undefined }],
+    queryFn: ({ pageParam }) =>
+      api.listJobs({
+        status: statusParam,
+        search: debouncedSearch || undefined,
+        page: pageParam,
+        limit: 20,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (last) => (last.meta.hasNextPage ? last.meta.page + 1 : undefined),
+  });
 
+  const load = () => void jobsQuery.refetch();
   useMobilePullRefresh(load);
 
+  const jobs = jobsQuery.data?.pages.flatMap((page) => page.data) ?? [];
+
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    if (filter !== "overdue") return jobs;
     const start = new Date();
     start.setHours(0, 0, 0, 0);
     return jobs.filter((j) => {
       const status = formatJobStatus(j.status);
-      if (filter === "overdue") {
-        if (!j.scheduledFor || status === "completed") return false;
-        if (new Date(j.scheduledFor) >= start) return false;
-      } else if (filter !== "all" && status !== filter) {
-        return false;
-      }
-      if (!q) return true;
-      return (
-        j.equipmentName.toLowerCase().includes(q) ||
-        j.customerName.toLowerCase().includes(q) ||
-        j.reference.toLowerCase().includes(q) ||
-        j.engineer.toLowerCase().includes(q)
-      );
+      return Boolean(j.scheduledFor) && status !== "completed" && new Date(j.scheduledFor) < start;
     });
-  }, [jobs, filter, search]);
+  }, [jobs, filter]);
 
   const filterCounts = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
-    const counts: Record<string, number> = { all: jobs.length };
-    for (const opt of FILTER_OPTIONS) {
-      if (opt.value === "all") continue;
-      if (opt.value === "overdue") {
-        counts.overdue = jobs.filter(
-          (j) => j.scheduledFor && new Date(j.scheduledFor) < start && formatJobStatus(j.status) !== "completed",
-        ).length;
-      } else {
-        counts[opt.value] = jobs.filter((j) => formatJobStatus(j.status) === opt.value).length;
-      }
+    const counts: Record<string, number> = { all: jobsQuery.data?.pages[0]?.meta.total ?? jobs.length };
+    if (filter !== "all" && filter !== "overdue") {
+      counts[filter] = jobsQuery.data?.pages[0]?.meta.total ?? filtered.length;
     }
+    counts.overdue = jobs.filter(
+      (j) => j.scheduledFor && new Date(j.scheduledFor) < start && formatJobStatus(j.status) !== "completed",
+    ).length;
     return counts;
-  }, [jobs]);
+  }, [filter, filtered.length, jobs, jobsQuery.data?.pages]);
 
   const activeStatus = filtered[0] ? formatJobStatus(filtered[0].status) : "scheduled";
 
@@ -147,7 +134,7 @@ export default function MobileJobs() {
       </div>
 
       <section className="mt-5 space-y-4">
-        {loading ? (
+        {jobsQuery.isLoading ? (
           <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" />
             Loading…
@@ -157,13 +144,26 @@ export default function MobileJobs() {
             No service jobs found.
           </div>
         ) : (
-          filtered.map((job, i) => (
-            <ServiceJobCard
-              key={job.id}
-              job={jobToCard(job, i === 0)}
-              onClick={() => navigate(`/app/jobs/${job.id}`)}
-            />
-          ))
+          <>
+            {filtered.map((job, i) => (
+              <ServiceJobCard
+                key={job.id}
+                job={jobToCard(job, i === 0)}
+                onClick={() => navigate(`/app/jobs/${job.id}`)}
+              />
+            ))}
+            {filter !== "overdue" && jobsQuery.hasNextPage ? (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => void jobsQuery.fetchNextPage()}
+                disabled={jobsQuery.isFetchingNextPage}
+              >
+                {jobsQuery.isFetchingNextPage ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Load more
+              </Button>
+            ) : null}
+          </>
         )}
       </section>
     </div>

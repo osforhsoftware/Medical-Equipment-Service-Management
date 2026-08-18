@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { z } from "zod";
 import { Eye, Loader2, Plus } from "lucide-react";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { fieldAria, fieldErrorClass, fieldRules, type FieldErrors } from "@/lib/formValidation";
 import {
   ActivityTimeline,
   DetailInfoGrid,
@@ -21,10 +26,15 @@ import { ApiError, api, type BackendEstimate, type BackendUser } from "@/lib/api
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
+const decisionSchema = z.object({
+  decisionNote: fieldRules.optionalString(),
+  engineerId: fieldRules.optionalString(),
+});
+
 export default function EstimateDetail() {
   const { id = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { hasRole } = useAuth();
   const [estimate, setEstimate] = useState<BackendEstimate | null>(null);
   const [engineers, setEngineers] = useState<BackendUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,6 +44,21 @@ export default function EstimateDetail() {
   const [engineerId, setEngineerId] = useState("");
   const [saving, setSaving] = useState(false);
   const tab = searchParams.get("tab") ?? "overview";
+  const decisionRef = useRef<HTMLDivElement>(null);
+  const {
+    errors,
+    shouldShow,
+    validateAll,
+    handleBlur,
+    handleChange,
+    applyApiErrors,
+    reset: resetValidation,
+  } = useFormValidation({
+    fieldOrder: ["engineerId", "decisionNote"],
+    schema: decisionSchema,
+  });
+  const canApprove = hasRole(["admin", "coordinator", "inspector", "engineer"]);
+  const canBuild = hasRole(["admin", "coordinator", "estimator"]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -63,10 +88,13 @@ export default function EstimateDetail() {
 
   const act = async (action: "approved" | "rejected" | "revision") => {
     if (!estimate) return;
-    if (action === "approved" && ["admin", "coordinator"].includes(user?.role ?? "") && !engineerId) {
-      toast({ title: "Engineer required", description: "Select a service engineer to auto-assign the job.", variant: "destructive" });
-      return;
+    const values = { decisionNote, engineerId };
+    const extraErrors: FieldErrors = {};
+    if (action === "approved" && canApprove && !engineerId) {
+      extraErrors.engineerId = "Select a service engineer to auto-assign the job.";
     }
+    if (!validateAll(values, extraErrors, decisionRef.current)) return;
+
     setSaving(true);
     try {
       await api.decideEstimate(estimate.id, action, decisionNote || undefined, {
@@ -74,10 +102,13 @@ export default function EstimateDetail() {
       });
       setDecisionNote("");
       setEngineerId("");
+      resetValidation();
       toast({ title: `Estimate ${action}` });
       await load();
     } catch (err) {
-      toast.apiError(err, { fallback: "Workflow update failed" });
+      if (!applyApiErrors(err, decisionRef.current)) {
+        toast.apiError(err, { fallback: "Workflow update failed" });
+      }
     } finally {
       setSaving(false);
     }
@@ -105,7 +136,7 @@ export default function EstimateDetail() {
   const canDecide = estimate && ["pendingAdminApproval", "sent", "revision"].includes(estimate.status);
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "estimator", "billing"]}>
+    <RoleGuard roles={["admin", "coordinator", "estimator", "billing", "inspector", "engineer"]}>
       <RecordDetailLayout
         backTo="/app/estimates"
         backLabel="Back to Estimates"
@@ -128,7 +159,7 @@ export default function EstimateDetail() {
             <Button variant="outline" onClick={() => setPreviewOpen(true)}>
               <Eye className="mr-1 h-4 w-4" /> Preview
             </Button>
-            {estimate.serviceRequestId ? (
+            {canBuild && estimate.serviceRequestId ? (
               <Button variant="outline" asChild>
                 <Link to={`/app/estimates/${estimate.serviceRequestId}/build`}>
                   <Plus className="mr-1 h-4 w-4" /> Open Builder
@@ -235,39 +266,72 @@ export default function EstimateDetail() {
         sidebar={estimate ? (
           <Card>
             <CardHeader className="pb-3"><CardTitle className="text-base">Decision</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent ref={decisionRef} className="space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Status</span>
                 <StatusBadge status={estimate.status} />
               </div>
-              {canDecide && ["admin", "coordinator"].includes(user?.role ?? "") ? (
-                <>
-                  <div className="grid gap-2">
-                    <Label>Assign engineer (required to approve)</Label>
-                    <Select value={engineerId} onValueChange={setEngineerId}>
-                      <SelectTrigger><SelectValue placeholder="Select engineer" /></SelectTrigger>
-                      <SelectContent>
-                        {engineers.map((eng) => (
-                          <SelectItem key={eng.id} value={eng.id}>{eng.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              {canDecide && canApprove ? (
+                <form
+                  noValidate
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void act("approved");
+                  }}
+                >
+                  <div className="grid gap-3">
+                    <div className="grid gap-2" data-field="engineerId">
+                      <Label className={shouldShow("engineerId") ? "text-destructive" : undefined}>
+                        Assign engineer (required to approve)
+                        <RequiredMark />
+                      </Label>
+                      <Select
+                        value={engineerId}
+                        onValueChange={(value) => {
+                          setEngineerId(value);
+                          handleChange("engineerId", { engineerId: value, decisionNote });
+                        }}
+                      >
+                        <SelectTrigger
+                          id="engineerId"
+                          className={fieldErrorClass(shouldShow("engineerId"))}
+                          {...fieldAria("engineerId", shouldShow("engineerId") ? errors.engineerId : null)}
+                        >
+                          <SelectValue placeholder="Select engineer" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {engineers.map((eng) => (
+                            <SelectItem key={eng.id} value={eng.id}>{eng.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {shouldShow("engineerId") && <FormFieldError field="engineerId" message={errors.engineerId} />}
+                    </div>
+                    <div className="grid gap-2" data-field="decisionNote">
+                      <Label htmlFor="decision-note">Decision note</Label>
+                      <Textarea
+                        id="decision-note"
+                        name="decisionNote"
+                        value={decisionNote}
+                        onChange={(e) => {
+                          setDecisionNote(e.target.value);
+                          handleChange("decisionNote", { decisionNote: e.target.value, engineerId });
+                        }}
+                        onBlur={() => handleBlur("decisionNote", { decisionNote, engineerId })}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Button type="submit" className="bg-success text-success-foreground" disabled={saving}>
+                        {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Approve
+                      </Button>
+                      <Button type="button" variant="outline" onClick={() => void act("revision")} disabled={saving}>Request revision</Button>
+                      <Button type="button" variant="destructive" onClick={() => void act("rejected")} disabled={saving}>Reject</Button>
+                    </div>
                   </div>
-                  <div className="grid gap-2">
-                    <Label>Decision note</Label>
-                    <Textarea value={decisionNote} onChange={(e) => setDecisionNote(e.target.value)} />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Button className="bg-success text-success-foreground" onClick={() => void act("approved")} disabled={saving}>
-                      {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Approve
-                    </Button>
-                    <Button variant="outline" onClick={() => void act("revision")} disabled={saving}>Request revision</Button>
-                    <Button variant="destructive" onClick={() => void act("rejected")} disabled={saving}>Reject</Button>
-                  </div>
-                </>
+                </form>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  {canDecide ? "Only admin/coordinator can decide this estimate." : "No pending decisions for this estimate."}
+                  {canDecide ? "Only admin, coordinator, inspection staff, or service staff can decide this estimate." : "No pending decisions for this estimate."}
                 </p>
               )}
             </CardContent>

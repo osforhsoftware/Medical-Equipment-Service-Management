@@ -1,18 +1,64 @@
 import { prisma } from "@/db/prisma";
 import type { Prisma } from "@prisma/client";
+import type { PaginatedResult } from "@/types";
+import { searchContains } from "@/utils/searchFilter";
+
+const listIncludes = {
+  lineItems: true,
+  decisions: { orderBy: { createdAt: "desc" as const }, take: 1 },
+  revisions: { orderBy: { revision: "desc" as const }, take: 1 },
+  reservations: true,
+};
+
+export interface EstimateListFilters {
+  status?: string;
+  search?: string;
+  skip: number;
+  take: number;
+  orderBy: Prisma.EstimateOrderByWithRelationInput;
+}
+
+function buildWhere(tenantId: string, filters: Omit<EstimateListFilters, "skip" | "take" | "orderBy">): Prisma.EstimateWhereInput {
+  const where: Prisma.EstimateWhereInput = {
+    tenantId,
+    ...(filters.status ? { status: filters.status as never } : {}),
+  };
+
+  if (filters.search) {
+    where.OR = [
+      { reference: searchContains(filters.search) },
+      { customerName: searchContains(filters.search) },
+      { equipmentName: searchContains(filters.search) },
+      { requestRef: searchContains(filters.search) },
+    ];
+  }
+
+  return where;
+}
 
 export class EstimatesRepository {
+  async findPaginated(tenantId: string, filters: EstimateListFilters): Promise<PaginatedResult<Awaited<ReturnType<typeof prisma.estimate.findMany>>[number]>> {
+    const where = buildWhere(tenantId, filters);
+    const [data, total] = await Promise.all([
+      prisma.estimate.findMany({
+        where,
+        include: listIncludes,
+        orderBy: filters.orderBy,
+        skip: filters.skip,
+        take: filters.take,
+      }),
+      prisma.estimate.count({ where }),
+    ]);
+    return { data, total };
+  }
+
   async findAll(tenantId: string) {
-    return prisma.estimate.findMany({
-      where: { tenantId },
-      include: {
-        lineItems: true,
-        decisions: { orderBy: { createdAt: "desc" } },
-        revisions: { orderBy: { revision: "desc" } },
-        reservations: true,
-      },
+    const { data } = await this.findPaginated(tenantId, {
+      skip: 0,
+      take: 100,
       orderBy: { createdAt: "desc" },
     });
+    return data;
   }
 
   async findById(id: string, tenantId: string) {

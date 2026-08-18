@@ -8,7 +8,7 @@ import { createEstimateSchema, updateEstimateSchema } from "@/schemas/estimates.
 const router = Router();
 router.use(authenticate, resolveTenant);
 
-const canRead = requireRole("admin", "coordinator", "estimator", "billing");
+const canRead = requireRole("admin", "coordinator", "estimator", "billing", "inspector", "engineer");
 const canManage = requireRole("admin", "coordinator", "estimator");
 
 router.get("/", canRead, estimatesController.getAll);

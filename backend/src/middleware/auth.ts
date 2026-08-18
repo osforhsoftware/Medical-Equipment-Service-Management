@@ -45,7 +45,7 @@ export const authenticate = (req: Request, res: Response, next: NextFunction): v
       const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
       const user = await prisma.user.findFirst({
         where: { id: payload.userId, tenantId: payload.tenantId },
-        select: { id: true, isActive: true, role: true, tenantId: true, email: true },
+        select: { id: true, name: true, isActive: true, role: true, tenantId: true, email: true },
       });
       if (!user) {
         res.status(401).json(failure("Invalid or expired token"));
@@ -60,6 +60,7 @@ export const authenticate = (req: Request, res: Response, next: NextFunction): v
         tenantId: user.tenantId,
         role: user.role,
         email: user.email,
+        name: user.name,
       };
       req.tenantId = user.tenantId;
       next();

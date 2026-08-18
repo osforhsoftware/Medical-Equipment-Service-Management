@@ -14,7 +14,7 @@ export const API_WRITE_ACCESS = {
   "tickets.delete": ["admin"],
   "inspections.write": ["admin", "coordinator", "inspector"],
   "estimates.write": ["admin", "coordinator", "estimator"],
-  "estimates.decide": ["admin", "coordinator", "customer"],
+  "estimates.decide": ["admin", "coordinator", "inspector", "engineer", "customer"],
   "jobs.write": ["admin", "coordinator", "engineer"],
   "inventory.write": ["admin", "inventory"],
   "inventory.adjust": ["admin", "inventory"],
@@ -25,6 +25,7 @@ export const API_WRITE_ACCESS = {
   "amc.write": ["admin", "coordinator", "billing"],
   "billing.write": ["admin", "billing"],
   "settings.write": ["admin"],
+  "taxonomy.write": ["admin", "coordinator"],
   "auditLogs.write": ["admin"],
   "files.upload": ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
   "notifications.write": ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
@@ -44,6 +45,9 @@ export const ALL_ROLES = [
 ] as const;
 
 export type AppRole = (typeof ALL_ROLES)[number];
+
+/** Staff who can approve/reject estimates and assign an engineer. */
+export const ESTIMATE_STAFF_APPROVER_ROLES = ["admin", "coordinator", "inspector", "engineer"] as const;
 
 export function rolesFor(permission: ApiWritePermission): readonly string[] {
   return API_WRITE_ACCESS[permission];

@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
+import { z } from "zod";
 import { Loader2, PackageCheck } from "lucide-react";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { fieldAria, fieldErrorClass, fieldRules, type FieldErrors } from "@/lib/formValidation";
 import {
   DetailInfoGrid,
   DetailSection,
@@ -18,6 +23,18 @@ import { api, ApiError, type BackendPurchaseOrder } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
+const receiveSchema = z.object({
+  receiptRef: fieldRules.requiredString("Receipt reference"),
+  receiptNotes: fieldRules.optionalString(),
+});
+
+function validateReceivedQuantities(received: Record<string, number>): FieldErrors {
+  if (!Object.values(received).some((quantity) => quantity > 0)) {
+    return { received: "Enter a quantity to receive for at least one line." };
+  }
+  return {};
+}
+
 export default function PurchaseOrderDetail() {
   const { id = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -30,6 +47,20 @@ export default function PurchaseOrderDetail() {
   const [received, setReceived] = useState<Record<string, number>>({});
   const [saving, setSaving] = useState(false);
   const tab = searchParams.get("tab") ?? "overview";
+  const receiveRef = useRef<HTMLDivElement>(null);
+  const {
+    errors,
+    shouldShow,
+    validateAll,
+    handleBlur,
+    handleChange,
+    applyApiErrors,
+    reset: resetValidation,
+  } = useFormValidation<{ receiptRef: string; receiptNotes: string; received: Record<string, number> }>({
+    fieldOrder: ["receiptRef", "received"],
+    schema: receiveSchema,
+    validate: (values) => validateReceivedQuantities(values.received),
+  });
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -54,6 +85,8 @@ export default function PurchaseOrderDetail() {
 
   const receive = async () => {
     if (!order) return;
+    const values = { receiptRef, receiptNotes, received };
+    if (!validateAll(values, undefined, receiveRef.current)) return;
     const receiptLines = Object.entries(received)
       .filter(([, quantity]) => quantity > 0)
       .map(([purchaseOrderLineId, quantity]) => ({ purchaseOrderLineId, quantity }));
@@ -68,10 +101,13 @@ export default function PurchaseOrderDetail() {
       setReceiptRef("");
       setReceiptNotes("");
       setReceived({});
+      resetValidation();
       toast({ title: "Purchase receipt posted", description: "Inventory quantities were updated." });
       await load();
     } catch (err) {
-      toast.apiError(err, { fallback: "Receive failed" });
+      if (!applyApiErrors(err, receiveRef.current)) {
+        toast.apiError(err, { fallback: "Receive failed" });
+      }
     } finally {
       setSaving(false);
     }
@@ -185,18 +221,36 @@ export default function PurchaseOrderDetail() {
         ) : undefined}
       />
 
-      <Dialog open={receiveOpen} onOpenChange={setReceiveOpen}>
+      <Dialog open={receiveOpen} onOpenChange={(open) => { if (!open) resetValidation(); setReceiveOpen(open); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Receive {order?.reference}</DialogTitle></DialogHeader>
-          <div className="grid gap-3 py-2">
-            <div className="grid gap-2">
-              <Label>Receipt reference</Label>
-              <Input value={receiptRef} onChange={(e) => setReceiptRef(e.target.value)} placeholder="GRN-2026-001" />
+          <form noValidate onSubmit={(e) => { e.preventDefault(); void receive(); }}>
+          <div ref={receiveRef} className="grid gap-3 py-2">
+            <div className="grid gap-2" data-field="receiptRef">
+              <Label htmlFor="receipt-ref" className={shouldShow("receiptRef") ? "text-destructive" : undefined}>
+                Receipt reference
+                <RequiredMark />
+              </Label>
+              <Input
+                id="receipt-ref"
+                name="receiptRef"
+                value={receiptRef}
+                placeholder="GRN-2026-001"
+                className={fieldErrorClass(shouldShow("receiptRef"))}
+                {...fieldAria("receiptRef", shouldShow("receiptRef") ? errors.receiptRef : null)}
+                onChange={(e) => {
+                  setReceiptRef(e.target.value);
+                  handleChange("receiptRef", { receiptRef: e.target.value, receiptNotes, received });
+                }}
+                onBlur={() => handleBlur("receiptRef", { receiptRef, receiptNotes, received })}
+              />
+              {shouldShow("receiptRef") && <FormFieldError field="receiptRef" message={errors.receiptRef} />}
             </div>
+            {shouldShow("received") && <FormFieldError field="received" message={errors.received} />}
             {order?.lineItems?.map((line) => {
               const outstanding = line.quantityOrdered - line.quantityReceived;
               return (
-                <div key={line.id} className="grid grid-cols-[1fr_120px] items-end gap-3">
+                <div key={line.id} className="grid grid-cols-[1fr_120px] items-end gap-3" data-field="received">
                   <div>
                     <p className="text-sm font-medium">{line.description}</p>
                     <p className="text-xs text-muted-foreground">{outstanding} outstanding</p>
@@ -206,23 +260,28 @@ export default function PurchaseOrderDetail() {
                     min={0}
                     max={outstanding}
                     value={received[line.id] ?? 0}
-                    onChange={(e) => setReceived({ ...received, [line.id]: Number(e.target.value) })}
+                    onChange={(e) => {
+                      const next = { ...received, [line.id]: Number(e.target.value) };
+                      setReceived(next);
+                      handleChange("received", { receiptRef, receiptNotes, received: next });
+                    }}
                   />
                 </div>
               );
             })}
             <div className="grid gap-2">
-              <Label>Notes</Label>
-              <Textarea value={receiptNotes} onChange={(e) => setReceiptNotes(e.target.value)} />
+              <Label htmlFor="receipt-notes">Notes</Label>
+              <Textarea id="receipt-notes" value={receiptNotes} onChange={(e) => setReceiptNotes(e.target.value)} />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setReceiveOpen(false)}>Cancel</Button>
-            <Button onClick={() => void receive()} disabled={saving || !receiptRef || !Object.values(received).some((q) => q > 0)}>
+            <Button type="button" variant="outline" onClick={() => setReceiveOpen(false)}>Cancel</Button>
+            <Button type="submit" disabled={saving}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Post receipt
             </Button>
           </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </RoleGuard>

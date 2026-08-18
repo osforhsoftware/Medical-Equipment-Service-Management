@@ -27,13 +27,12 @@ export default function PortalEquipment() {
       {loading ? <div className="flex justify-center gap-2 py-16 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /> Loading equipment…</div> : null}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {mine.map((e) => (
-          <Card key={e.id} className="group overflow-hidden shadow-card hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-elevated">
-            <div className="h-1 bg-gradient-primary opacity-80" />
+          <Card key={e.id} className="overflow-hidden">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary/18 to-accent/12 text-primary transition-transform group-hover:scale-105">
-                    <HardDrive className="h-5 w-5" />
+                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary-light text-primary">
+                    <HardDrive className="h-4 w-4" />
                   </div>
                   <div>
                     <CardTitle className="text-base">{e.name}</CardTitle>

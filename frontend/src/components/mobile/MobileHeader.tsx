@@ -1,4 +1,5 @@
 import { Bell, Plus, Search } from "lucide-react";
+import { MesmsLogo } from "@/components/shared/MesmsLogo";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { roleLabels } from "@/data/mock";
@@ -40,10 +41,16 @@ export function MobileHeader({
 
   return (
     <header className={cn("mobile-header", className)}>
+      <div className="mb-3 flex items-center">
+        <div className="px-1 py-0.5">
+          <MesmsLogo size="xs" />
+        </div>
+      </div>
+
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-muted-foreground">{displayGreeting}</p>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">{title}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
           {subtitle && <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>}
           {badge && (
             <p className="mt-1 text-xs font-semibold text-primary">{badge}</p>

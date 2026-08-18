@@ -83,7 +83,7 @@ export default function QRTracking() {
                 <div className="no-print space-y-4">
                   <div className="flex items-start justify-between">
                     <div>
-                      <h3 className="font-display text-lg font-bold">{scanned.name}</h3>
+                      <h3 className="text-lg font-semibold tracking-tight">{scanned.name}</h3>
                       <p className="text-sm text-muted-foreground">{scanned.manufacturer} · {scanned.model}</p>
                       <span className="mt-1 inline-block rounded-md bg-muted px-2 py-1 font-mono text-xs">{scanned.assetTag}</span>
                     </div>

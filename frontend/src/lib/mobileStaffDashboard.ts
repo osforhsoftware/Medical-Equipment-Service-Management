@@ -43,6 +43,7 @@ export function roleQuickActions(role: Role): MobileQuickAction[] {
     case "inspector":
       return [
         { label: "Inspections", to: "/app/inspections", icon: Search, primary: true },
+        { label: "Estimates", to: "/app/estimates", icon: FileText },
         { label: "Scan QR", to: "/app/qr-tracking", icon: QrCode },
         { label: "Alerts", to: "/app/notifications", icon: Bell },
       ];
@@ -55,6 +56,7 @@ export function roleQuickActions(role: Role): MobileQuickAction[] {
     case "engineer":
       return [
         { label: "My Jobs", to: "/app/jobs", icon: Wrench, primary: true },
+        { label: "Estimates", to: "/app/estimates", icon: FileText },
         { label: "Scan QR", to: "/app/qr-tracking", icon: QrCode },
         { label: "Alerts", to: "/app/notifications", icon: Bell },
         { label: "Parts", to: "/app/inventory", icon: Package },

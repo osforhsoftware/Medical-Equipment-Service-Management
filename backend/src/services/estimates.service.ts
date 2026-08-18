@@ -14,6 +14,10 @@ type CreateEstimateData = {
 };
 
 export class EstimatesService {
+  async getPaginated(tenantId: string, filters: import("@/repositories/estimates.repository").EstimateListFilters) {
+    return estimatesRepository.findPaginated(tenantId, filters);
+  }
+
   async getAll(tenantId: string) {
     return estimatesRepository.findAll(tenantId);
   }

@@ -59,6 +59,8 @@ model Tenant {
   referrals              Referral[]
   commissions            Commission[]
   stockPurchaseRequests  StockPurchaseRequest[]
+  ticketChangeRequests   ServiceTicketChangeRequest[]
+  taxonomyTerms          TaxonomyTerm[]
 
   @@map("tenants")
 }
@@ -217,6 +219,7 @@ model Customer {
   city           String
   country        String       @default("")
   licenseGst     String?      @map("license_gst")
+  note           String?      @map("note")
   branchId       String       @map("branch_id")
   equipmentCount Int          @default(0) @map("equipment_count")
   activeJobs     Int          @default(0) @map("active_jobs")
@@ -234,6 +237,8 @@ model Customer {
 
   @@index([tenantId])
   @@index([branchId])
+  @@index([tenantId, status])
+  @@index([tenantId, name])
   @@map("customers")
 }
 
@@ -259,7 +264,7 @@ model Equipment {
   installDate     DateTime  @map("install_date")
   warrantyEnd     DateTime  @map("warranty_end")
   amcStatus       AmcStatus @default(none) @map("amc_status")
-  condition       Condition @default(operational)
+  condition       String    @default("operational")
   lastServiceDate DateTime? @map("last_service_date")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
@@ -274,6 +279,8 @@ model Equipment {
   @@unique([tenantId, assetTag])
   @@index([tenantId])
   @@index([customerId])
+  @@index([tenantId, category])
+  @@index([tenantId, condition])
   @@map("equipment")
 }
 
@@ -284,10 +291,33 @@ enum AmcStatus {
   none
 }
 
-enum Condition {
-  operational
-  needsService @map("needs-service")
-  down
+enum TaxonomyType {
+  equipment_category
+  equipment_condition
+  customer_type
+}
+
+/// Tenant-managed lookup lists (WordPress-style taxonomies) for equipment
+/// categories/conditions and customer types.
+model TaxonomyTerm {
+  id          String       @id @default(cuid())
+  tenantId    String       @map("tenant_id")
+  type        TaxonomyType
+  name        String
+  slug        String
+  description String?      @db.Text
+  sortOrder   Int          @default(0) @map("sort_order")
+  isActive    Boolean      @default(true) @map("is_active")
+  isSystem    Boolean      @default(false) @map("is_system")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, type, slug])
+  @@unique([tenantId, type, name])
+  @@index([tenantId, type, isActive])
+  @@map("taxonomy_terms")
 }
 
 // ── Tenant service catalog ────────────────────────────────────────────────────
@@ -333,9 +363,11 @@ model ServiceRequest {
   status        ServiceStatus @default(new)
   description   String        @default("")
   createdBy     String        @map("created_by")
-  assignedTo    String?       @map("assigned_to")
-  assignedName  String?       @map("assigned_name")
-  slaDue        DateTime      @map("sla_due")
+  assignedTo            String?       @map("assigned_to")
+  assignedName          String?       @map("assigned_name")
+  assignedInspectorId   String?       @map("assigned_inspector_id")
+  assignedEngineerId    String?       @map("assigned_engineer_id")
+  slaDue                DateTime      @map("sla_due")
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @updatedAt @map("updated_at")
 
@@ -350,13 +382,39 @@ model ServiceRequest {
   invoices              Invoice[]
   referrals             Referral[]
   stockPurchaseRequests StockPurchaseRequest[]
+  changeRequests        ServiceTicketChangeRequest[]
 
   @@unique([tenantId, reference])
   @@index([tenantId])
   @@index([customerId])
   @@index([status])
   @@index([assignedTo])
+  @@index([assignedInspectorId])
+  @@index([assignedEngineerId])
   @@map("service_requests")
+}
+
+model ServiceTicketChangeRequest {
+  id               String    @id @default(cuid())
+  tenantId         String    @map("tenant_id")
+  serviceRequestId String    @map("service_request_id")
+  jobId            String?   @map("job_id")
+  requestedBy      String    @map("requested_by")
+  status           String    @default("pending")
+  description      String    @db.Text
+  items            Json      @default("[]")
+  reviewNote       String?   @map("review_note") @db.Text
+  reviewedBy       String?   @map("reviewed_by")
+  reviewedAt       DateTime? @map("reviewed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  job            ServiceJob?    @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, serviceRequestId, status])
+  @@map("service_ticket_change_requests")
 }
 
 // ── ServiceRequestEquipment ───────────────────────────────────────────────────
@@ -414,6 +472,7 @@ model InspectionRecommendation {
   quantity           Decimal  @default(1) @db.Decimal(12, 3)
   estimatedCost      Decimal  @default(0) @map("estimated_cost") @db.Decimal(12, 2)
   accepted           Boolean?
+  procurementStatus  String?  @map("procurement_status")
   createdAt          DateTime @default(now()) @map("created_at")
 
   inspectionReport InspectionReport    @relation(fields: [inspectionReportId], references: [id], onDelete: Cascade)
@@ -478,10 +537,16 @@ enum ServiceStatus {
   new
   inspection
   estimate
-  approval
-  inProgress @map("in-progress")
-  completed
+  pending_approval      @map("pending-approval")
+  assigned_engineer     @map("assigned-engineer")
+  change_pending_approval @map("change-pending-approval")
+  pending_final_approval  @map("pending-final-approval")
+  pending_invoice       @map("pending-invoice")
   invoiced
+  closed
+  approval
+  inProgress            @map("in-progress")
+  completed
   finished
 }
 
@@ -527,6 +592,7 @@ model Estimate {
   @@index([tenantId])
   @@index([serviceRequestId])
   @@index([customerId])
+  @@index([tenantId, status])
   @@map("estimates")
 }
 
@@ -652,12 +718,14 @@ model ServiceJob {
   invoices              Invoice[]
   projectExpenses       ProjectExpense[]
   stockPurchaseRequests StockPurchaseRequest[]
+  changeRequests        ServiceTicketChangeRequest[]
 
   @@unique([tenantId, reference])
   @@index([tenantId])
   @@index([engineerId])
   @@index([serviceRequestId])
   @@index([estimateId])
+  @@index([tenantId, status])
   @@map("service_jobs")
 }
 
@@ -738,6 +806,7 @@ model JobPhoto {
   /// Legacy compatibility only. New media is stored through StoredFile.
   dataUrl    String   @map("data_url") @db.Text
   fileId     String?  @map("file_id")
+  caption    String?  @db.VarChar(500)
   uploadedBy String   @map("uploaded_by")
   createdAt  DateTime @default(now()) @map("created_at")
 
@@ -1001,6 +1070,7 @@ model PurchaseOrder {
   @@unique([tenantId, reference])
   @@index([tenantId])
   @@index([supplierId])
+  @@index([tenantId, status])
   @@map("purchase_orders")
 }
 

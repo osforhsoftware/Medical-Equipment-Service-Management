@@ -15,11 +15,18 @@ const REQUEST_STATUS_TO_STAGE: Record<string, WorkflowStageKey> = {
   new: "request",
   inspection: "inspection",
   estimate: "estimate",
+  pending_approval: "approval",
   approval: "approval",
+  assigned_engineer: "service",
+  change_pending_approval: "service",
+  pending_final_approval: "service",
   inProgress: "service",
   "in-progress": "service",
   completed: "completed",
+  pending_invoice: "billing",
   invoiced: "billing",
+  closed: "completed",
+  finished: "completed",
 };
 
 const JOB_STATUS_TO_STAGE: Record<string, WorkflowStageKey> = {
@@ -65,12 +72,27 @@ export function statusToChipVariant(status: string, overdue = false): WorkflowCh
   if (["new", "scheduled"].includes(s)) return "assigned";
   if (s === "inspection") return "inspection";
   if (s === "estimate") return "estimate";
-  if (["approval", "review"].includes(s)) return "estimate";
-  if (["in-progress", "inProgress", "parts-pending", "partsPending"].includes(status)) return "in-progress";
+  if (["approval", "pending_approval", "pending-approval", "review"].includes(status)) return "estimate";
+  if (
+    [
+      "in-progress",
+      "inProgress",
+      "parts-pending",
+      "partsPending",
+      "assigned_engineer",
+      "assigned-engineer",
+      "change_pending_approval",
+      "change-pending-approval",
+      "pending_final_approval",
+      "pending-final-approval",
+    ].includes(status)
+  ) {
+    return "in-progress";
+  }
   if (s === "completed") return "completed";
-  if (["invoiced", "ready-billing", "sent"].includes(s)) return "ready-billing";
+  if (["invoiced", "ready-billing", "sent", "pending_invoice", "pending-invoice"].includes(s)) return "ready-billing";
   if (s === "paid") return "paid";
-  if (s === "closed" || s === "cancelled") return "closed";
+  if (s === "closed" || s === "cancelled" || s === "finished") return "closed";
   return "default";
 }
 

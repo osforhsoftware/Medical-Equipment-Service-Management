@@ -1,13 +1,13 @@
 import { cn } from "@/lib/utils";
 
-/** Brand mark in /public. Drop MESMS.png there to override the default SVG. */
+/** Brand mark served from /public/MESMS.png */
 const sizeClasses = {
-  xs: "h-8",
-  sm: "h-9",
-  md: "h-11",
-  lg: "h-14",
-  xl: "h-20",
-  hero: "h-24 sm:h-28",
+  xs: "h-7 max-w-[5.5rem]",
+  sm: "h-8 max-w-[6.5rem]",
+  md: "h-10 max-w-[9rem]",
+  lg: "h-12 max-w-[11rem]",
+  xl: "h-16 max-w-[14rem]",
+  hero: "h-20 max-w-[min(100%,20rem)] sm:h-24",
 } as const;
 
 interface MesmsLogoProps {
@@ -18,7 +18,7 @@ interface MesmsLogoProps {
 export function MesmsLogo({ className, size = "md" }: MesmsLogoProps) {
   return (
     <img
-      src="/MESMS.svg"
+      src="/MESMS.png"
       alt="MESMS — Medical Equipment Service Management"
       className={cn("w-auto shrink-0 object-contain object-left", sizeClasses[size], className)}
     />

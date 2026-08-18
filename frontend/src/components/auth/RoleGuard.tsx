@@ -8,7 +8,7 @@ import { navItems } from "@/config/nav";
 function AccessDenied({ role }: { role: Role }) {
   return (
     <div className="flex h-[60vh] flex-col items-center justify-center text-center">
-      <h2 className="font-display text-xl font-bold">Access restricted</h2>
+      <h2 className="text-lg font-semibold">Access restricted</h2>
       <p className="mt-2 max-w-sm text-sm text-muted-foreground">
         Your role ({role}) does not have permission to view this section.
       </p>

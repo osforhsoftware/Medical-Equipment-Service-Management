@@ -1,6 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { z } from "zod";
 import { Building2, Loader2, Plus } from "lucide-react";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useListingUrlState } from "@/hooks/useListingUrlState";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
+import { fieldRules } from "@/lib/formValidation";
+import { EMPTY_PAGINATION_META } from "@/lib/listing";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -22,38 +32,33 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api, type BackendCustomer } from "@/lib/api";
-import { CUSTOMER_TYPE_OPTIONS, formatFixedOption } from "@/lib/fixedOptions";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
+import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
+import { userCanAccessModule } from "@/lib/userRoles";
+import { navItems } from "@/config/nav";
+import { activeTerms, termLabel } from "@/lib/taxonomy";
 
-function formatCustomerType(type: string, typeOther?: string | null) {
-  return formatFixedOption(CUSTOMER_TYPE_OPTIONS, type, typeOther);
-}
-
-function customerTypeValue(c: BackendCustomer) {
-  if (c.type === "Other" && c.typeOther?.trim()) return c.typeOther.trim();
-  return c.type;
-}
-
-function buildTypeOptions(customers: BackendCustomer[], addedTypes: string[]) {
-  const base = CUSTOMER_TYPE_OPTIONS.filter((o) => o.value !== "Other");
-  const other = CUSTOMER_TYPE_OPTIONS.find((o) => o.value === "Other")!;
-  const known = new Set(base.map((o) => o.value));
-  const extras = [
-    ...new Set([
-      ...customers.map(customerTypeValue),
-      ...addedTypes,
-    ]),
-  ]
-    .filter((t) => t && !known.has(t) && t !== "Other")
-    .sort()
-    .map((t) => ({ value: t, label: t }));
-  return [...base, ...extras, other];
-}
+const customerSchema = z
+  .object({
+    name: fieldRules.requiredString("Customer name"),
+    type: fieldRules.selectRequired("a customer type"),
+    contactPerson: fieldRules.optionalString(),
+    email: fieldRules.email(false),
+    phone: fieldRules.phone(false),
+    address: fieldRules.requiredString("Site address"),
+    city: fieldRules.optionalString(),
+    country: fieldRules.optionalString(),
+    licenseGst: fieldRules.optionalString(),
+    note: z.string().trim().max(5000).optional(),
+    status: z.string(),
+  });
 
 type FormState = {
   name: string;
   type: string;
-  typeOther: string;
   contactPerson: string;
   email: string;
   phone: string;
@@ -61,13 +66,13 @@ type FormState = {
   city: string;
   country: string;
   licenseGst: string;
+  note: string;
   status: string;
 };
 
 const emptyForm: FormState = {
   name: "",
-  type: "Hospital",
-  typeOther: "",
+  type: "",
   contactPerson: "",
   email: "",
   phone: "",
@@ -75,78 +80,126 @@ const emptyForm: FormState = {
   city: "",
   country: "",
   licenseGst: "",
+  note: "",
   status: "active",
 };
 
 export default function Customers() {
   const navigate = useNavigate();
-  const [customers, setCustomers] = useState<BackendCustomer[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const { rbacMatrix } = useSettings();
+  const canManageMasterData = Boolean(
+    user && userCanAccessModule(
+      user,
+      "Master Data",
+      rbacMatrix,
+      navItems.find((item) => item.label === "Master Data")?.roles,
+    ),
+  );
+  const {
+    search,
+    setSearch,
+    filters,
+    setFilter,
+    listParams,
+    setPage,
+    setLimit,
+  } = useListingUrlState({ filterKeys: ["status", "type"] });
+
+  const debouncedSearch = useDebouncedValue(search);
+  const queryParams = useMemo(
+    () => ({ ...listParams, search: debouncedSearch || undefined }),
+    [listParams, debouncedSearch],
+  );
+
+  const customersQuery = usePaginatedQuery({
+    queryKey: "customers",
+    params: queryParams,
+    queryFn: (params) => api.listCustomers(params),
+  });
+
+  const typesQuery = useQuery({
+    queryKey: ["taxonomy", "customer_type"],
+    queryFn: () => api.listTaxonomy({ type: "customer_type" }),
+    staleTime: 30_000,
+  });
+
+  const customers = customersQuery.data?.data ?? [];
+  const pagination = customersQuery.data?.meta ?? EMPTY_PAGINATION_META;
+  const typeTerms = typesQuery.data ?? [];
+  const activeTypes = activeTerms(typeTerms);
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
-  const [addedTypes, setAddedTypes] = useState<string[]>([]);
+  const [newTypeName, setNewTypeName] = useState("");
+  const [addingType, setAddingType] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
-  const loadCustomers = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await api.listCustomers();
-      setCustomers(data);
-    } catch (err) {
-      toast.apiError(err, { fallback: "Failed to load customers" });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const {
+    errors,
+    shouldShow,
+    reset: resetValidation,
+    validateAll,
+    handleBlur,
+    handleChange,
+    applyApiErrors,
+    clearError,
+  } = useFormValidation({
+    fieldOrder: ["name", "type", "email", "phone", "address", "city", "country", "note"],
+    schema: customerSchema,
+  });
 
-  useEffect(() => {
-    void loadCustomers();
-  }, [loadCustomers]);
+  const loadCustomers = () => void queryClient.invalidateQueries({ queryKey: ["customers"] });
 
-  const typeSelectOptions = useMemo(
-    () => buildTypeOptions(customers, addedTypes),
-    [customers, addedTypes],
-  );
-
-  const typeFilterOptions = useMemo(
-    () => typeSelectOptions.filter((o) => o.value !== "Other").map((o) => ({ label: o.label, value: o.value })),
-    [typeSelectOptions],
-  );
-
-  const resolvedType = form.type === "Other" ? "" : form.type;
+  const typeFilterOptions = typeTerms.map((t) => ({ label: t.name, value: t.slug }));
+  const defaultType = activeTypes.find((t) => t.slug === "Hospital")?.slug ?? activeTypes[0]?.slug ?? "";
 
   const openCreate = () => {
-    setForm(emptyForm);
+    setForm({ ...emptyForm, type: defaultType });
+    setNewTypeName("");
+    resetValidation();
     setDialogOpen(true);
   };
 
-  const addType = () => {
-    const name = form.typeOther.trim();
+  const addType = async () => {
+    const name = newTypeName.trim();
     if (!name) return;
-
-    const existing = typeSelectOptions.find((o) => o.value.toLowerCase() === name.toLowerCase());
-    if (existing && existing.value !== "Other") {
-      setForm({ ...form, type: existing.value, typeOther: "" });
-      toast.info("Type selected", { description: `"${existing.label}" is already in the list.` });
+    const existing = typeTerms.find(
+      (t) => t.slug.toLowerCase() === name.toLowerCase() || t.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (existing) {
+      setForm({ ...form, type: existing.slug });
+      setNewTypeName("");
+      clearError("type");
+      toast.info("Type selected", { description: `"${existing.name}" is already in the list.` });
       return;
     }
 
-    setAddedTypes((current) => [...new Set([...current, name])]);
-    setForm({ ...form, type: name, typeOther: "" });
-    toast.success("Type added", { description: `"${name}" is now available in the dropdown.` });
+    setAddingType(true);
+    try {
+      const created = await api.createTaxonomy({ type: "customer_type", name });
+      await queryClient.invalidateQueries({ queryKey: ["taxonomy", "customer_type"] });
+      setForm({ ...form, type: created.slug });
+      setNewTypeName("");
+      clearError("type");
+      toast.success("Type added", { description: `${created.name} is now selectable.` });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to add customer type" });
+    } finally {
+      setAddingType(false);
+    }
   };
 
   const saveCustomer = async () => {
-    if (!resolvedType) {
-      toast.warning("Please select or add a customer type");
-      return;
-    }
+    if (!validateAll(form, undefined, dialogRef.current)) return;
+
     setSaving(true);
     try {
       await api.createCustomer({
         name: form.name.trim(),
-        type: resolvedType,
-        typeOther: null,
+        type: form.type,
         contactPerson: form.contactPerson.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
@@ -154,15 +207,19 @@ export default function Customers() {
         city: form.city.trim(),
         country: form.country.trim(),
         licenseGst: form.licenseGst.trim() || null,
+        note: form.note.trim() || null,
         status: form.status,
       });
       toast.success("Customer created successfully", {
         description: `${form.name.trim()} was added successfully.`,
       });
       setDialogOpen(false);
-      await loadCustomers();
+      resetValidation();
+      await queryClient.invalidateQueries({ queryKey: ["customers"] });
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to save customer" });
+      if (!applyApiErrors(err, dialogRef.current)) {
+        toast.apiError(err, { fallback: "Unable to save customer" });
+      }
     } finally {
       setSaving(false);
     }
@@ -187,7 +244,7 @@ export default function Customers() {
     {
       key: "type",
       header: "Type",
-      render: (c) => <span className="text-sm">{formatCustomerType(customerTypeValue(c), c.type === "Other" ? c.typeOther : null)}</span>,
+      render: (c) => <span className="text-sm">{termLabel(typeTerms, c.type, c.typeOther)}</span>,
     },
     {
       key: "city",
@@ -238,73 +295,109 @@ export default function Customers() {
         }
       />
 
-      {loading ? (
-        <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" /> Loading customers…
-        </div>
-      ) : (
-        <DataTable
-          data={customers}
-          columns={columns}
-          searchKeys={["name", "contactPerson", "email", "city", "country", "address", "licenseGst"]}
-          searchPlaceholder="Search customers…"
-          emptyMessage="No customers yet. Add your first customer to get started."
-          filters={[
-            {
-              label: "Type",
-              options: typeFilterOptions,
-              predicate: (c, v) => customerTypeValue(c) === v,
-            },
-            {
-              label: "Status",
-              options: [
-                { label: "Active", value: "active" },
-                { label: "Inactive", value: "inactive" },
-              ],
-              predicate: (c, v) => c.status === v,
-            },
-          ]}
-          onRowClick={(c) => navigate(`/app/customers/${c.id}`)}
-        />
-      )}
+      <DataTable
+        mode="server"
+        data={customers}
+        columns={columns}
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search customers…"
+        emptyMessage="No customers yet. Add your first customer to get started."
+        emptyHint="Try changing your search or filters."
+        filterValues={filters}
+        onFilterChange={setFilter}
+        filters={[
+          {
+            key: "type",
+            label: "Type",
+            options: typeFilterOptions,
+          },
+          {
+            key: "status",
+            label: "Status",
+            options: [
+              { label: "Active", value: "active" },
+              { label: "Inactive", value: "inactive" },
+            ],
+          },
+        ]}
+        pagination={pagination}
+        onPageChange={setPage}
+        onLimitChange={setLimit}
+        loading={customersQuery.isLoading}
+        isFetching={customersQuery.isFetching}
+        error={customersQuery.error as Error | null}
+        onRetry={() => loadCustomers()}
+        onRowClick={(c) => navigate(`/app/customers/${c.id}`)}
+      />
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetValidation(); setDialogOpen(open); }}>
+        <DialogContent ref={dialogRef} className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Building2 className="h-5 w-5" /> Add Customer
             </DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2">
-            <div className="grid gap-2">
-              <Label htmlFor="customer-name">Customer name</Label>
+            <div className="grid gap-2" data-field="name">
+              <Label htmlFor="customer-name" className={shouldShow("name") ? "text-destructive" : undefined}>
+                Customer name
+                <RequiredMark />
+              </Label>
               <Input
                 id="customer-name"
                 value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onChange={(e) => {
+                  const next = { ...form, name: e.target.value };
+                  setForm(next);
+                  handleChange("name", next);
+                }}
+                onBlur={() => handleBlur("name", form)}
+                aria-invalid={shouldShow("name") || undefined}
+                aria-describedby={shouldShow("name") ? "name-error" : undefined}
+                className={cn(shouldShow("name") && "border-destructive focus-visible:ring-destructive")}
                 placeholder="St. Mary's Hospital"
               />
+              {shouldShow("name") && <FormFieldError field="name" message={errors.name} />}
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Type</Label>
+              <div className="grid gap-2" data-field="type">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className={shouldShow("type") ? "text-destructive" : undefined}>
+                    Type
+                    <RequiredMark />
+                  </Label>
+                  {canManageMasterData ? (
+                    <Link to="/app/master-data?type=customer_type" className="text-xs text-primary hover:underline">
+                      Manage
+                    </Link>
+                  ) : null}
+                </div>
                 <Select
                   value={form.type}
-                  onValueChange={(value) =>
-                    setForm({ ...form, type: value, typeOther: value === "Other" ? form.typeOther : "" })
-                  }
+                  onValueChange={(value) => {
+                    const next = { ...form, type: value };
+                    setForm(next);
+                    clearError("type");
+                    handleChange("type", next);
+                  }}
                 >
-                  <SelectTrigger>
-                    <SelectValue />
+                  <SelectTrigger
+                    id="type"
+                    className={cn(shouldShow("type") && "border-destructive focus:ring-destructive")}
+                    aria-invalid={shouldShow("type") || undefined}
+                  >
+                    <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
-                    {typeSelectOptions.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>
-                        {t.label}
+                    {activeTypes.map((t) => (
+                      <SelectItem key={t.id} value={t.slug}>
+                        {t.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {shouldShow("type") && <FormFieldError field="type" message={errors.type} />}
               </div>
               <div className="grid gap-2">
                 <Label>Status</Label>
@@ -319,31 +412,31 @@ export default function Customers() {
                 </Select>
               </div>
             </div>
-            {form.type === "Other" && (
-              <div className="grid gap-2 rounded-lg border border-dashed border-border p-3">
-                <Label htmlFor="customer-type-other">Add new type</Label>
+            {canManageMasterData ? (
+              <div className="grid gap-2">
+                <Label htmlFor="customer-type-new">Add type</Label>
                 <div className="flex gap-2">
                   <Input
-                    id="customer-type-other"
-                    value={form.typeOther}
-                    onChange={(e) => setForm({ ...form, typeOther: e.target.value })}
+                    id="customer-type-new"
+                    value={newTypeName}
+                    onChange={(e) => setNewTypeName(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
-                        addType();
+                        void addType();
                       }
                     }}
-                    placeholder="e.g. Nursing Home, Pharmacy"
+                    placeholder="e.g. Nursing Home"
                   />
-                  <Button type="button" variant="outline" disabled={!form.typeOther.trim()} onClick={addType}>
-                    Add
+                  <Button type="button" variant="outline" disabled={!newTypeName.trim() || addingType} onClick={() => void addType()}>
+                    {addingType ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Added types appear in the dropdown above for this and future customers.
+                  Saves to Master Data so the type is available for every customer form.
                 </p>
               </div>
-            )}
+            ) : null}
             <div className="grid gap-2">
               <Label htmlFor="contact-person">Contact person</Label>
               <Input
@@ -354,53 +447,96 @@ export default function Customers() {
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
+              <div className="grid gap-2" data-field="email">
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   type="email"
                   value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, email: e.target.value };
+                    setForm(next);
+                    handleChange("email", next);
+                  }}
+                  onBlur={() => handleBlur("email", form)}
+                  aria-invalid={shouldShow("email") || undefined}
+                  className={cn(shouldShow("email") && "border-destructive focus-visible:ring-destructive")}
                   placeholder="facilities@hospital.org"
                 />
+                {shouldShow("email") && <FormFieldError field="email" message={errors.email} />}
               </div>
-              <div className="grid gap-2">
+              <div className="grid gap-2" data-field="phone">
                 <Label htmlFor="phone">Phone</Label>
                 <Input
                   id="phone"
                   value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, phone: e.target.value };
+                    setForm(next);
+                    handleChange("phone", next);
+                  }}
+                  onBlur={() => handleBlur("phone", form)}
+                  aria-invalid={shouldShow("phone") || undefined}
+                  className={cn(shouldShow("phone") && "border-destructive focus-visible:ring-destructive")}
                   placeholder="+1 512-555-2010"
                 />
+                {shouldShow("phone") && <FormFieldError field="phone" message={errors.phone} />}
               </div>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="site-address">Site address</Label>
+            <div className="grid gap-2" data-field="address">
+              <Label htmlFor="site-address" className={shouldShow("address") ? "text-destructive" : undefined}>
+                Site address
+                <RequiredMark />
+              </Label>
               <Input
                 id="site-address"
                 value={form.address}
-                onChange={(e) => setForm({ ...form, address: e.target.value })}
+                onChange={(e) => {
+                  const next = { ...form, address: e.target.value };
+                  setForm(next);
+                  handleChange("address", next);
+                }}
+                onBlur={() => handleBlur("address", form)}
+                aria-invalid={shouldShow("address") || undefined}
+                className={cn(shouldShow("address") && "border-destructive focus-visible:ring-destructive")}
                 placeholder="1200 Medical Center Dr"
               />
+              {shouldShow("address") && <FormFieldError field="address" message={errors.address} />}
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
+              <div className="grid gap-2" data-field="city">
                 <Label htmlFor="city">City</Label>
                 <Input
                   id="city"
                   value={form.city}
-                  onChange={(e) => setForm({ ...form, city: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, city: e.target.value };
+                    setForm(next);
+                    handleChange("city", next);
+                  }}
+                  onBlur={() => handleBlur("city", form)}
+                  aria-invalid={shouldShow("city") || undefined}
+                  className={cn(shouldShow("city") && "border-destructive focus-visible:ring-destructive")}
                   placeholder="Austin"
                 />
+                {shouldShow("city") && <FormFieldError field="city" message={errors.city} />}
               </div>
-              <div className="grid gap-2">
+              <div className="grid gap-2" data-field="country">
                 <Label htmlFor="country">Country</Label>
                 <Input
                   id="country"
                   value={form.country}
-                  onChange={(e) => setForm({ ...form, country: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, country: e.target.value };
+                    setForm(next);
+                    handleChange("country", next);
+                  }}
+                  onBlur={() => handleBlur("country", form)}
+                  aria-invalid={shouldShow("country") || undefined}
+                  className={cn(shouldShow("country") && "border-destructive focus-visible:ring-destructive")}
                   placeholder="United States"
                 />
+                {shouldShow("country") && <FormFieldError field="country" message={errors.country} />}
               </div>
             </div>
             <div className="grid gap-2">
@@ -415,22 +551,30 @@ export default function Customers() {
                 Optional. Use whichever ID applies for this country (GST, license, VAT, etc.).
               </p>
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="customer-note">Note</Label>
+              <Textarea
+                id="customer-note"
+                value={form.note}
+                onChange={(e) => {
+                  const next = { ...form, note: e.target.value };
+                  setForm(next);
+                  handleChange("note", next);
+                }}
+                onBlur={() => handleBlur("note", form)}
+                aria-invalid={shouldShow("note") || undefined}
+                className={cn(shouldShow("note") && "border-destructive focus-visible:ring-destructive")}
+                placeholder="Add any notes or message for this customer (optional)"
+                rows={3}
+              />
+              {shouldShow("note") && <FormFieldError field="note" message={errors.note} />}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
-            <Button
-              onClick={saveCustomer}
-              disabled={
-                saving ||
-                !form.name.trim() ||
-                !resolvedType ||
-                !form.address.trim() ||
-                !form.city.trim() ||
-                !form.country.trim()
-              }
-            >
+            <Button onClick={saveCustomer} disabled={saving}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Save customer
             </Button>

@@ -11,11 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api, ApiError, type BackendEquipment, type BackendEquipmentHistory } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
-
-function formatCondition(condition: string) {
-  if (condition === "needsService") return "needs-service";
-  return condition;
-}
+import { termLabel } from "@/lib/taxonomy";
+import { useQuery } from "@tanstack/react-query";
 
 export default function EquipmentDetail() {
   const { id = "" } = useParams();
@@ -25,6 +22,18 @@ export default function EquipmentDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const tab = searchParams.get("tab") ?? "overview";
+  const categoriesQuery = useQuery({
+    queryKey: ["taxonomy", "equipment_category"],
+    queryFn: () => api.listTaxonomy({ type: "equipment_category" }),
+    staleTime: 60_000,
+  });
+  const conditionsQuery = useQuery({
+    queryKey: ["taxonomy", "equipment_condition"],
+    queryFn: () => api.listTaxonomy({ type: "equipment_condition" }),
+    staleTime: 60_000,
+  });
+  const categoryName = termLabel(categoriesQuery.data, equipment?.category);
+  const conditionName = termLabel(conditionsQuery.data, equipment?.condition);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -59,9 +68,10 @@ export default function EquipmentDetail() {
       backLabel="Back to Equipment"
       title={equipment?.name ?? "Equipment"}
       subtitle={equipment ? `${equipment.assetTag} · ${equipment.customerName}` : undefined}
-      status={equipment ? formatCondition(equipment.condition) : undefined}
+      status={equipment ? equipment.condition : undefined}
+      statusLabel={equipment ? conditionName : undefined}
       meta={equipment ? [
-        { label: "Category", value: equipment.category },
+        { label: "Category", value: categoryName },
         { label: "Location", value: equipment.location || "—" },
         { label: "Serial", value: equipment.serialNumber || "—" },
       ] : undefined}
@@ -83,7 +93,7 @@ export default function EquipmentDetail() {
                 items={[
                   { label: "Manufacturer", value: equipment.manufacturer },
                   { label: "Model", value: equipment.model },
-                  { label: "Category", value: equipment.category },
+                  { label: "Category", value: categoryName },
                   { label: "Serial no.", value: equipment.serialNumber },
                   { label: "Location", value: equipment.location },
                   { label: "Customer", value: (
@@ -163,7 +173,7 @@ export default function EquipmentDetail() {
         <Card>
           <CardHeader className="pb-3"><CardTitle className="text-base">Summary</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Condition</span><StatusBadge status={formatCondition(equipment.condition)} /></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Condition</span><StatusBadge status={equipment.condition} label={conditionName} /></div>
             <div className="flex justify-between gap-2"><span className="text-muted-foreground">Tickets</span><span>{history?.requests?.length ?? "—"}</span></div>
             <div className="flex justify-between gap-2"><span className="text-muted-foreground">Jobs</span><span>{history?.jobs?.length ?? "—"}</span></div>
             <div className="flex justify-between gap-2"><span className="text-muted-foreground">Invoices</span><span>{history?.invoices?.length ?? "—"}</span></div>

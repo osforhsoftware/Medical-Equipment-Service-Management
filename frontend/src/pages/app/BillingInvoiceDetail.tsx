@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { z } from "zod";
 import { ArrowLeft, Loader2, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { fieldAria, fieldErrorClass, fieldRules, focusFirstInvalidField, type FieldErrors } from "@/lib/formValidation";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ProfessionalDocument } from "@/components/shared/ProfessionalDocument";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -49,6 +54,48 @@ function toPreviewLines(lines: InvoiceLineInput[], jobRef?: string | null) {
   }));
 }
 
+type EditInvoiceValues = { dueAt: string; lines: InvoiceLineInput[] };
+
+function validateEditInvoice(values: EditInvoiceValues): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!values.dueAt.trim()) {
+    errors.dueAt = "Due date is required.";
+  }
+  values.lines.forEach((line, index) => {
+    if (!line.description.trim()) {
+      errors[`line_${index}_description`] = "Description is required.";
+    }
+    if (line.quantity <= 0) {
+      errors[`line_${index}_quantity`] = "Quantity must be greater than zero.";
+    }
+  });
+  return errors;
+}
+
+function editInvoiceFieldOrder(lines: InvoiceLineInput[]): string[] {
+  const order = ["dueAt"];
+  lines.forEach((_, index) => {
+    order.push(`line_${index}_description`, `line_${index}_quantity`);
+  });
+  return order;
+}
+
+const paymentSchema = z.object({
+  amount: fieldRules.positiveNumber("Amount"),
+  method: fieldRules.selectRequired("payment method"),
+  methodOther: fieldRules.optionalString(),
+  reference: fieldRules.optionalString(),
+  note: fieldRules.optionalString(),
+}).superRefine((data, ctx) => {
+  if (data.method === "other" && !data.methodOther?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["methodOther"],
+      message: "Specify the payment method.",
+    });
+  }
+});
+
 export default function BillingInvoiceDetail() {
   const { invoiceId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -60,6 +107,18 @@ export default function BillingInvoiceDetail() {
   const [editDueAt, setEditDueAt] = useState("");
   const [editLines, setEditLines] = useState<InvoiceLineInput[]>([]);
   const [payment, setPayment] = useState({ amount: 0, method: "bank_transfer", methodOther: "", reference: "", note: "" });
+  const editFormRef = useRef<HTMLDivElement>(null);
+  const paymentFormRef = useRef<HTMLDivElement>(null);
+
+  const editValidation = useFormValidation<EditInvoiceValues>({
+    fieldOrder: ["dueAt"],
+    validate: validateEditInvoice,
+  });
+
+  const paymentValidation = useFormValidation({
+    fieldOrder: ["amount", "method", "methodOther", "reference", "note"],
+    schema: paymentSchema,
+  });
 
   const load = useCallback(async () => {
     if (!invoiceId) return;
@@ -103,6 +162,7 @@ export default function BillingInvoiceDetail() {
     const editable = toEditableLines(invoice);
     setEditDueAt(invoice.dueAt.slice(0, 10));
     setEditLines(editable.length ? editable : [newLine()]);
+    editValidation.reset();
     setEditing(true);
   };
 
@@ -136,26 +196,33 @@ export default function BillingInvoiceDetail() {
     setEditing(false);
     setEditLines([]);
     setEditDueAt("");
+    editValidation.reset();
   };
 
   const updateLine = (index: number, patch: Partial<InvoiceLineInput>) => {
-    setEditLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+    setEditLines((prev) => {
+      const next = prev.map((line, i) => (i === index ? { ...line, ...patch } : line));
+      const values = { dueAt: editDueAt, lines: next };
+      if (patch.description !== undefined) {
+        editValidation.handleChange(`line_${index}_description`, values);
+      }
+      if (patch.quantity !== undefined) {
+        editValidation.handleChange(`line_${index}_quantity`, values);
+      }
+      return next;
+    });
   };
 
   const saveEdits = async () => {
     if (!invoice) return;
-    if (!editDueAt) {
-      toast({ title: "Due date required", variant: "destructive" });
+    const values = { dueAt: editDueAt, lines: editLines };
+    const fieldErrors = validateEditInvoice(values);
+    if (Object.keys(fieldErrors).length > 0) {
+      editValidation.validateAll(values, fieldErrors, editFormRef.current);
+      focusFirstInvalidField(fieldErrors, editInvoiceFieldOrder(editLines), editFormRef.current);
       return;
     }
-    if (editLines.some((line) => !line.description.trim() || line.quantity <= 0)) {
-      toast({
-        title: "Invalid line items",
-        description: "Each line needs a description and quantity greater than zero.",
-        variant: "destructive",
-      });
-      return;
-    }
+
     setSaving(true);
     try {
       const updated = await api.updateInvoice(invoiceId, {
@@ -172,13 +239,16 @@ export default function BillingInvoiceDetail() {
       });
       setInvoice(updated);
       setEditing(false);
+      editValidation.reset();
       toast({ title: "Invoice updated" });
     } catch (error) {
-      toast({
-        title: "Save failed",
-        description: error instanceof ApiError ? error.message : "Request failed",
-        variant: "destructive",
-      });
+      if (!editValidation.applyApiErrors(error, editFormRef.current)) {
+        toast({
+          title: "Save failed",
+          description: error instanceof ApiError ? error.message : "Request failed",
+          variant: "destructive",
+        });
+      }
     } finally {
       setSaving(false);
     }
@@ -251,10 +321,14 @@ export default function BillingInvoiceDetail() {
 
   const recordPayment = async () => {
     if (!invoice) return;
-    if (payment.method === "other" && !payment.methodOther.trim()) {
-      toast({ title: "Method required", variant: "destructive" });
-      return;
+    const values = payment;
+    const extraErrors: FieldErrors = {};
+    const maxAmount = Number(invoice.balanceDue ?? invoice.total);
+    if (values.amount > maxAmount) {
+      extraErrors.amount = `Amount cannot exceed ${formatCurrency(maxAmount)}.`;
     }
+    if (!paymentValidation.validateAll(values, extraErrors, paymentFormRef.current)) return;
+
     setSaving(true);
     try {
       const method = payment.method === "other" ? payment.methodOther.trim() : payment.method;
@@ -265,9 +339,12 @@ export default function BillingInvoiceDetail() {
         note: payment.note,
       }));
       setPayment({ amount: 0, method: "bank_transfer", methodOther: "", reference: "", note: "" });
+      paymentValidation.reset();
       toast({ title: "Payment recorded" });
     } catch (error) {
-      toast.apiError(error, { fallback: "Request failed" });
+      if (!paymentValidation.applyApiErrors(error, paymentFormRef.current)) {
+        toast.apiError(error, { fallback: "Request failed" });
+      }
     } finally { setSaving(false); }
   };
 
@@ -325,93 +402,144 @@ export default function BillingInvoiceDetail() {
           <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
             <div className="no-print space-y-4">
               {editing ? (
-                <Card>
+                <Card ref={editFormRef}>
                   <CardHeader>
                     <CardTitle className="text-base">Edit invoice</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="grid gap-2">
-                      <Label>Payment due date</Label>
-                      <Input type="date" value={editDueAt} onChange={(e) => setEditDueAt(e.target.value)} />
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <Label>Line items</Label>
-                        <Button type="button" variant="outline" size="sm" onClick={() => setEditLines((prev) => [...prev, newLine()])}>
-                          <Plus className="mr-1 h-3.5 w-3.5" /> Add line
-                        </Button>
+                    <form
+                      noValidate
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void saveEdits();
+                      }}
+                    >
+                      <div className="grid gap-2" data-field="dueAt">
+                        <Label htmlFor="edit-due-at" className={editValidation.shouldShow("dueAt") ? "text-destructive" : undefined}>
+                          Payment due date
+                          <RequiredMark />
+                        </Label>
+                        <Input
+                          id="edit-due-at"
+                          name="dueAt"
+                          type="date"
+                          value={editDueAt}
+                          className={fieldErrorClass(editValidation.shouldShow("dueAt"))}
+                          {...fieldAria("dueAt", editValidation.shouldShow("dueAt") ? editValidation.errors.dueAt : null)}
+                          onChange={(e) => {
+                            setEditDueAt(e.target.value);
+                            editValidation.handleChange("dueAt", { dueAt: e.target.value, lines: editLines });
+                          }}
+                          onBlur={() => editValidation.handleBlur("dueAt", { dueAt: editDueAt, lines: editLines })}
+                        />
+                        {editValidation.shouldShow("dueAt") && (
+                          <FormFieldError field="dueAt" message={editValidation.errors.dueAt} />
+                        )}
                       </div>
-                      {editLines.map((line, index) => (
-                        <div key={line.id ?? `new-${index}`} className="space-y-2 rounded-lg border p-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <Input
-                              value={line.description}
-                              onChange={(e) => updateLine(index, { description: e.target.value })}
-                              placeholder="Description"
-                            />
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="shrink-0"
-                              disabled={editLines.length <= 1}
-                              onClick={() => setEditLines((prev) => prev.filter((_, i) => i !== index))}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="grid gap-1">
-                              <Label className="text-xs">Qty</Label>
-                              <Input
-                                type="number"
-                                min={0.001}
-                                step="any"
-                                value={line.quantity}
-                                onChange={(e) => updateLine(index, { quantity: Number(e.target.value) })}
-                              />
-                            </div>
-                            <div className="grid gap-1">
-                              <Label className="text-xs">Unit price</Label>
-                              <Input
-                                type="number"
-                                min={0}
-                                step="any"
-                                value={line.unitPrice}
-                                onChange={(e) => updateLine(index, { unitPrice: Number(e.target.value) })}
-                              />
-                            </div>
-                            <div className="grid gap-1">
-                              <Label className="text-xs">Discount</Label>
-                              <Input
-                                type="number"
-                                min={0}
-                                step="any"
-                                value={line.discount ?? 0}
-                                onChange={(e) => updateLine(index, { discount: Number(e.target.value) })}
-                              />
-                            </div>
-                            <div className="grid gap-1">
-                              <Label className="text-xs">Tax %</Label>
-                              <Input
-                                type="number"
-                                min={0}
-                                max={100}
-                                step="any"
-                                value={line.taxRate ?? 0}
-                                onChange={(e) => updateLine(index, { taxRate: Number(e.target.value) })}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
 
-                    <InfoRow label="Preview total" value={formatCurrency(editPreviewTotal)} />
-                    <p className="text-xs text-muted-foreground">
-                      Totals are recalculated on the server when you save. Only draft and pending-approval invoices can be edited.
-                    </p>
+                      <div className="mt-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label>Line items</Label>
+                          <Button type="button" variant="outline" size="sm" onClick={() => setEditLines((prev) => [...prev, newLine()])}>
+                            <Plus className="mr-1 h-3.5 w-3.5" /> Add line
+                          </Button>
+                        </div>
+                        {editLines.map((line, index) => {
+                          const descKey = `line_${index}_description`;
+                          const qtyKey = `line_${index}_quantity`;
+                          return (
+                            <div key={line.id ?? `new-${index}`} className="space-y-2 rounded-lg border p-3">
+                              <div className="flex items-start justify-between gap-2" data-field={descKey}>
+                                <div className="grid flex-1 gap-1">
+                                  <Input
+                                    id={descKey}
+                                    name={descKey}
+                                    value={line.description}
+                                    placeholder="Description"
+                                    className={fieldErrorClass(editValidation.shouldShow(descKey))}
+                                    {...fieldAria(descKey, editValidation.shouldShow(descKey) ? editValidation.errors[descKey] : null)}
+                                    onChange={(e) => updateLine(index, { description: e.target.value })}
+                                    onBlur={() => editValidation.handleBlur(descKey, { dueAt: editDueAt, lines: editLines })}
+                                  />
+                                  {editValidation.shouldShow(descKey) && (
+                                    <FormFieldError field={descKey} message={editValidation.errors[descKey]} />
+                                  )}
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="shrink-0"
+                                  disabled={editLines.length <= 1}
+                                  onClick={() => setEditLines((prev) => prev.filter((_, i) => i !== index))}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="grid gap-1" data-field={qtyKey}>
+                                  <Label className={`text-xs ${editValidation.shouldShow(qtyKey) ? "text-destructive" : ""}`}>
+                                    Qty
+                                    <RequiredMark />
+                                  </Label>
+                                  <Input
+                                    id={qtyKey}
+                                    name={qtyKey}
+                                    type="number"
+                                    min={0.001}
+                                    step="any"
+                                    value={line.quantity}
+                                    className={fieldErrorClass(editValidation.shouldShow(qtyKey))}
+                                    {...fieldAria(qtyKey, editValidation.shouldShow(qtyKey) ? editValidation.errors[qtyKey] : null)}
+                                    onChange={(e) => updateLine(index, { quantity: Number(e.target.value) })}
+                                    onBlur={() => editValidation.handleBlur(qtyKey, { dueAt: editDueAt, lines: editLines })}
+                                  />
+                                  {editValidation.shouldShow(qtyKey) && (
+                                    <FormFieldError field={qtyKey} message={editValidation.errors[qtyKey]} />
+                                  )}
+                                </div>
+                                <div className="grid gap-1">
+                                  <Label className="text-xs">Unit price</Label>
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    step="any"
+                                    value={line.unitPrice}
+                                    onChange={(e) => updateLine(index, { unitPrice: Number(e.target.value) })}
+                                  />
+                                </div>
+                                <div className="grid gap-1">
+                                  <Label className="text-xs">Discount</Label>
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    step="any"
+                                    value={line.discount ?? 0}
+                                    onChange={(e) => updateLine(index, { discount: Number(e.target.value) })}
+                                  />
+                                </div>
+                                <div className="grid gap-1">
+                                  <Label className="text-xs">Tax %</Label>
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    step="any"
+                                    value={line.taxRate ?? 0}
+                                    onChange={(e) => updateLine(index, { taxRate: Number(e.target.value) })}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <InfoRow label="Preview total" value={formatCurrency(editPreviewTotal)} />
+                      <p className="text-xs text-muted-foreground">
+                        Totals are recalculated on the server when you save. Only draft and pending-approval invoices can be edited.
+                      </p>
+                    </form>
                   </CardContent>
                 </Card>
               ) : null}
@@ -438,45 +566,120 @@ export default function BillingInvoiceDetail() {
               </Card>
 
               {["sent", "overdue"].includes(invoice.status) && Number(invoice.balanceDue ?? invoice.total) > 0 ? (
-                <Card>
+                <Card ref={paymentFormRef}>
                   <CardHeader><CardTitle className="text-base">Record payment</CardTitle></CardHeader>
                   <CardContent className="space-y-3">
-                    <div className="grid gap-2">
-                      <Label>Amount</Label>
-                      <Input
-                        type="number"
-                        min={0.01}
-                        max={Number(invoice.balanceDue ?? invoice.total)}
-                        value={payment.amount}
-                        onChange={(e) => setPayment({ ...payment, amount: Number(e.target.value) })}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label>Method</Label>
-                      <Select value={payment.method} onValueChange={(method) => setPayment({ ...payment, method, methodOther: method === "other" ? payment.methodOther : "" })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {PAYMENT_METHOD_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {payment.method === "other" ? (
-                      <div className="grid gap-2">
-                        <Label>Specify method</Label>
-                        <Input value={payment.methodOther} onChange={(e) => setPayment({ ...payment, methodOther: e.target.value })} />
+                    <form
+                      noValidate
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void recordPayment();
+                      }}
+                    >
+                      <div className="grid gap-2" data-field="amount">
+                        <Label htmlFor="payment-amount" className={paymentValidation.shouldShow("amount") ? "text-destructive" : undefined}>
+                          Amount
+                          <RequiredMark />
+                        </Label>
+                        <Input
+                          id="payment-amount"
+                          name="amount"
+                          type="number"
+                          min={0.01}
+                          max={Number(invoice.balanceDue ?? invoice.total)}
+                          value={payment.amount}
+                          className={fieldErrorClass(paymentValidation.shouldShow("amount"))}
+                          {...fieldAria("amount", paymentValidation.shouldShow("amount") ? paymentValidation.errors.amount : null)}
+                          onChange={(e) => {
+                            const next = { ...payment, amount: Number(e.target.value) };
+                            setPayment(next);
+                            paymentValidation.handleChange("amount", next);
+                          }}
+                          onBlur={() => paymentValidation.handleBlur("amount", payment)}
+                        />
+                        {paymentValidation.shouldShow("amount") && (
+                          <FormFieldError field="amount" message={paymentValidation.errors.amount} />
+                        )}
                       </div>
-                    ) : null}
-                    <div className="grid gap-2">
-                      <Label>Reference</Label>
-                      <Input value={payment.reference} onChange={(e) => setPayment({ ...payment, reference: e.target.value })} />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label>Note</Label>
-                      <Textarea value={payment.note} onChange={(e) => setPayment({ ...payment, note: e.target.value })} />
-                    </div>
-                    <Button className="w-full" onClick={recordPayment} disabled={saving || payment.amount <= 0}>Record payment</Button>
+                      <div className="grid gap-2" data-field="method">
+                        <Label className={paymentValidation.shouldShow("method") ? "text-destructive" : undefined}>
+                          Method
+                          <RequiredMark />
+                        </Label>
+                        <Select
+                          value={payment.method}
+                          onValueChange={(method) => {
+                            const next = { ...payment, method, methodOther: method === "other" ? payment.methodOther : "" };
+                            setPayment(next);
+                            paymentValidation.clearError("method");
+                            if (method !== "other") paymentValidation.clearError("methodOther");
+                            paymentValidation.handleChange("method", next);
+                          }}
+                        >
+                          <SelectTrigger
+                            id="method"
+                            className={fieldErrorClass(paymentValidation.shouldShow("method"))}
+                            {...fieldAria("method", paymentValidation.shouldShow("method") ? paymentValidation.errors.method : null)}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PAYMENT_METHOD_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {paymentValidation.shouldShow("method") && (
+                          <FormFieldError field="method" message={paymentValidation.errors.method} />
+                        )}
+                      </div>
+                      {payment.method === "other" ? (
+                        <div className="grid gap-2" data-field="methodOther">
+                          <Label htmlFor="method-other" className={paymentValidation.shouldShow("methodOther") ? "text-destructive" : undefined}>
+                            Specify method
+                            <RequiredMark />
+                          </Label>
+                          <Input
+                            id="method-other"
+                            name="methodOther"
+                            value={payment.methodOther}
+                            className={fieldErrorClass(paymentValidation.shouldShow("methodOther"))}
+                            {...fieldAria("methodOther", paymentValidation.shouldShow("methodOther") ? paymentValidation.errors.methodOther : null)}
+                            onChange={(e) => {
+                              const next = { ...payment, methodOther: e.target.value };
+                              setPayment(next);
+                              paymentValidation.handleChange("methodOther", next);
+                            }}
+                            onBlur={() => paymentValidation.handleBlur("methodOther", payment)}
+                          />
+                          {paymentValidation.shouldShow("methodOther") && (
+                            <FormFieldError field="methodOther" message={paymentValidation.errors.methodOther} />
+                          )}
+                        </div>
+                      ) : null}
+                      <div className="grid gap-2" data-field="reference">
+                        <Label htmlFor="payment-reference">Reference</Label>
+                        <Input
+                          id="payment-reference"
+                          name="reference"
+                          value={payment.reference}
+                          onChange={(e) => setPayment({ ...payment, reference: e.target.value })}
+                        />
+                      </div>
+                      <div className="grid gap-2" data-field="note">
+                        <Label htmlFor="payment-note">Note</Label>
+                        <Textarea
+                          id="payment-note"
+                          name="note"
+                          value={payment.note}
+                          onChange={(e) => setPayment({ ...payment, note: e.target.value })}
+                        />
+                      </div>
+                      <Button type="submit" className="w-full" disabled={saving}>
+                        {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Record payment
+                      </Button>
+                    </form>
                   </CardContent>
                 </Card>
               ) : null}

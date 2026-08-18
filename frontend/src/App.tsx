@@ -50,6 +50,7 @@ import ServiceCatalog from "./pages/app/ServiceCatalog.tsx";
 import Projects from "./pages/app/Projects.tsx";
 import ProjectDetail from "./pages/app/ProjectDetail.tsx";
 import OfficeAssets from "./pages/app/OfficeAssets.tsx";
+import MasterData from "./pages/app/MasterData.tsx";
 import ExpensesCommissions from "./pages/app/ExpensesCommissions.tsx";
 
 import { PortalLayout } from "./pages/portal/PortalLayout.tsx";
@@ -58,7 +59,14 @@ import PortalEquipment from "./pages/portal/PortalEquipment.tsx";
 import PortalEstimates from "./pages/portal/PortalEstimates.tsx";
 import PortalHistory from "./pages/portal/PortalHistory.tsx";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 const App = () => (
   <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
@@ -107,6 +115,7 @@ const App = () => (
               <Route path="qr-tracking" element={<ModuleGuard module="QR Tracking"><ResponsivePage mobile={<MobileQR />} desktop={<QRTracking />} /></ModuleGuard>} />
               <Route path="audit-logs" element={<ModuleGuard module="Audit Logs"><AuditLogs /></ModuleGuard>} />
               <Route path="users" element={<ModuleGuard module="Users"><UsersPage /></ModuleGuard>} />
+              <Route path="master-data" element={<ModuleGuard module="Master Data"><MasterData /></ModuleGuard>} />
               <Route path="office-assets" element={<ModuleGuard module="Office Assets"><OfficeAssets /></ModuleGuard>} />
               <Route path="settings" element={<ModuleGuard module="Settings"><Settings /></ModuleGuard>} />
             </Route>

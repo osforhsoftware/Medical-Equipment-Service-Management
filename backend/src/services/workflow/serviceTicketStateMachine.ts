@@ -3,56 +3,71 @@ import { AppError } from "@/middleware/errorHandler";
 /**
  * Canonical ticket lifecycle (DB / API values).
  *
- * Target product vocabulary (Phase 3 naming) maps as:
- *   intake              → new
- *   assigned_inspection → inspection
- *   inspection_complete → estimate   (inspection submitted; estimate stage opens)
- *   estimate_drafted    → estimate
- *   estimate_sent       → approval
- *   estimate_approved   → approval   (approved estimate; job may be scheduled)
- *   job_scheduled       → inProgress (job exists; work underway / ready)
- *   job_in_progress     → inProgress
- *   job_completed       → completed
- *   invoiced            → invoiced
- *   paid / closed       → finished
+ * Flow:
+ *   new → inspection → estimate → pending_approval → assigned_engineer
+ *     ↔ change_pending_approval → pending_final_approval → pending_invoice → invoiced → closed
  *
- * Phase 1 keeps existing enum values to avoid breaking API response shapes.
+ * Legacy enum values (approval, inProgress, completed, finished) remain readable via normalizeTicketStatus().
  */
 export const TICKET_STATUS_ORDER = [
   "new",
   "inspection",
   "estimate",
-  "approval",
-  "inProgress",
-  "completed",
+  "pending_approval",
+  "assigned_engineer",
+  "change_pending_approval",
+  "pending_final_approval",
+  "pending_invoice",
   "invoiced",
-  "finished",
+  "closed",
 ] as const;
 
 export type TicketStatus = (typeof TICKET_STATUS_ORDER)[number];
 
-/** Explicit next-state table — only one forward step unless reopen. */
+/** Map legacy DB statuses to canonical workflow statuses. */
+export const LEGACY_STATUS_ALIASES: Record<string, TicketStatus> = {
+  approval: "pending_approval",
+  inProgress: "assigned_engineer",
+  "in-progress": "assigned_engineer",
+  completed: "pending_final_approval",
+  finished: "closed",
+};
+
+export function normalizeTicketStatus(status: string): TicketStatus {
+  if ((TICKET_STATUS_ORDER as readonly string[]).includes(status)) return status as TicketStatus;
+  return LEGACY_STATUS_ALIASES[status] ?? (status as TicketStatus);
+}
+
+/** Explicit next-state table — only one forward step unless reopen or admin reject-back. */
 export const TICKET_TRANSITIONS: Record<TicketStatus, readonly TicketStatus[]> = {
   new: ["inspection"],
   inspection: ["estimate"],
-  estimate: ["approval"],
-  approval: ["inProgress"],
-  inProgress: ["completed"],
-  completed: ["invoiced"],
-  invoiced: ["finished"],
-  finished: [],
+  estimate: ["pending_approval"],
+  pending_approval: ["assigned_engineer"],
+  assigned_engineer: ["change_pending_approval", "pending_final_approval"],
+  change_pending_approval: ["assigned_engineer"],
+  pending_final_approval: ["pending_invoice"],
+  pending_invoice: ["invoiced"],
+  invoiced: ["closed"],
+  closed: [],
 };
+
+/** Admin/coordinator reject-back targets from pending_approval. */
+export const ESTIMATE_REJECT_TARGETS = ["estimate", "inspection"] as const;
+export type EstimateRejectTarget = (typeof ESTIMATE_REJECT_TARGETS)[number];
 
 /** Roles allowed to move a ticket *into* each status via advanceWorkflow. */
 export const TICKET_TRANSITION_ROLES: Record<TicketStatus, readonly string[]> = {
   new: [],
   inspection: ["admin", "coordinator", "inspector"],
   estimate: ["admin", "coordinator", "inspector"],
-  approval: ["admin", "coordinator", "estimator"],
-  inProgress: ["admin", "coordinator"],
-  completed: ["admin", "coordinator", "engineer"],
+  pending_approval: ["admin", "coordinator", "estimator"],
+  assigned_engineer: ["admin", "coordinator"],
+  change_pending_approval: ["admin", "coordinator", "engineer"],
+  pending_final_approval: ["admin", "coordinator", "engineer"],
+  pending_invoice: ["admin", "billing"],
   invoiced: ["admin", "billing"],
-  finished: ["admin", "coordinator", "billing"],
+  closed: ["admin", "coordinator", "billing"],
 };
 
 /** Roles allowed to reopen a ticket to an earlier stage. */
@@ -66,13 +81,21 @@ export const TICKET_EVENT_TARGETS = {
   inspectionStarted: "inspection",
   inspectionSubmitted: "estimate",
   estimateCreated: "estimate",
-  estimatePendingApproval: "approval",
-  estimateApproved: "approval",
-  estimateRejected: "estimate",
-  jobScheduled: "inProgress",
-  jobCompleted: "completed",
+  estimatePendingApproval: "pending_approval",
+  estimateApproved: "assigned_engineer",
+  estimateRejectedToEstimate: "estimate",
+  estimateRejectedToInspection: "inspection",
+  changeRequestSubmitted: "change_pending_approval",
+  changeRequestResolved: "assigned_engineer",
+  jobScheduled: "assigned_engineer",
+  jobCompleted: "pending_final_approval",
+  finalApproved: "pending_invoice",
   invoiceGenerated: "invoiced",
-  ticketFinished: "finished",
+  ticketClosed: "closed",
+  // Legacy event aliases
+  estimateRejected: "estimate",
+  estimateApprovedLegacy: "pending_approval",
+  ticketFinished: "closed",
 } as const satisfies Record<string, TicketStatus>;
 
 export type TicketEvent = keyof typeof TICKET_EVENT_TARGETS;
@@ -98,7 +121,7 @@ export const JOB_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
 
 export const ESTIMATE_DECISION_FROM = [
   "pendingAdminApproval",
-  "sent", // compat for seed / older estimates
+  "sent",
   "revision",
 ] as const;
 
@@ -107,15 +130,15 @@ export function assertTicketAdvance(
   target: string,
   actorRole: string,
 ): asserts target is TicketStatus {
-  const from = current as TicketStatus;
-  const to = target as TicketStatus;
+  const from = normalizeTicketStatus(current);
+  const to = normalizeTicketStatus(target);
   if (!TICKET_STATUS_ORDER.includes(from)) throw new AppError("Invalid current ticket status", 400);
   if (!TICKET_STATUS_ORDER.includes(to)) throw new AppError("Invalid target status", 400);
 
   const allowedNext = TICKET_TRANSITIONS[from];
   if (!allowedNext.includes(to)) {
     throw new AppError(
-      `Workflow cannot move from ${current} to ${target}. Use reopen to move backward.`,
+      `Workflow cannot move from ${current} to ${target}. Use reopen or dedicated approval actions to move backward.`,
       409,
     );
   }
@@ -129,15 +152,15 @@ export function assertTicketReopen(
   target: string,
   actorRole: string,
 ): asserts target is TicketStatus {
-  const from = current as TicketStatus;
-  const to = target as TicketStatus;
+  const from = normalizeTicketStatus(current);
+  const to = normalizeTicketStatus(target);
   if (!TICKET_STATUS_ORDER.includes(from)) throw new AppError("Invalid current ticket status", 400);
   if (!TICKET_STATUS_ORDER.includes(to)) throw new AppError("Invalid target status", 400);
   if (!(TICKET_REOPEN_ROLES as readonly string[]).includes(actorRole)) {
     throw new AppError("Only administrators and coordinators can reopen a ticket", 403);
   }
-  if (from === "finished" && actorRole !== "admin") {
-    throw new AppError("Only administrators can reopen a finished ticket", 403);
+  if (from === "closed" && actorRole !== "admin") {
+    throw new AppError("Only administrators can reopen a closed ticket", 403);
   }
   const currentIdx = TICKET_STATUS_ORDER.indexOf(from);
   const targetIdx = TICKET_STATUS_ORDER.indexOf(to);
@@ -148,15 +171,27 @@ export function assertTicketReopen(
 
 /** Apply a domain event: allow same status, forward to event target, or controlled reverse. */
 export function resolveTicketEventStatus(current: string, event: TicketEvent): TicketStatus {
+  const normalized = normalizeTicketStatus(current);
   const target = TICKET_EVENT_TARGETS[event];
-  const currentIdx = TICKET_STATUS_ORDER.indexOf(current as TicketStatus);
+  const currentIdx = TICKET_STATUS_ORDER.indexOf(normalized);
   const targetIdx = TICKET_STATUS_ORDER.indexOf(target);
   if (currentIdx < 0) throw new AppError("Invalid current ticket status", 400);
-  const allowReverse: TicketEvent[] = ["estimateRejected"];
+  const allowReverse: TicketEvent[] = [
+    "estimateRejected",
+    "estimateRejectedToEstimate",
+    "estimateRejectedToInspection",
+    "changeRequestResolved",
+  ];
   if (targetIdx < currentIdx && !allowReverse.includes(event)) {
     throw new AppError(`Cannot move ticket from ${current} to ${target} via ${event}`, 409);
   }
   return target;
+}
+
+export function assertEstimateDecisionAllowed(status: string) {
+  if (!(ESTIMATE_DECISION_FROM as readonly string[]).includes(status)) {
+    throw new AppError("Only estimates pending admin approval can receive a decision", 409);
+  }
 }
 
 export function assertJobTransition(current: string, target: string): asserts target is JobStatus {
@@ -168,11 +203,5 @@ export function assertJobTransition(current: string, target: string): asserts ta
   }
   if (!JOB_TRANSITIONS[from].includes(to)) {
     throw new AppError(`Job cannot move from ${current} to ${target}`, 409);
-  }
-}
-
-export function assertEstimateDecisionAllowed(status: string) {
-  if (!(ESTIMATE_DECISION_FROM as readonly string[]).includes(status)) {
-    throw new AppError("Only estimates pending admin approval can receive a decision", 409);
   }
 }

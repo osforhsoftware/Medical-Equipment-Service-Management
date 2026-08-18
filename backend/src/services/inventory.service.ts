@@ -29,11 +29,20 @@ export class InventoryService {
     };
   }
 
+  async getPaginated(tenantId: string, filters: import("@/repositories/inventory.repository").InventoryListFilters) {
+    const { data, total } = await inventoryRepository.findPaginated(tenantId, filters);
+    return {
+      data: data.map((item) => this.withAvailability(item)),
+      total,
+    };
+  }
+
   async getAll(tenantId: string) {
     const items = await prisma.inventoryItem.findMany({
       where: { tenantId },
       include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
       orderBy: { name: "asc" },
+      take: 100,
     });
     return items.map((item) => this.withAvailability(item));
   }

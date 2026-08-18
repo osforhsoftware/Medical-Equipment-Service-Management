@@ -1,5 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import { Loader2, Pencil, Phone, Plus, Trash2, UserCog } from "lucide-react";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { fieldRules } from "@/lib/formValidation";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { RoleGuard } from "@/components/auth/RoleGuard";
@@ -39,6 +44,18 @@ import { api, type BackendUser } from "@/lib/api";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
+
+const userSchema = z.object({
+  name: fieldRules.requiredString("Full name"),
+  username: fieldRules.requiredString("Username"),
+  email: fieldRules.email(true),
+  phone: fieldRules.phone(false),
+  password: z.string(),
+  selectedRoles: z.array(z.string()),
+  primaryRole: z.string(),
+  isActive: z.boolean(),
+});
 
 const staffRoles: Role[] = ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing", "customer"];
 const filterRoles: (Role | "all")[] = ["all", "admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
@@ -94,6 +111,33 @@ export default function UsersPage() {
   const [editing, setEditing] = useState<BackendUser | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  const {
+    errors,
+    shouldShow,
+    reset: resetValidation,
+    validateAll,
+    handleBlur,
+    handleChange,
+    applyApiErrors,
+    clearError,
+  } = useFormValidation({
+    fieldOrder: ["name", "username", "email", "phone", "password", "selectedRoles"],
+    schema: userSchema,
+    validate: (values) => {
+      const fieldErrors: Record<string, string> = {};
+      if (values.selectedRoles.length === 0) {
+        fieldErrors.selectedRoles = "Select at least one role.";
+      }
+      if (!editing && !values.password.trim()) {
+        fieldErrors.password = "Password is required.";
+      } else if (values.password.trim() && values.password.length < 8) {
+        fieldErrors.password = "Enter at least 8 characters.";
+      }
+      return fieldErrors;
+    },
+  });
 
   const loadUsers = async () => {
     setLoading(true);
@@ -114,6 +158,7 @@ export default function UsersPage() {
   const openCreate = () => {
     setEditing(null);
     setForm(emptyForm);
+    resetValidation();
     setDialogOpen(true);
   };
 
@@ -130,25 +175,24 @@ export default function UsersPage() {
       primaryRole: target.role as Role,
       isActive: target.isActive,
     });
+    resetValidation();
     setDialogOpen(true);
   };
 
   const updateSelectedRoles = (role: Role, checked: boolean) => {
-    setForm((prev) => {
-      const nextRoles = checked
-        ? toggleRoleSelection(prev.selectedRoles, role)
-        : prev.selectedRoles.filter((entry) => entry !== role);
-      const safeRoles = nextRoles.length ? nextRoles : prev.selectedRoles;
-      const primaryRole = safeRoles.includes(prev.primaryRole) ? prev.primaryRole : safeRoles[0];
-      return { ...prev, selectedRoles: safeRoles, primaryRole };
-    });
+    const nextRoles = checked
+      ? toggleRoleSelection(form.selectedRoles, role)
+      : form.selectedRoles.filter((entry) => entry !== role);
+    const safeRoles = nextRoles.length ? nextRoles : form.selectedRoles;
+    const primaryRole = safeRoles.includes(form.primaryRole) ? form.primaryRole : safeRoles[0];
+    const next = { ...form, selectedRoles: safeRoles, primaryRole };
+    setForm(next);
+    clearError("selectedRoles");
+    handleChange("selectedRoles", next);
   };
 
   const saveUser = async () => {
-    if (form.selectedRoles.length === 0) {
-      toast.warning("Please select at least one role");
-      return;
-    }
+    if (!validateAll(form, undefined, dialogRef.current)) return;
 
     setSaving(true);
     try {
@@ -182,9 +226,12 @@ export default function UsersPage() {
         });
       }
       setDialogOpen(false);
+      resetValidation();
       await loadUsers();
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to save user" });
+      if (!applyApiErrors(err, dialogRef.current)) {
+        toast.apiError(err, { fallback: "Unable to save user" });
+      }
     } finally {
       setSaving(false);
     }
@@ -227,10 +274,10 @@ export default function UsersPage() {
             <button
               key={r}
               onClick={() => setRoleFilter(r)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              className={`rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${
                 roleFilter === r
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  ? "bg-primary-light text-primary"
+                  : "bg-muted text-muted-foreground hover:text-foreground"
               }`}
             >
               {r === "all" ? "All Roles" : roleLabels[r as Role]}
@@ -336,52 +383,106 @@ export default function UsersPage() {
         </Card>
       </div>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetValidation(); setDialogOpen(open); }}>
+        <DialogContent ref={dialogRef} className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserCog className="h-5 w-5" /> {editing ? "Edit User" : "Add User"}
             </DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2">
-            <div className="grid gap-2">
-              <Label htmlFor="name">Full name</Label>
-              <Input id="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <div className="grid gap-2" data-field="name">
+              <Label htmlFor="name" className={shouldShow("name") ? "text-destructive" : undefined}>
+                Full name
+                <RequiredMark />
+              </Label>
+              <Input
+                id="name"
+                value={form.name}
+                onChange={(e) => {
+                  const next = { ...form, name: e.target.value };
+                  setForm(next);
+                  handleChange("name", next);
+                }}
+                onBlur={() => handleBlur("name", form)}
+                aria-invalid={shouldShow("name") || undefined}
+                className={cn(shouldShow("name") && "border-destructive focus-visible:ring-destructive")}
+              />
+              {shouldShow("name") && <FormFieldError field="name" message={errors.name} />}
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label htmlFor="username">Username</Label>
+              <div className="grid gap-2" data-field="username">
+                <Label htmlFor="username" className={shouldShow("username") ? "text-destructive" : undefined}>
+                  Username
+                  <RequiredMark />
+                </Label>
                 <Input
                   id="username"
                   value={form.username}
-                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, username: e.target.value };
+                    setForm(next);
+                    handleChange("username", next);
+                  }}
+                  onBlur={() => handleBlur("username", form)}
                   autoComplete="off"
+                  aria-invalid={shouldShow("username") || undefined}
+                  className={cn(shouldShow("username") && "border-destructive focus-visible:ring-destructive")}
                 />
+                {shouldShow("username") && <FormFieldError field="username" message={errors.username} />}
               </div>
-              <div className="grid gap-2">
+              <div className="grid gap-2" data-field="phone">
                 <Label htmlFor="phone">Phone</Label>
                 <Input
                   id="phone"
                   type="tel"
                   value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, phone: e.target.value };
+                    setForm(next);
+                    handleChange("phone", next);
+                  }}
+                  onBlur={() => handleBlur("phone", form)}
                   placeholder="+91 99999 00000"
+                  aria-invalid={shouldShow("phone") || undefined}
+                  className={cn(shouldShow("phone") && "border-destructive focus-visible:ring-destructive")}
                 />
+                {shouldShow("phone") && <FormFieldError field="phone" message={errors.phone} />}
               </div>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
+            <div className="grid gap-2" data-field="email">
+              <Label htmlFor="email" className={shouldShow("email") ? "text-destructive" : undefined}>
+                Email
+                <RequiredMark />
+              </Label>
               <Input
                 id="email"
                 type="email"
                 value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                onChange={(e) => {
+                  const next = { ...form, email: e.target.value };
+                  setForm(next);
+                  handleChange("email", next);
+                }}
+                onBlur={() => handleBlur("email", form)}
+                aria-invalid={shouldShow("email") || undefined}
+                className={cn(shouldShow("email") && "border-destructive focus-visible:ring-destructive")}
               />
+              {shouldShow("email") && <FormFieldError field="email" message={errors.email} />}
             </div>
 
-            <div className="space-y-3 rounded-lg border border-border p-3">
+            <div
+              className={cn(
+                "space-y-3 rounded-lg border p-3",
+                shouldShow("selectedRoles") ? "border-destructive" : "border-border",
+              )}
+              data-field="selectedRoles"
+            >
               <div>
-                <p className="text-sm font-medium">Job roles</p>
+                <p className={cn("text-sm font-medium", shouldShow("selectedRoles") && "text-destructive")}>
+                  Job roles
+                  <RequiredMark />
+                </p>
                 <p className="text-xs text-muted-foreground">
                   Select all roles this staff member can perform. Example: Service Coordinator + Estimate Staff.
                 </p>
@@ -404,6 +505,9 @@ export default function UsersPage() {
                 />
                 <span>{roleLabels.customer} (portal only — cannot combine with staff roles)</span>
               </label>
+              {shouldShow("selectedRoles") && (
+                <FormFieldError field="selectedRoles" message={errors.selectedRoles} />
+              )}
             </div>
 
             {!isCustomerOnly && form.selectedRoles.length > 1 ? (
@@ -430,15 +534,25 @@ export default function UsersPage() {
               </div>
             ) : null}
 
-            <div className="grid gap-2">
-              <Label htmlFor="password">{editing ? "New password (optional)" : "Password"}</Label>
+            <div className="grid gap-2" data-field="password">
+              <Label htmlFor="password" className={shouldShow("password") ? "text-destructive" : undefined}>
+                {editing ? "New password (optional)" : "Password"}
+                {!editing ? <RequiredMark /> : null}
+              </Label>
               <Input
                 id="password"
                 type="password"
                 value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                required={!editing}
+                onChange={(e) => {
+                  const next = { ...form, password: e.target.value };
+                  setForm(next);
+                  handleChange("password", next);
+                }}
+                onBlur={() => handleBlur("password", form)}
+                aria-invalid={shouldShow("password") || undefined}
+                className={cn(shouldShow("password") && "border-destructive focus-visible:ring-destructive")}
               />
+              {shouldShow("password") && <FormFieldError field="password" message={errors.password} />}
             </div>
             <div className="flex items-center justify-between rounded-lg border border-border p-3">
               <div>
@@ -455,7 +569,7 @@ export default function UsersPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={saveUser} disabled={saving || form.selectedRoles.length === 0}>
+            <Button onClick={saveUser} disabled={saving}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {editing ? "Save changes" : "Create user"}
             </Button>

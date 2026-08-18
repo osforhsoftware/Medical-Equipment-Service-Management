@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { z } from "zod";
 import { Loader2, ShoppingCart } from "lucide-react";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import {
   DetailInfoGrid,
   DetailSection,
@@ -18,6 +23,11 @@ import { ApiError, api, type BackendStockPurchaseRequest } from "@/lib/api";
 import { defaultDatePlusDays, formatCurrency, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
+const convertSchema = z.object({
+  expectedDate: fieldRules.requiredString("Expected date"),
+  unitCost: z.string().refine((v) => !v.trim() || (!Number.isNaN(Number(v)) && Number(v) >= 0), "Unit cost cannot be negative."),
+});
+
 export default function StockPurchaseRequestDetail() {
   const { id = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -31,6 +41,21 @@ export default function StockPurchaseRequestDetail() {
   const [unitCost, setUnitCost] = useState("");
   const [saving, setSaving] = useState(false);
   const tab = searchParams.get("tab") ?? "overview";
+  const convertRef = useRef<HTMLDivElement>(null);
+  const {
+    errors,
+    shouldShow,
+    validateAll,
+    handleBlur,
+    handleChange,
+    applyApiErrors,
+    reset: resetValidation,
+  } = useFormValidation({
+    fieldOrder: ["expectedDate", "unitCost"],
+    schema: convertSchema,
+  });
+
+  const formValues = () => ({ expectedDate, unitCost });
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -57,20 +82,21 @@ export default function StockPurchaseRequestDetail() {
 
   const convert = async () => {
     if (!request) return;
+    if (!validateAll(formValues(), undefined, convertRef.current)) return;
     setSaving(true);
     try {
-      const result = await api.convertStockPurchaseRequest(request.id, {
+      await api.convertStockPurchaseRequest(request.id, {
         expectedDate,
         unitCost: unitCost ? Number(unitCost) : undefined,
       });
       toast({ title: "Converted to purchase order" });
       setConvertOpen(false);
+      resetValidation();
       await load();
-      if (result.purchaseOrder?.id) {
-        // stay on page; user can open PO via link after reload
-      }
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to convert" });
+      if (!applyApiErrors(err, convertRef.current)) {
+        toast.apiError(err, { fallback: "Unable to convert" });
+      }
     } finally {
       setSaving(false);
     }
@@ -99,7 +125,7 @@ export default function StockPurchaseRequestDetail() {
         notFoundDescription="The requested stock purchase request could not be found."
         onRetry={() => void load()}
         actions={canConvert && request?.status === "open" ? (
-          <Button onClick={() => setConvertOpen(true)}>
+          <Button onClick={() => { resetValidation(); setConvertOpen(true); }}>
             <ShoppingCart className="mr-1 h-4 w-4" /> Convert to PO
           </Button>
         ) : undefined}
@@ -166,33 +192,65 @@ export default function StockPurchaseRequestDetail() {
         ) : undefined}
       />
 
-      <Dialog open={convertOpen} onOpenChange={setConvertOpen}>
+      <Dialog open={convertOpen} onOpenChange={(open) => { if (!open) resetValidation(); setConvertOpen(open); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ShoppingCart className="h-4 w-4" /> Convert to Purchase Order
             </DialogTitle>
           </DialogHeader>
-          <div className="grid gap-3 py-2">
-            <p className="text-sm text-muted-foreground">
-              {request?.inventoryItem?.name} × {request?.quantity}
-            </p>
-            <div className="grid gap-2">
-              <Label>Expected date</Label>
-              <Input type="date" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} />
+          <form noValidate onSubmit={(e) => { e.preventDefault(); void convert(); }}>
+            <div ref={convertRef} className="grid gap-3 py-2">
+              <p className="text-sm text-muted-foreground">
+                {request?.inventoryItem?.name} × {request?.quantity}
+              </p>
+              <div className="grid gap-2" data-field="expectedDate">
+                <Label htmlFor="spr-detail-expected" className={shouldShow("expectedDate") ? "text-destructive" : undefined}>
+                  Expected date
+                  <RequiredMark />
+                </Label>
+                <Input
+                  id="spr-detail-expected"
+                  name="expectedDate"
+                  type="date"
+                  value={expectedDate}
+                  className={fieldErrorClass(shouldShow("expectedDate"))}
+                  {...fieldAria("expectedDate", shouldShow("expectedDate") ? errors.expectedDate : null)}
+                  onChange={(e) => {
+                    setExpectedDate(e.target.value);
+                    handleChange("expectedDate", { expectedDate: e.target.value, unitCost });
+                  }}
+                  onBlur={() => handleBlur("expectedDate", formValues())}
+                />
+                {shouldShow("expectedDate") && <FormFieldError field="expectedDate" message={errors.expectedDate} />}
+              </div>
+              <div className="grid gap-2" data-field="unitCost">
+                <Label htmlFor="spr-detail-unit-cost" className={shouldShow("unitCost") ? "text-destructive" : undefined}>Unit cost</Label>
+                <Input
+                  id="spr-detail-unit-cost"
+                  name="unitCost"
+                  type="number"
+                  min={0}
+                  value={unitCost}
+                  className={fieldErrorClass(shouldShow("unitCost"))}
+                  {...fieldAria("unitCost", shouldShow("unitCost") ? errors.unitCost : null)}
+                  onChange={(e) => {
+                    setUnitCost(e.target.value);
+                    handleChange("unitCost", { expectedDate, unitCost: e.target.value });
+                  }}
+                  onBlur={() => handleBlur("unitCost", formValues())}
+                />
+                {shouldShow("unitCost") && <FormFieldError field="unitCost" message={errors.unitCost} />}
+              </div>
             </div>
-            <div className="grid gap-2">
-              <Label>Unit cost</Label>
-              <Input type="number" min={0} value={unitCost} onChange={(e) => setUnitCost(e.target.value)} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConvertOpen(false)}>Cancel</Button>
-            <Button disabled={saving} onClick={() => void convert()}>
-              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Create PO
-            </Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setConvertOpen(false)}>Cancel</Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Create PO
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </RoleGuard>

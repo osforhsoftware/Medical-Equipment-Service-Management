@@ -16,13 +16,11 @@ import {
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type {
-  BackendCatalogItem,
   BackendInspectionReport,
-  BackendInventoryItem,
   BackendServiceRequest,
 } from "@/lib/api";
 import { formatServiceStatus } from "@/lib/format";
-import { InspectionReportForm, type RequirementEntry } from "./InspectionReportForm";
+import { InspectionReportForm } from "./InspectionReportForm";
 
 interface InspectionReportPanelProps {
   open: boolean;
@@ -43,16 +41,9 @@ interface InspectionReportPanelProps {
   machineImages: File[];
   setMachineImages: React.Dispatch<React.SetStateAction<File[]>>;
   setMachineImage: (file: File | null) => void;
+  imageCaptions: string[];
+  setImageCaptions: React.Dispatch<React.SetStateAction<string[]>>;
   newImagePreviews: { file: File; url: string }[];
-  inventory: BackendInventoryItem[];
-  serviceCatalog: BackendCatalogItem[];
-  recommendedItems: RequirementEntry[];
-  setRecommendedItems: React.Dispatch<React.SetStateAction<RequirementEntry[]>>;
-  emptyRequirement: () => RequirementEntry;
-  findingsTouched?: boolean;
-  setFindingsTouched?: (v: boolean) => void;
-  recommendationTouched?: boolean;
-  setRecommendationTouched?: (v: boolean) => void;
 }
 
 export function InspectionReportPanel(props: InspectionReportPanelProps) {
@@ -143,7 +134,7 @@ export function InspectionReportPanel(props: InspectionReportPanelProps) {
           <div className="shrink-0 border-b border-border/60 bg-card px-4 pb-3 pt-safe">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1 pt-1">
-                <DrawerTitle className="font-display text-lg font-bold leading-tight">{title}</DrawerTitle>
+                <DrawerTitle className="text-lg font-semibold leading-tight">{title}</DrawerTitle>
                 <p className="mt-1 truncate text-sm font-medium text-foreground">{equipmentLabel}</p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
                   {active.reference} · {active.customerName}
@@ -181,7 +172,7 @@ export function InspectionReportPanel(props: InspectionReportPanelProps) {
         <DialogHeader className="shrink-0 space-y-1 border-b border-border/60 px-6 py-5 pr-12 text-left">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <DialogTitle className="font-display text-xl">{title}</DialogTitle>
+              <DialogTitle className="text-xl font-semibold">{title}</DialogTitle>
               <DialogDescription className="mt-1.5 text-sm text-foreground/80">
                 <span className="font-medium text-foreground">{equipmentLabel}</span>
                 <span className="text-muted-foreground">

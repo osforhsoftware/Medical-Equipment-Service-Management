@@ -1,10 +1,38 @@
+const SERVICE_STATUS_LABELS: Record<string, string> = {
+  new: "New",
+  inspection: "Inspection",
+  estimate: "Estimate",
+  pending_approval: "Pending approval",
+  assigned_engineer: "Assigned engineer",
+  change_pending_approval: "Change pending approval",
+  pending_final_approval: "Pending final approval",
+  pending_invoice: "Pending invoice",
+  invoiced: "Invoiced",
+  closed: "Closed",
+  approval: "Pending approval",
+  inProgress: "In progress",
+  completed: "Completed",
+  finished: "Closed",
+};
+
 export function formatServiceStatus(status: string) {
-  return status === "inProgress" ? "in-progress" : status;
+  if (status === "inProgress") return "in-progress";
+  return SERVICE_STATUS_LABELS[status] ?? status.replace(/_/g, " ");
+}
+
+export function toApiServiceStatus(status: string) {
+  return status === "in-progress" ? "inProgress" : status;
 }
 
 export function formatJobStatus(status: string) {
   if (status === "inProgress") return "in-progress";
   if (status === "partsPending") return "parts-pending";
+  return status;
+}
+
+export function toApiJobStatus(status: string) {
+  if (status === "in-progress") return "inProgress";
+  if (status === "parts-pending") return "partsPending";
   return status;
 }
 
@@ -21,7 +49,7 @@ export function formatDate(value: string | null | undefined) {
   });
 }
 
-export function formatDateTime(value: string | null | undefined) {
+export function formatDateTime(value: string | Date | null | undefined) {
   if (!value) return "—";
   return new Date(value).toLocaleString(undefined, {
     year: "numeric",
@@ -30,6 +58,10 @@ export function formatDateTime(value: string | null | undefined) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+export function formatFileTimestamp(file: File) {
+  return formatDateTime(file.lastModified ? new Date(file.lastModified) : new Date());
 }
 
 export const CURRENCY_SYMBOL = "₹";

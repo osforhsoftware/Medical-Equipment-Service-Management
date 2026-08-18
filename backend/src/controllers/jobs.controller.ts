@@ -1,17 +1,25 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { jobsService } from "@/services/jobs.service";
+import { parseJobListQuery, sendPaginatedList } from "@/utils/listQuery";
 import { success } from "@/utils/response";
 
 export class JobsController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await jobsService.getAll(
+      const query = parseJobListQuery(req);
+      const { data, total } = await jobsService.getPaginated(
         req.tenantId!,
         req.user!.userId,
         req.user!.role,
-        req.query.status as string,
+        {
+          status: query.status,
+          search: query.search,
+          skip: query.skip,
+          take: query.take,
+          orderBy: query.orderBy,
+        },
       );
-      res.json(success("Jobs fetched successfully", data));
+      sendPaginatedList(res, "Jobs fetched successfully", data, total, query.page, query.limit);
     } catch (err) { next(err); }
   }
 

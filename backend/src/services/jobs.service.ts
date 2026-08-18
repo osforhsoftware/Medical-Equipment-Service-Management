@@ -68,6 +68,19 @@ export class JobsService {
     return assignee;
   }
 
+  async getPaginated(
+    tenantId: string,
+    actorId: string | undefined,
+    actorRole: string | undefined,
+    filters: import("@/repositories/jobs.repository").JobListFilters,
+  ) {
+    let engineerId = filters.engineerId;
+    if (actorRole === "engineer" && actorId) {
+      engineerId = actorId;
+    }
+    return jobsRepository.findPaginated(tenantId, { ...filters, engineerId });
+  }
+
   async getAll(tenantId: string, actorId?: string, actorRole?: string, status?: string) {
     let engineerId: string | undefined;
     if (actorRole === "engineer" && actorId) {
@@ -237,9 +250,21 @@ export class JobsService {
             });
           }
         }
-        if (job.equipmentId) {
+        // A service request may include multiple equipment items (`service_request_equipment`).
+        // When a job is completed for the ticket workflow, we update *all* linked equipment
+        // to keep equipment "machine count" / condition in sync with the ticket lifecycle.
+        const equipmentIds = new Set<string>();
+        if (job.equipmentId) equipmentIds.add(job.equipmentId);
+        if (job.serviceRequestId) {
+          const linked = await tx.serviceRequestEquipment.findMany({
+            where: { serviceRequestId: job.serviceRequestId },
+            select: { equipmentId: true },
+          });
+          for (const row of linked) equipmentIds.add(row.equipmentId);
+        }
+        if (equipmentIds.size > 0) {
           await tx.equipment.updateMany({
-            where: { id: job.equipmentId, tenantId },
+            where: { tenantId, id: { in: Array.from(equipmentIds) } },
             data: { lastServiceDate: new Date(), condition: "operational" },
           });
         }
@@ -278,7 +303,7 @@ export class JobsService {
     tenantId: string,
     actorId: string,
     actorRole: string,
-    photos: { filename?: string; mimeType?: string; dataUrl?: string; fileId?: string }[],
+    photos: { filename?: string; mimeType?: string; dataUrl?: string; fileId?: string; caption?: string }[],
   ) {
     const job = await this.getById(id, tenantId, actorId, actorRole);
     const actor = await usersRepository.findById(actorId, tenantId);
@@ -316,6 +341,7 @@ export class JobsService {
           mimeType,
           dataUrl,
           fileId,
+          caption: photo.caption?.trim() || null,
           uploadedBy: actorName,
         },
       });

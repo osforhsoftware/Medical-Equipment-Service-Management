@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Printer } from "lucide-react";
+import { MesmsLogo } from "@/components/shared/MesmsLogo";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/context/SettingsContext";
 import { formatCurrency } from "@/lib/format";
@@ -60,7 +61,9 @@ export function ProfessionalDocument({
         <div className="flex items-center gap-3">
           {settings?.logoUrl ? (
             <img src={settings.logoUrl} alt="" className="h-14 w-14 object-contain" />
-          ) : null}
+          ) : (
+            <MesmsLogo size="lg" />
+          )}
           <div>
             <h1 className="text-xl font-bold">{settings?.companyName ?? "MESMS"}</h1>
             <p className="text-sm text-slate-600">{settings?.supportEmail}</p>

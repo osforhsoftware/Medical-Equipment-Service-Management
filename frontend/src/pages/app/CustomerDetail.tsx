@@ -8,23 +8,11 @@ import {
 } from "@/components/shared/RecordDetailLayout";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  api,
-  ApiError,
-  type BackendCustomer,
-  type BackendEquipment,
-  type BackendEstimate,
-  type BackendInvoice,
-  type BackendServiceJob,
-  type BackendServiceRequest,
-} from "@/lib/api";
-import { CUSTOMER_TYPE_OPTIONS, formatFixedOption } from "@/lib/fixedOptions";
+import { api, ApiError, type BackendCustomer, type BackendEquipment, type BackendEstimate, type BackendInvoice, type BackendServiceJob, type BackendServiceRequest } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
-
-function formatCustomerType(type: string, typeOther?: string | null) {
-  return formatFixedOption(CUSTOMER_TYPE_OPTIONS, type, typeOther);
-}
+import { termLabel } from "@/lib/taxonomy";
+import { useQuery } from "@tanstack/react-query";
 
 export default function CustomerDetail() {
   const { id = "" } = useParams();
@@ -38,6 +26,17 @@ export default function CustomerDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const tab = searchParams.get("tab") ?? "overview";
+  const typesQuery = useQuery({
+    queryKey: ["taxonomy", "customer_type"],
+    queryFn: () => api.listTaxonomy({ type: "customer_type" }),
+    staleTime: 60_000,
+  });
+  const conditionsQuery = useQuery({
+    queryKey: ["taxonomy", "equipment_condition"],
+    queryFn: () => api.listTaxonomy({ type: "equipment_condition" }),
+    staleTime: 60_000,
+  });
+  const customerTypeName = termLabel(typesQuery.data, customer?.type, customer?.typeOther);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -47,10 +46,10 @@ export default function CustomerDetail() {
       const record = await api.getCustomer(id);
       setCustomer(record);
       const [eq, sr, jb, est, inv] = await Promise.all([
-        api.listEquipment({ customerId: id }).catch(() => [] as BackendEquipment[]),
-        api.listServiceRequests().catch(() => [] as BackendServiceRequest[]),
-        api.listJobs().catch(() => [] as BackendServiceJob[]),
-        api.listEstimates().catch(() => [] as BackendEstimate[]),
+        api.listEquipment({ customerId: id, limit: 100, page: 1 }).then((r) => r.data).catch(() => [] as BackendEquipment[]),
+        api.listServiceRequests({ customerId: id, limit: 100, page: 1 }).then((r) => r.data).catch(() => [] as BackendServiceRequest[]),
+        api.listJobs({ customerId: id, limit: 100, page: 1 }).then((r) => r.data).catch(() => [] as BackendServiceJob[]),
+        api.listEstimates({ customerId: id, limit: 100, page: 1 }).then((r) => r.data).catch(() => [] as BackendEstimate[]),
         api.listInvoices().catch(() => [] as BackendInvoice[]),
       ]);
       setEquipment(eq);
@@ -80,7 +79,7 @@ export default function CustomerDetail() {
       title={customer?.name ?? "Customer"}
       subtitle={customer ? (
         <>
-          {formatCustomerType(customer.type, customer.type === "Other" ? customer.typeOther : null)}
+          {customerTypeName}
           {" · "}
           {[customer.city, customer.country].filter(Boolean).join(", ") || "No location"}
         </>
@@ -125,7 +124,7 @@ export default function CustomerDetail() {
                   items={[
                     { label: "Added", value: formatDate(customer.createdAt) },
                     { label: "Last updated", value: formatDate(customer.updatedAt) },
-                    { label: "Type", value: formatCustomerType(customer.type, customer.type === "Other" ? customer.typeOther : null) },
+                    { label: "Type", value: customerTypeName },
                     { label: "Status", value: customer.status },
                   ]}
                 />
@@ -148,7 +147,7 @@ export default function CustomerDetail() {
                         <p className="font-medium">{e.name}</p>
                         <p className="font-mono text-xs text-muted-foreground">{e.assetTag}</p>
                       </div>
-                      <StatusBadge status={e.condition === "needsService" ? "needs-service" : e.condition} />
+                      <StatusBadge status={e.condition} label={termLabel(conditionsQuery.data, e.condition)} />
                     </Link>
                   ))}
                 </div>

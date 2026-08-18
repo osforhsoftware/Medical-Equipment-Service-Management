@@ -68,7 +68,7 @@ export interface Equipment {
   installDate: string;
   warrantyEnd: string;
   amcStatus: "active" | "expiring" | "expired" | "none";
-  condition: "operational" | "needs-service" | "down";
+  condition: string;
   lastServiceDate: string;
 }
 

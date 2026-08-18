@@ -1,7 +1,10 @@
-import { equipmentRepository } from "@/repositories/equipment.repository";
+import { equipmentRepository, type EquipmentListFilters } from "@/repositories/equipment.repository";
 import { customersRepository } from "@/repositories/customers.repository";
+import { taxonomyService } from "@/services/taxonomy.service";
 import { AppError } from "@/middleware/errorHandler";
 import { prisma } from "@/db/prisma";
+import type { PaginatedResult } from "@/types";
+import type { Equipment } from "@prisma/client";
 
 type CreateEquipmentData = {
   assetTag: string;
@@ -21,6 +24,10 @@ type CreateEquipmentData = {
 };
 
 export class EquipmentService {
+  async getPaginated(tenantId: string, filters: EquipmentListFilters): Promise<PaginatedResult<Equipment>> {
+    return equipmentRepository.findPaginated(tenantId, filters);
+  }
+
   async getAll(tenantId: string, filters?: { customerId?: string }) {
     return equipmentRepository.findAll(tenantId, filters);
   }
@@ -42,13 +49,19 @@ export class EquipmentService {
     if (!customer) throw new AppError("Customer not found", 404);
 
     const branchId = data.branchId ?? customer.branchId;
+    const category = await taxonomyService.resolveSlug(tenantId, "equipment_category", data.category);
+    const condition = await taxonomyService.resolveSlug(
+      tenantId,
+      "equipment_condition",
+      data.condition ?? "operational",
+    );
 
     const equipment = await equipmentRepository.create(tenantId, {
       assetTag: data.assetTag,
       name: data.name,
       model: data.model,
       manufacturer: data.manufacturer,
-      category: data.category,
+      category,
       serialNumber: data.serialNumber,
       customerId: data.customerId,
       customerName: customer.name,
@@ -57,7 +70,7 @@ export class EquipmentService {
       installDate: new Date(data.installDate),
       warrantyEnd: new Date(data.warrantyEnd),
       amcStatus: (data.amcStatus ?? "none") as never,
-      condition: (data.condition ?? "operational") as never,
+      condition,
       lastServiceDate: data.lastServiceDate ? new Date(data.lastServiceDate) : null,
     });
 
@@ -70,8 +83,25 @@ export class EquipmentService {
   }
 
   async update(id: string, tenantId: string, data: Record<string, unknown>) {
-    await this.getById(id, tenantId);
-    return equipmentRepository.update(id, tenantId, data);
+    const existing = await this.getById(id, tenantId);
+    const next = { ...data };
+    if (typeof next.category === "string") {
+      next.category = await taxonomyService.resolveSlug(
+        tenantId,
+        "equipment_category",
+        next.category,
+        existing.category,
+      );
+    }
+    if (typeof next.condition === "string") {
+      next.condition = await taxonomyService.resolveSlug(
+        tenantId,
+        "equipment_condition",
+        next.condition,
+        existing.condition,
+      );
+    }
+    return equipmentRepository.update(id, tenantId, next);
   }
 
   async delete(id: string, tenantId: string) {

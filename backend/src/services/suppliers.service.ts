@@ -1,6 +1,9 @@
 import { suppliersRepository } from "@/repositories/suppliers.repository";
 import { AppError } from "@/middleware/errorHandler";
 export class SuppliersService {
+  async getPaginated(tenantId: string, filters: import("@/repositories/suppliers.repository").SupplierListFilters) {
+    return suppliersRepository.findPaginated(tenantId, filters);
+  }
   async getAll(tenantId: string) { return suppliersRepository.findAll(tenantId); }
   async getById(id: string, tenantId: string) {
     const s = await suppliersRepository.findById(id, tenantId);

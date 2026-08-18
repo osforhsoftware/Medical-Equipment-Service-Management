@@ -2,6 +2,7 @@ import { PrismaClient, type UserRole } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 import path from "path";
+import { DEFAULT_TAXONOMY_TERMS, TAXONOMY_TYPES } from "../src/config/taxonomyDefaults";
 
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
@@ -30,6 +31,26 @@ async function main() {
     update: { name: "MedTech Services Inc." },
     create: { id: TENANT_ID, name: "MedTech Services Inc." },
   });
+
+  for (const type of TAXONOMY_TYPES) {
+    for (const term of DEFAULT_TAXONOMY_TERMS[type]) {
+      const existing = await prisma.taxonomyTerm.findFirst({
+        where: { tenantId: TENANT_ID, type, slug: term.slug },
+      });
+      if (existing) continue;
+      await prisma.taxonomyTerm.create({
+        data: {
+          tenantId: TENANT_ID,
+          type,
+          name: term.name,
+          slug: term.slug,
+          sortOrder: term.sortOrder,
+          isActive: true,
+          isSystem: true,
+        },
+      });
+    }
+  }
 
   // ── Branches ──────────────────────────────────────────────────────────────
   const branchDefs = [
@@ -243,7 +264,7 @@ async function main() {
         Equipment: ["admin", "coordinator", "inspector", "engineer", "inventory"],
         "Service Requests": ["admin", "coordinator", "inspector", "engineer"],
         Inspections: ["admin", "coordinator", "inspector"],
-        Estimates: ["admin", "coordinator", "estimator", "billing"],
+        Estimates: ["admin", "coordinator", "estimator", "billing", "inspector", "engineer"],
         "Service Jobs": ["admin", "coordinator", "engineer"],
         Inventory: ["admin", "inventory", "engineer"],
         Suppliers: ["admin", "inventory"],
@@ -386,7 +407,7 @@ async function main() {
       name: "MRI Scanner",
       model: "Magnetom Vida",
       manufacturer: "Siemens",
-      category: "Imaging",
+      category: "imaging",
       serialNumber: "SN-MRI-88421",
       customerKey: "citygen",
       location: "Radiology Wing A",
@@ -401,7 +422,7 @@ async function main() {
       name: "CT Scanner",
       model: "Revolution Ascend",
       manufacturer: "GE Healthcare",
-      category: "Imaging",
+      category: "imaging",
       serialNumber: "SN-CT-55210",
       customerKey: "citygen",
       location: "Radiology Wing B",
@@ -416,7 +437,7 @@ async function main() {
       name: "Ultrasound System",
       model: "LOGIQ E10",
       manufacturer: "GE Healthcare",
-      category: "Imaging",
+      category: "imaging",
       serialNumber: "SN-US-11902",
       customerKey: "sunrise",
       location: "Exam Room 3",
@@ -461,7 +482,7 @@ async function main() {
       name: "Digital X-Ray",
       model: "DRX-Evolution",
       manufacturer: "Carestream",
-      category: "Imaging",
+      category: "imaging",
       serialNumber: "SN-XR-44088",
       customerKey: "midwest-research",
       location: "Imaging Suite 1",

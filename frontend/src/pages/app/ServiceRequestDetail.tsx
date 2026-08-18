@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { z } from "zod";
 import { CheckCircle2, ChevronRight, Circle, Loader2, UserCheck } from "lucide-react";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import {
   ActivityTimeline,
   DetailInfoGrid,
@@ -40,6 +45,15 @@ const WORKFLOW_STEPS = [
 
 const ASSIGNABLE_ROLES: Role[] = ["coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
 
+const workflowSchema = z.object({
+  note: fieldRules.requiredString("Note"),
+});
+
+const assignSchema = z.object({
+  assignRole: fieldRules.selectRequired("a role"),
+  assignNote: fieldRules.optionalString(),
+});
+
 function formatServiceType(type: string, typeOther?: string | null) {
   return formatFixedOption(SERVICE_TYPE_OPTIONS, type, typeOther);
 }
@@ -47,7 +61,7 @@ function formatServiceType(type: string, typeOther?: string | null) {
 export default function ServiceRequestDetail() {
   const { id = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { hasRole } = useAuth();
   const [request, setRequest] = useState<BackendServiceRequest | null>(null);
   const [timeline, setTimeline] = useState<BackendTimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,10 +77,24 @@ export default function ServiceRequestDetail() {
   const [assignNote, setAssignNote] = useState("");
   const [assignSaving, setAssignSaving] = useState(false);
   const [loadingAssignStaff, setLoadingAssignStaff] = useState(false);
+  const workflowDialogRef = useRef<HTMLDivElement>(null);
+  const assignDialogRef = useRef<HTMLDivElement>(null);
   const tab = searchParams.get("tab") ?? "overview";
 
-  const canCreate = user?.role === "coordinator" || user?.role === "admin";
-  const canAssign = user?.role === "admin" || user?.role === "coordinator";
+  const workflowValidation = useFormValidation({
+    fieldOrder: ["note"],
+    schema: workflowSchema,
+  });
+
+  const assignValidation = useFormValidation({
+    fieldOrder: ["assignRole", "assignTarget"],
+    schema: assignSchema,
+  });
+
+  const canCreate = hasRole(["admin", "coordinator"]);
+  const canAssign = hasRole(["admin", "coordinator"]);
+  const canBuildEstimate = hasRole(["admin", "coordinator", "estimator"]);
+  const canApproveEstimate = hasRole(["admin", "coordinator", "inspector", "engineer"]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -109,28 +137,41 @@ export default function ServiceRequestDetail() {
   const currentStepIndex = WORKFLOW_STEPS.findIndex((s) => s.status === request?.status || formatServiceStatus(request?.status ?? "") === s.status);
 
   const submitWorkflow = async () => {
-    if (!request || !workflowStatus || !workflowNote.trim()) return;
+    if (!request || !workflowStatus) return;
+    const values = { note: workflowNote };
+    if (!workflowValidation.validateAll(values, undefined, workflowDialogRef.current)) return;
+
     setWorkflowSaving(true);
     try {
       const updated = await api.advanceWorkflow(request.id, { status: workflowStatus, note: workflowNote.trim() });
       setRequest(updated);
       setWorkflowOpen(false);
       setWorkflowNote("");
+      workflowValidation.reset();
       toast({ title: "Workflow advanced" });
       setTimeline(await api.getServiceRequestTimeline(request.id));
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to advance workflow" });
+      if (!workflowValidation.applyApiErrors(err, workflowDialogRef.current)) {
+        toast.apiError(err, { fallback: "Unable to advance workflow" });
+      }
     } finally {
       setWorkflowSaving(false);
     }
   };
 
   const submitAssign = async () => {
-    if (!request || !assignTarget) return;
+    if (!request) return;
+    const values = { assignRole, assignNote };
+    const extraErrors: Record<string, string> = {};
+    if (assignRole && !assignTarget) {
+      extraErrors.assignTarget = "Select a staff member.";
+    }
+    if (!assignValidation.validateAll(values, extraErrors, assignDialogRef.current)) return;
+
     setAssignSaving(true);
     try {
       const updated = await api.assignServiceRequest(request.id, {
-        assignedTo: assignTarget.id,
+        assignedTo: assignTarget!.id,
         note: assignNote.trim() || undefined,
       });
       setRequest(updated);
@@ -138,10 +179,13 @@ export default function ServiceRequestDetail() {
       setAssignTarget(null);
       setAssignNote("");
       setAssignRole("");
-      toast({ title: "Staff assigned", description: assignTarget.name });
+      assignValidation.reset();
+      toast({ title: "Staff assigned", description: assignTarget!.name });
       setTimeline(await api.getServiceRequestTimeline(request.id));
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to assign" });
+      if (!assignValidation.applyApiErrors(err, assignDialogRef.current)) {
+        toast.apiError(err, { fallback: "Unable to assign" });
+      }
     } finally {
       setAssignSaving(false);
     }
@@ -258,12 +302,13 @@ export default function ServiceRequestDetail() {
             <CardContent className="space-y-2">
               {canCreate && currentStepIndex >= 0 && currentStepIndex < WORKFLOW_STEPS.length - 1 ? (
                 <Button
-                  className="w-full bg-gradient-primary text-primary-foreground hover:opacity-90"
+                  className="w-full"
                   onClick={() => {
                     const next = WORKFLOW_STEPS[currentStepIndex + 1];
                     if (next) {
                       setWorkflowStatus(next.status);
                       setWorkflowNote("");
+                      workflowValidation.reset();
                       setWorkflowOpen(true);
                     }
                   }}
@@ -280,14 +325,20 @@ export default function ServiceRequestDetail() {
                     setAssignRole("");
                     setAssignTarget(null);
                     setAssignNote("");
+                    assignValidation.reset();
                   }}
                 >
                   <UserCheck className="mr-1.5 h-4 w-4" /> Assign / Reassign
                 </Button>
               ) : null}
-              {request.status === "estimate" || request.status === "inspection" || request.status === "approval" ? (
+              {canBuildEstimate && (request.status === "estimate" || request.status === "inspection" || request.status === "approval" || request.status === "pending_approval") ? (
                 <Button asChild variant="outline" className="w-full">
                   <Link to={`/app/estimates/${request.id}/build`}>Open estimate builder</Link>
+                </Button>
+              ) : null}
+              {canApproveEstimate && !canBuildEstimate ? (
+                <Button asChild variant="outline" className="w-full">
+                  <Link to="/app/estimates">Review estimates</Link>
                 </Button>
               ) : null}
             </CardContent>
@@ -295,78 +346,158 @@ export default function ServiceRequestDetail() {
         ) : undefined}
       />
 
-      <Dialog open={workflowOpen} onOpenChange={setWorkflowOpen}>
-        <DialogContent className="max-w-md">
+      <Dialog open={workflowOpen} onOpenChange={(open) => { if (!open) workflowValidation.reset(); setWorkflowOpen(open); }}>
+        <DialogContent ref={workflowDialogRef} className="max-w-md">
           <DialogHeader>
             <DialogTitle>Advance workflow</DialogTitle>
             <DialogDescription>Add a note before advancing the workflow stage.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2 py-2">
-            <Label>Note / Comment</Label>
-            <Textarea value={workflowNote} onChange={(e) => setWorkflowNote(e.target.value)} rows={4} />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setWorkflowOpen(false)}>Cancel</Button>
-            <Button onClick={() => void submitWorkflow()} disabled={workflowSaving || !workflowNote.trim()} variant="brand">
-              {workflowSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Advance Stage
-            </Button>
-          </DialogFooter>
+          <form
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitWorkflow();
+            }}
+          >
+            <div className="grid gap-2 py-2" data-field="note">
+              <Label htmlFor="workflow-note" className={workflowValidation.shouldShow("note") ? "text-destructive" : undefined}>
+                Note / Comment
+                <RequiredMark />
+              </Label>
+              <Textarea
+                id="workflow-note"
+                name="note"
+                value={workflowNote}
+                rows={4}
+                className={fieldErrorClass(workflowValidation.shouldShow("note"))}
+                {...fieldAria("note", workflowValidation.shouldShow("note") ? workflowValidation.errors.note : null)}
+                onChange={(e) => {
+                  setWorkflowNote(e.target.value);
+                  workflowValidation.handleChange("note", { note: e.target.value });
+                }}
+                onBlur={() => workflowValidation.handleBlur("note", { note: workflowNote })}
+              />
+              {workflowValidation.shouldShow("note") && (
+                <FormFieldError field="note" message={workflowValidation.errors.note} />
+              )}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setWorkflowOpen(false)}>Cancel</Button>
+              <Button type="submit" disabled={workflowSaving} variant="brand">
+                {workflowSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Advance Stage
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
-        <DialogContent className="max-w-md">
+      <Dialog open={assignOpen} onOpenChange={(open) => { if (!open) assignValidation.reset(); setAssignOpen(open); }}>
+        <DialogContent ref={assignDialogRef} className="max-w-md">
           <DialogHeader>
             <DialogTitle>Assign / Reassign Staff</DialogTitle>
             <DialogDescription>Select a role then pick the staff member.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="grid gap-2">
-              <Label>Select Role</Label>
-              <Select value={assignRole} onValueChange={(v) => { setAssignRole(v as Role); setAssignTarget(null); }}>
-                <SelectTrigger><SelectValue placeholder="Choose a role…" /></SelectTrigger>
-                <SelectContent>
-                  {ASSIGNABLE_ROLES.map((r) => (
-                    <SelectItem key={r} value={r}>{roleLabels[r]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {assignRole ? (
-              <div className="grid gap-2">
-                <Label>Staff — {roleLabels[assignRole as Role]}</Label>
-                {loadingAssignStaff ? (
-                  <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading staff…
-                  </div>
-                ) : (
-                  <Select
-                    value={assignTarget?.id ?? ""}
-                    onValueChange={(v) => setAssignTarget(assignStaff.find((s) => s.id === v) ?? null)}
+          <form
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitAssign();
+            }}
+          >
+            <div className="space-y-4 py-2">
+              <div className="grid gap-2" data-field="assignRole">
+                <Label className={assignValidation.shouldShow("assignRole") ? "text-destructive" : undefined}>
+                  Select Role
+                  <RequiredMark />
+                </Label>
+                <Select
+                  value={assignRole}
+                  onValueChange={(v) => {
+                    setAssignRole(v as Role);
+                    setAssignTarget(null);
+                    assignValidation.clearError("assignRole");
+                    assignValidation.clearError("assignTarget");
+                    assignValidation.handleChange("assignRole", { assignRole: v, assignNote });
+                  }}
+                >
+                  <SelectTrigger
+                    id="assignRole"
+                    className={fieldErrorClass(assignValidation.shouldShow("assignRole"))}
+                    {...fieldAria("assignRole", assignValidation.shouldShow("assignRole") ? assignValidation.errors.assignRole : null)}
                   >
-                    <SelectTrigger><SelectValue placeholder="Select staff" /></SelectTrigger>
-                    <SelectContent>
-                      {assignStaff.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    <SelectValue placeholder="Choose a role…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ASSIGNABLE_ROLES.map((r) => (
+                      <SelectItem key={r} value={r}>{roleLabels[r]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {assignValidation.shouldShow("assignRole") && (
+                  <FormFieldError field="assignRole" message={assignValidation.errors.assignRole} />
                 )}
               </div>
-            ) : null}
-            <div className="grid gap-2">
-              <Label>Note</Label>
-              <Textarea value={assignNote} onChange={(e) => setAssignNote(e.target.value)} rows={2} />
+              {assignRole ? (
+                <div className="grid gap-2" data-field="assignTarget">
+                  <Label className={assignValidation.shouldShow("assignTarget") ? "text-destructive" : undefined}>
+                    Staff — {roleLabels[assignRole as Role]}
+                    <RequiredMark />
+                  </Label>
+                  {loadingAssignStaff ? (
+                    <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading staff…
+                    </div>
+                  ) : (
+                    <Select
+                      value={assignTarget?.id ?? ""}
+                      onValueChange={(v) => {
+                        setAssignTarget(assignStaff.find((s) => s.id === v) ?? null);
+                        assignValidation.clearError("assignTarget");
+                      }}
+                    >
+                      <SelectTrigger
+                        id="assignTarget"
+                        className={fieldErrorClass(assignValidation.shouldShow("assignTarget"))}
+                        {...fieldAria("assignTarget", assignValidation.shouldShow("assignTarget") ? assignValidation.errors.assignTarget : null)}
+                      >
+                        <SelectValue placeholder="Select staff" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {assignStaff.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {assignValidation.shouldShow("assignTarget") && (
+                    <FormFieldError field="assignTarget" message={assignValidation.errors.assignTarget} />
+                  )}
+                </div>
+              ) : null}
+              <div className="grid gap-2" data-field="assignNote">
+                <Label htmlFor="assign-note">Note</Label>
+                <Textarea
+                  id="assign-note"
+                  name="assignNote"
+                  value={assignNote}
+                  rows={2}
+                  onChange={(e) => {
+                    setAssignNote(e.target.value);
+                    assignValidation.handleChange("assignNote", { assignRole, assignNote: e.target.value });
+                  }}
+                  onBlur={() => assignValidation.handleBlur("assignNote", { assignRole, assignNote })}
+                />
+              </div>
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAssignOpen(false)}>Cancel</Button>
-            <Button onClick={() => void submitAssign()} disabled={assignSaving || !assignTarget}>
-              {assignSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Assign
-            </Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setAssignOpen(false)}>Cancel</Button>
+              <Button type="submit" disabled={assignSaving}>
+                {assignSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Assign
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </>

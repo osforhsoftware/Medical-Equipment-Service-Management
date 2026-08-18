@@ -1,12 +1,19 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { suppliersService } from "@/services/suppliers.service";
+import { parseSupplierListQuery, sendPaginatedList } from "@/utils/listQuery";
 import { success } from "@/utils/response";
 
 export class SuppliersController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await suppliersService.getAll(req.tenantId!);
-      res.json(success("Suppliers fetched successfully", data));
+      const query = parseSupplierListQuery(req);
+      const { data, total } = await suppliersService.getPaginated(req.tenantId!, {
+        search: query.search,
+        skip: query.skip,
+        take: query.take,
+        orderBy: query.orderBy,
+      });
+      sendPaginatedList(res, "Suppliers fetched successfully", data, total, query.page, query.limit);
     } catch (err) { next(err); }
   }
 

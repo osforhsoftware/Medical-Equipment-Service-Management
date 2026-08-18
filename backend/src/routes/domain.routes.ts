@@ -56,7 +56,7 @@ router.post("/inspection-reports/:id/recommendations", requireRole("admin", "coo
 router.post("/inspection-reports/:id/attachments", requireRole("admin", "coordinator", "inspector"), validate(attachmentLinkSchema), c.inspectionAttachment);
 
 router.post("/estimates/:id/revisions", requireRole("admin", "coordinator", "estimator"), validate(estimateRevisionSchema), c.estimateRevision);
-router.post("/estimates/:id/decisions", requireRole("admin", "coordinator", "customer"), validate(estimateDecisionSchema), c.estimateDecision);
+router.post("/estimates/:id/decisions", requireRole("admin", "coordinator", "inspector", "engineer", "customer"), validate(estimateDecisionSchema), c.estimateDecision);
 
 router.post("/jobs/:id/assignments", operations, validate(jobAssignmentSchema), c.jobAssignment);
 router.post("/jobs/:id/work-logs", requireRole("admin", "coordinator", "engineer"), validate(workLogSchema), c.workLog);

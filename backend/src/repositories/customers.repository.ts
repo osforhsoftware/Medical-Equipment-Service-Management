@@ -1,12 +1,54 @@
 import { prisma } from "@/db/prisma";
 import type { Customer, Prisma } from "@prisma/client";
+import type { PaginatedResult } from "@/types";
+import { searchContains } from "@/utils/searchFilter";
+
+export interface CustomerListFilters {
+  status?: string;
+  type?: string;
+  search?: string;
+  skip: number;
+  take: number;
+  orderBy: Prisma.CustomerOrderByWithRelationInput;
+}
+
+function buildWhere(tenantId: string, filters: Omit<CustomerListFilters, "skip" | "take" | "orderBy">): Prisma.CustomerWhereInput {
+  const where: Prisma.CustomerWhereInput = {
+    tenantId,
+    ...(filters.status ? { status: filters.status as Customer["status"] } : {}),
+    ...(filters.type ? { type: filters.type } : {}),
+  };
+
+  if (filters.search) {
+    where.OR = [
+      { name: searchContains(filters.search) },
+      { contactPerson: searchContains(filters.search) },
+      { email: searchContains(filters.search) },
+      { phone: searchContains(filters.search) },
+      { city: searchContains(filters.search) },
+      { country: searchContains(filters.search) },
+      { address: searchContains(filters.search) },
+      { licenseGst: searchContains(filters.search) },
+        { note: searchContains(filters.search) },
+    ];
+  }
+
+  return where;
+}
 
 export class CustomersRepository {
-  async findAll(tenantId: string): Promise<Customer[]> {
-    return prisma.customer.findMany({
-      where: { tenantId },
-      orderBy: { name: "asc" },
-    });
+  async findPaginated(tenantId: string, filters: CustomerListFilters): Promise<PaginatedResult<Customer>> {
+    const where = buildWhere(tenantId, filters);
+    const [data, total] = await Promise.all([
+      prisma.customer.findMany({
+        where,
+        orderBy: filters.orderBy,
+        skip: filters.skip,
+        take: filters.take,
+      }),
+      prisma.customer.count({ where }),
+    ]);
+    return { data, total };
   }
 
   async findById(id: string, tenantId: string): Promise<Customer | null> {

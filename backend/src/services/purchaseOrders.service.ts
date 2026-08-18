@@ -11,6 +11,10 @@ type CreatePurchaseOrderData = {
 };
 
 export class PurchaseOrdersService {
+  async getPaginated(tenantId: string, filters: import("@/repositories/purchaseOrders.repository").PurchaseOrderListFilters) {
+    return purchaseOrdersRepository.findPaginated(tenantId, filters);
+  }
+
   async getAll(tenantId: string, status?: string) {
     return purchaseOrdersRepository.findAll(tenantId, status);
   }

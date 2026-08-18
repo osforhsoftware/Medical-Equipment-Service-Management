@@ -40,6 +40,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/context/AuthContext";
 import { api,
   type DashboardData,
@@ -67,6 +68,7 @@ function roleQuickActions(role: Role): QuickAction[] {
       return [
         { label: "Assigned Inspections", to: "/app/inspections", icon: Search },
         { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList },
+        { label: "Estimates", to: "/app/estimates", icon: FileText },
         { label: "QR Scanner", to: "/app/qr-tracking", icon: QrCode },
         { label: "Notifications", to: "/app/notifications", icon: Bell },
       ];
@@ -81,6 +83,7 @@ function roleQuickActions(role: Role): QuickAction[] {
         { label: "Assigned Jobs", to: "/app/jobs", icon: Wrench },
         { label: "Request Parts", to: "/app/jobs", icon: Package },
         { label: "Inventory", to: "/app/inventory", icon: Package },
+        { label: "Estimates", to: "/app/estimates", icon: FileText },
         { label: "QR Scanner", to: "/app/qr-tracking", icon: QrCode },
         { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList },
       ];
@@ -204,7 +207,7 @@ function QueueRow({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-muted/30">
+    <div className="flex items-start gap-3 rounded-md border border-border p-3 transition-colors hover:bg-muted/40">
       <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-xs text-muted-foreground">{item.reference}</span>
@@ -276,8 +279,20 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center text-muted-foreground">
-        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your dashboard…
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <Skeleton className="h-7 w-64" />
+          <Skeleton className="h-4 w-52" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-[108px] rounded-lg" />
+          ))}
+        </div>
+        <div className="grid gap-4 xl:grid-cols-3">
+          <Skeleton className="h-72 rounded-lg xl:col-span-2" />
+          <Skeleton className="h-72 rounded-lg" />
+        </div>
       </div>
     );
   }
@@ -330,9 +345,9 @@ export default function Dashboard() {
 
       {/* Service request status strip for ops roles */}
       {(role === "admin" || role === "coordinator" || role === "inspector" || role === "estimator" || role === "engineer") && (
-        <Card className="shadow-card">
+        <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Work Status</CardTitle>
+            <CardTitle>Work Status</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
@@ -344,9 +359,9 @@ export default function Dashboard() {
                 { label: "Service Pending", value: data.roleQueues.servicePending },
                 { label: "Completed (MTD)", value: data.roleQueues.completed },
               ].map((item) => (
-                <div key={item.label} className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                <div key={item.label} className="rounded-md border border-border bg-muted/30 px-3 py-2.5">
                   <p className="text-xs text-muted-foreground">{item.label}</p>
-                  <p className="font-display text-xl font-semibold">{item.value}</p>
+                  <p className="mt-1 text-xl font-semibold tabular-nums">{item.value}</p>
                 </div>
               ))}
             </div>

@@ -64,8 +64,8 @@ export function InspectionCard({ task, onOpen, mobile = false }: InspectionCardP
         }
       }}
       className={cn(
-        "group flex cursor-pointer flex-col border-l-[3px] p-0 shadow-card outline-none transition-colors transition-shadow duration-200",
-        "hover:border-primary/20 hover:shadow-elevated focus-visible:ring-2 focus-visible:ring-ring",
+        "flex cursor-pointer flex-col border-l-[3px] p-0 outline-none transition-colors",
+        "hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring",
         accentClass(task),
         mobile && "active:scale-[0.99]",
       )}

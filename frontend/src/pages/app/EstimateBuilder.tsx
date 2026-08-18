@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { z } from "zod";
 import { ArrowLeft, Loader2, Plus, Send, Trash2 } from "lucide-react";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { fieldAria, fieldErrorClass, fieldRules, type FieldErrors } from "@/lib/formValidation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,6 +31,17 @@ import {
 import { useSettings } from "@/context/SettingsContext";
 import { defaultDatePlusDays, formatCurrency } from "@/lib/format";
 import { toast } from "@/lib/toast";
+
+const estimateSchema = z.object({
+  validUntil: fieldRules.requiredString("Validity date"),
+});
+
+function validateEstimateLines(lines: EstimateLineInput[]): FieldErrors {
+  if (lines.some((line) => !line.description.trim() || line.quantity <= 0)) {
+    return { lines: "Each line needs a description and quantity greater than 0." };
+  }
+  return {};
+}
 
 const newLine = (taxRate = 0, partial?: Partial<EstimateLineInput>): EstimateLineInput => ({
   type: "service",
@@ -54,18 +70,34 @@ export default function EstimateBuilder() {
   const [terms, setTerms] = useState("Payment due as agreed. Parts are subject to availability.");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<EstimateLineInput[]>([newLine(taxDefault)]);
+  const formRef = useRef<HTMLDivElement>(null);
+  const {
+    errors,
+    shouldShow,
+    validateAll,
+    handleBlur,
+    handleChange,
+    applyApiErrors,
+    reset: resetValidation,
+  } = useFormValidation<{ validUntil: string; lines: EstimateLineInput[] }>({
+    fieldOrder: ["lines", "validUntil"],
+    schema: estimateSchema,
+    validate: (values) => validateEstimateLines(values.lines),
+  });
 
   const load = useCallback(async () => {
     if (!ticketId) return;
     setLoading(true);
     try {
-      const [sr, estimates, services, stock] = await Promise.all([
+      const [sr, estimatesResult, services, stockResult] = await Promise.all([
         api.getServiceRequest(ticketId),
-        api.listEstimates(),
+        api.listEstimates({ limit: 100, page: 1 }),
         api.listServiceCatalog(),
-        api.listInventory(),
+        api.listInventory({ limit: 100, page: 1 }),
       ]);
       setTicket(sr);
+      const estimates = estimatesResult.data;
+      const stock = stockResult.data;
       setCatalog(services.filter((s) => s.isActive));
       setInventory(stock);
 
@@ -157,8 +189,14 @@ export default function EstimateBuilder() {
   );
   const clientTotal = Math.max(0, clientSubtotal - discount) + clientTax;
 
+  const formValues = useMemo(() => ({ validUntil, lines }), [validUntil, lines]);
+
   const updateLine = (index: number, patch: Partial<EstimateLineInput>) => {
-    setLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+    setLines((prev) => {
+      const next = prev.map((line, i) => (i === index ? { ...line, ...patch } : line));
+      handleChange("lines", { validUntil, lines: next });
+      return next;
+    });
   };
 
   const applyCatalog = (index: number, catalogId: string) => {
@@ -190,10 +228,7 @@ export default function EstimateBuilder() {
 
   const persist = async (sendForApproval: boolean) => {
     if (!ticketId || !ticket) return;
-    if (lines.some((line) => !line.description.trim() || line.quantity <= 0)) {
-      toast({ title: "Invalid lines", description: "Each line needs a description and quantity.", variant: "destructive" });
-      return;
-    }
+    if (!validateAll(formValues, undefined, formRef.current)) return;
     setSaving(true);
     try {
       const laborCost = lines.filter((l) => l.type !== "part").reduce((s, l) => s + l.quantity * l.unitPrice, 0);
@@ -221,13 +256,16 @@ export default function EstimateBuilder() {
         title: sendForApproval ? "Sent for admin approval" : "Estimate saved",
         description: `Server total: ${formatCurrency(revised.total)}`,
       });
+      resetValidation();
       if (sendForApproval) navigate("/app/estimates");
     } catch (err) {
-      toast({
-        title: "Save failed",
-        description: err instanceof ApiError ? err.message : "Unable to save",
-        variant: "destructive",
-      });
+      if (!applyApiErrors(err, formRef.current)) {
+        toast({
+          title: "Save failed",
+          description: err instanceof ApiError ? err.message : "Unable to save",
+          variant: "destructive",
+        });
+      }
     } finally {
       setSaving(false);
     }
@@ -267,7 +305,11 @@ export default function EstimateBuilder() {
           </div>
         )}
 
-        <div className="overflow-x-auto rounded-lg border border-border">
+        {shouldShow("lines") && (
+          <FormFieldError field="lines" message={errors.lines} className="mb-2" />
+        )}
+
+        <div className="overflow-x-auto rounded-lg border border-border" data-field="lines">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-left">
               <tr>
@@ -359,7 +401,11 @@ export default function EstimateBuilder() {
                     </td>
                     <td className="p-2 font-medium">{formatCurrency(lineTotal)}</td>
                     <td className="p-2">
-                      <Button size="icon" variant="ghost" onClick={() => setLines((prev) => prev.filter((_, i) => i !== index))}>
+                      <Button size="icon" variant="ghost" onClick={() => setLines((prev) => {
+                        const next = prev.filter((_, i) => i !== index);
+                        handleChange("lines", { validUntil, lines: next });
+                        return next;
+                      })}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </td>
@@ -370,15 +416,47 @@ export default function EstimateBuilder() {
           </table>
         </div>
 
-        <Button variant="outline" onClick={() => setLines((prev) => [...prev, newLine(taxDefault)])}>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setLines((prev) => {
+              const next = [...prev, newLine(taxDefault)];
+              handleChange("lines", { validUntil, lines: next });
+              return next;
+            });
+          }}
+        >
           <Plus className="mr-1 h-4 w-4" /> Add line
         </Button>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            void persist(false);
+          }}
+        >
+        <div ref={formRef} className="grid gap-4 md:grid-cols-2">
           <div className="space-y-3">
-            <div className="grid gap-2">
-              <Label>Validity date</Label>
-              <Input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+            <div className="grid gap-2" data-field="validUntil">
+              <Label htmlFor="valid-until" className={shouldShow("validUntil") ? "text-destructive" : undefined}>
+                Validity date
+                <RequiredMark />
+              </Label>
+              <Input
+                id="valid-until"
+                name="validUntil"
+                type="date"
+                value={validUntil}
+                className={fieldErrorClass(shouldShow("validUntil"))}
+                {...fieldAria("validUntil", shouldShow("validUntil") ? errors.validUntil : null)}
+                onChange={(e) => {
+                  setValidUntil(e.target.value);
+                  handleChange("validUntil", { validUntil: e.target.value, lines });
+                }}
+                onBlur={() => handleBlur("validUntil", formValues)}
+              />
+              {shouldShow("validUntil") && <FormFieldError field="validUntil" message={errors.validUntil} />}
             </div>
             <div className="grid gap-2">
               <Label>Discount</Label>
@@ -412,16 +490,17 @@ export default function EstimateBuilder() {
             </div>
             <p className="text-xs text-muted-foreground">Final totals are computed server-side when you save.</p>
             <div className="flex gap-2 pt-2">
-              <Button variant="outline" disabled={saving} onClick={() => void persist(false)}>
+              <Button type="submit" variant="outline" disabled={saving}>
                 Save draft
               </Button>
-              <Button disabled={saving} onClick={() => void persist(true)}>
+              <Button type="button" disabled={saving} onClick={() => void persist(true)}>
                 {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                 Send for Approval
               </Button>
             </div>
           </div>
         </div>
+        </form>
       </div>
     </RoleGuard>
   );

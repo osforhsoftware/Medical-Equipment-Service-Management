@@ -1,39 +1,16 @@
-import { useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { AlertTriangle, Camera, ImagePlus, Loader2, Plus, Trash2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useRef, type Dispatch, type SetStateAction } from "react";
+import { AlertTriangle, Camera, ImagePlus, Loader2, Plus } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { PhotoCaptionTile } from "@/components/shared/PhotoCaptionTile";
 import {
   api,
-  type BackendCatalogItem,
   type BackendInspectionReport,
-  type BackendInventoryItem,
   type BackendServiceRequest,
 } from "@/lib/api";
-import { MobileOptionPicker } from "@/components/mobile/MobileOptionPicker";
+import { formatFileTimestamp } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { InspectionSection } from "./InspectionSection";
-
-const KIND_OPTIONS = [
-  { value: "inventory", label: "Part", sublabel: "Inventory / spare part" },
-  { value: "service", label: "Service", sublabel: "Catalog service line" },
-  { value: "other", label: "Other", sublabel: "Custom requirement" },
-] as const;
-
-const PRIORITY_OPTIONS = [
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "critical", label: "Critical" },
-] as const;
 
 const SEVERITY_OPTIONS = [
   {
@@ -66,18 +43,6 @@ const SEVERITY_OPTIONS = [
   },
 ] as const;
 
-export type RequirementKind = "inventory" | "service" | "other";
-
-export type RequirementEntry = {
-  title: string;
-  description: string;
-  priority: "low" | "medium" | "high" | "critical";
-  kind: RequirementKind;
-  inventoryItemId: string;
-  catalogItemId: string;
-  quantity: string;
-};
-
 interface InspectionReportFormProps {
   active: BackendServiceRequest;
   existingReport: BackendInspectionReport | null;
@@ -93,17 +58,10 @@ interface InspectionReportFormProps {
   machineImages: File[];
   setMachineImages: Dispatch<SetStateAction<File[]>>;
   setMachineImage: (file: File | null) => void;
+  imageCaptions: string[];
+  setImageCaptions: Dispatch<SetStateAction<string[]>>;
   newImagePreviews: { file: File; url: string }[];
-  inventory: BackendInventoryItem[];
-  serviceCatalog: BackendCatalogItem[];
-  recommendedItems: RequirementEntry[];
-  setRecommendedItems: Dispatch<SetStateAction<RequirementEntry[]>>;
-  emptyRequirement: () => RequirementEntry;
   mobile?: boolean;
-  findingsTouched?: boolean;
-  setFindingsTouched?: (v: boolean) => void;
-  recommendationTouched?: boolean;
-  setRecommendationTouched?: (v: boolean) => void;
 }
 
 export function InspectionReportForm({
@@ -120,34 +78,13 @@ export function InspectionReportForm({
   setSeverity,
   setMachineImages,
   setMachineImage,
+  imageCaptions,
+  setImageCaptions,
   newImagePreviews,
-  inventory,
-  serviceCatalog,
-  recommendedItems,
-  setRecommendedItems,
-  emptyRequirement,
   mobile = false,
-  findingsTouched = false,
-  setFindingsTouched,
-  recommendationTouched = false,
-  setRecommendationTouched,
 }: InspectionReportFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const [localFindingsTouched, setLocalFindingsTouched] = useState(false);
-  const [localRecommendationTouched, setLocalRecommendationTouched] = useState(false);
-
-  const findingsIsTouched = findingsTouched || localFindingsTouched;
-  const recommendationIsTouched = recommendationTouched || localRecommendationTouched;
-
-  const markFindingsTouched = () => {
-    setLocalFindingsTouched(true);
-    setFindingsTouched?.(true);
-  };
-  const markRecommendationTouched = () => {
-    setLocalRecommendationTouched(true);
-    setRecommendationTouched?.(true);
-  };
 
   const equipmentLabel = active.equipmentItems?.length
     ? active.equipmentItems.map((e) => e.equipmentName).join(", ")
@@ -155,16 +92,6 @@ export function InspectionReportForm({
 
   const hasExistingPhotos = Boolean(existingReport?.attachments?.length);
   const hasNewPhotos = newImagePreviews.length > 0;
-  const photosRequired = !hasExistingPhotos;
-  const photosMissing = photosRequired && !hasNewPhotos;
-  const findingsError =
-    findingsIsTouched && findings.trim().length > 0 && findings.trim().length < 10
-      ? "Enter at least 10 characters."
-      : findingsIsTouched && !findings.trim()
-        ? "Findings are required."
-        : null;
-  const recommendationError =
-    recommendationIsTouched && !recommendation.trim() ? "Recommendation is required." : null;
 
   const appendFiles = (files: File[]) => {
     if (!files.length) return;
@@ -173,6 +100,7 @@ export function InspectionReportForm({
       setMachineImage(next[0] ?? null);
       return next;
     });
+    setImageCaptions((prev) => [...prev, ...files.map((file) => formatFileTimestamp(file))]);
   };
 
   const removeNewImage = (index: number) => {
@@ -181,6 +109,7 @@ export function InspectionReportForm({
       setMachineImage(next[0] ?? null);
       return next;
     });
+    setImageCaptions((prev) => prev.filter((_, i) => i !== index));
   };
 
   if (loadingReport) {
@@ -191,22 +120,6 @@ export function InspectionReportForm({
       </div>
     );
   }
-
-  const inventoryOptions = inventory.map((inv) => ({
-    value: inv.id,
-    label: inv.name,
-    sublabel: inv.sku,
-    stock: Math.max(0, inv.inStock - inv.reserved),
-  }));
-
-  const serviceOptions = serviceCatalog.map((svc) => ({
-    value: svc.id,
-    label: svc.name,
-    sublabel: `${svc.code} · ${svc.unit}`,
-  }));
-
-  const selectContentClass = "max-h-[min(60dvh,320px)] max-sm:min-w-[min(calc(100vw-2rem),22rem)]";
-  const selectItemClass = "items-start whitespace-normal py-3 pl-8 pr-3";
 
   return (
     <div className={cn("space-y-6", mobile && "pb-2")}>
@@ -223,7 +136,6 @@ export function InspectionReportForm({
         step="01"
         title="Severity"
         description="How serious is the issue?"
-        required
       >
         <div
           className={cn("grid grid-cols-2 gap-2", !mobile && "sm:grid-cols-4")}
@@ -261,7 +173,7 @@ export function InspectionReportForm({
         step="02"
         title="Findings & Observations"
         description="Describe what you observed during the inspection."
-        required
+        optional
       >
         <div className="space-y-2">
           <Label htmlFor="findings" className="sr-only">
@@ -269,24 +181,13 @@ export function InspectionReportForm({
           </Label>
           <Textarea
             id="findings"
+            data-field="findings"
             value={findings}
-            onChange={(e) => setFindings(e.target.value.slice(0, 500))}
-            onBlur={markFindingsTouched}
+            onChange={(e) => setFindings(e.target.value)}
             rows={mobile ? 5 : 4}
-            aria-invalid={Boolean(findingsError)}
-            aria-describedby="findings-hint"
-            className={cn(
-              mobile && "min-h-[120px] resize-none rounded-xl text-base leading-relaxed",
-              findingsError && "border-destructive focus-visible:ring-destructive",
-            )}
+            className={cn(mobile && "min-h-[120px] resize-none rounded-xl text-base leading-relaxed")}
             placeholder="Describe the issue, condition, or abnormal behavior…"
           />
-          <div id="findings-hint" className="flex items-center justify-between gap-2 text-xs">
-            <span className={cn(findingsError ? "text-destructive" : "text-muted-foreground")}>
-              {findingsError ?? "Minimum 10 characters"}
-            </span>
-            <span className="tabular-nums text-muted-foreground">{findings.length} / 500</span>
-          </div>
         </div>
       </InspectionSection>
 
@@ -309,14 +210,10 @@ export function InspectionReportForm({
       <InspectionSection
         step="03"
         title="Inspection Photos"
-        description={
-          photosMissing
-            ? "Photos are required before submitting this report."
-            : `${equipmentLabel} — attach clear photos of the equipment and any faults.`
-        }
-        required={photosRequired}
-        tone={photosMissing ? "warning" : "default"}
+        description={`${equipmentLabel} — attach photos and add a time or note for each image.`}
+        optional
       >
+        <div data-field="photos">
         <input
           ref={cameraInputRef}
           type="file"
@@ -364,12 +261,7 @@ export function InspectionReportForm({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className={cn(
-              "flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-8 text-center transition-colors",
-              photosMissing
-                ? "border-warning/50 bg-warning/5 hover:bg-warning/10"
-                : "border-border/70 bg-muted/20 hover:bg-muted/40",
-            )}
+            className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/70 bg-muted/20 px-4 py-8 text-center transition-colors hover:bg-muted/40"
           >
             <Camera className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
             <div>
@@ -380,39 +272,32 @@ export function InspectionReportForm({
         )}
 
         {(hasExistingPhotos || hasNewPhotos) && (
-          <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
             {existingReport?.attachments?.map((att) => (
-              <a
+              <PhotoCaptionTile
                 key={att.id}
+                src={api.fileDownloadUrl(att.fileId)}
+                alt={att.file?.originalName ?? "Inspection image"}
+                caption={att.caption ?? ""}
                 href={api.fileDownloadUrl(att.fileId)}
-                target="_blank"
-                rel="noreferrer"
-                className="relative aspect-square overflow-hidden rounded-lg border border-border/60 bg-muted"
-                title={att.file?.originalName ?? att.fileId}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <img
-                  src={api.fileDownloadUrl(att.fileId)}
-                  alt={att.file?.originalName ?? "Inspection image"}
-                  className="h-full w-full object-cover"
-                />
-              </a>
+                readOnly
+              />
             ))}
             {newImagePreviews.map(({ file, url }, index) => (
-              <div
-                key={`${file.name}-${file.lastModified}`}
-                className="relative aspect-square overflow-hidden rounded-lg border border-border/60 bg-muted"
-              >
-                <img src={url} alt={file.name} className="h-full w-full object-cover" />
-                <button
-                  type="button"
-                  onClick={() => removeNewImage(index)}
-                  className="absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded-full bg-foreground/70 text-background"
-                  aria-label={`Remove ${file.name}`}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
+              <PhotoCaptionTile
+                key={`${file.name}-${file.lastModified}-${index}`}
+                src={url}
+                alt={file.name}
+                caption={imageCaptions[index] ?? ""}
+                onCaptionChange={(value) => {
+                  setImageCaptions((prev) => {
+                    const next = [...prev];
+                    next[index] = value;
+                    return next;
+                  });
+                }}
+                onRemove={() => removeNewImage(index)}
+              />
             ))}
             {!mobile ? (
               <button
@@ -433,13 +318,14 @@ export function InspectionReportForm({
             {newImagePreviews.length} new photo{newImagePreviews.length === 1 ? "" : "s"} ready to upload
           </p>
         ) : null}
+        </div>
       </InspectionSection>
 
       <InspectionSection
         step="04"
         title="Recommendation"
         description="What should happen next?"
-        required
+        optional
       >
         <div className="space-y-2">
           <Label htmlFor="recommendation" className="sr-only">
@@ -447,296 +333,13 @@ export function InspectionReportForm({
           </Label>
           <Textarea
             id="recommendation"
+            data-field="recommendation"
             value={recommendation}
             onChange={(e) => setRecommendation(e.target.value)}
-            onBlur={markRecommendationTouched}
             rows={mobile ? 4 : 3}
-            aria-invalid={Boolean(recommendationError)}
-            aria-describedby="recommendation-hint"
-            className={cn(
-              mobile && "min-h-[96px] resize-none rounded-xl text-base leading-relaxed",
-              recommendationError && "border-destructive focus-visible:ring-destructive",
-            )}
+            className={cn(mobile && "min-h-[96px] resize-none rounded-xl text-base leading-relaxed")}
             placeholder="e.g. Replace compressor filter and schedule follow-up calibration…"
           />
-          <p
-            id="recommendation-hint"
-            className={cn("text-xs", recommendationError ? "text-destructive" : "text-muted-foreground")}
-          >
-            {recommendationError ?? "Provide a concise professional recommendation."}
-          </p>
-        </div>
-      </InspectionSection>
-
-      <InspectionSection
-        step="05"
-        title="Parts & Service Requirements"
-        description="Add required materials or work for the estimate stage."
-        optional
-      >
-        <div className="space-y-3">
-          {recommendedItems.map((item, index) => (
-            <div
-              key={index}
-              className="space-y-3 rounded-xl border border-border/60 bg-card p-3"
-            >
-              <div className={cn("grid gap-2", mobile ? "grid-cols-1" : "grid-cols-[110px_1fr_80px_110px_auto]")}>
-                {mobile ? (
-                  <MobileOptionPicker
-                    label="Requirement type"
-                    value={item.kind}
-                    options={[...KIND_OPTIONS]}
-                    onChange={(kind) => {
-                      setRecommendedItems((items) =>
-                        items.map((entry, i) =>
-                          i === index
-                            ? {
-                                ...entry,
-                                kind: kind as RequirementKind,
-                                inventoryItemId: "",
-                                catalogItemId: "",
-                                title: kind === "other" ? entry.title : "",
-                              }
-                            : entry,
-                        ),
-                      );
-                    }}
-                  />
-                ) : (
-                  <Select
-                    value={item.kind}
-                    onValueChange={(kind: RequirementKind) => {
-                      setRecommendedItems((items) =>
-                        items.map((entry, i) =>
-                          i === index
-                            ? {
-                                ...entry,
-                                kind,
-                                inventoryItemId: "",
-                                catalogItemId: "",
-                                title: kind === "other" ? entry.title : "",
-                              }
-                            : entry,
-                        ),
-                      );
-                    }}
-                  >
-                    <SelectTrigger aria-label="Requirement type">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className={selectContentClass}>
-                      <SelectItem value="inventory">Part</SelectItem>
-                      <SelectItem value="service">Service</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                )}
-
-                {item.kind === "inventory" ? (
-                  mobile ? (
-                    <MobileOptionPicker
-                      label="Select inventory item"
-                      placeholder="Select inventory item"
-                      value={item.inventoryItemId}
-                      options={inventoryOptions}
-                      searchable
-                      searchPlaceholder="Search parts by name or SKU…"
-                      onChange={(inventoryItemId) => {
-                        const inv = inventory.find((i) => i.id === inventoryItemId);
-                        setRecommendedItems((items) =>
-                          items.map((entry, i) =>
-                            i === index
-                              ? { ...entry, inventoryItemId, title: inv?.name ?? entry.title }
-                              : entry,
-                          ),
-                        );
-                      }}
-                    />
-                  ) : (
-                    <Select
-                      value={item.inventoryItemId || undefined}
-                      onValueChange={(inventoryItemId) => {
-                        const inv = inventory.find((i) => i.id === inventoryItemId);
-                        setRecommendedItems((items) =>
-                          items.map((entry, i) =>
-                            i === index
-                              ? { ...entry, inventoryItemId, title: inv?.name ?? entry.title }
-                              : entry,
-                          ),
-                        );
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select inventory item" />
-                      </SelectTrigger>
-                      <SelectContent className={selectContentClass}>
-                        {inventory.map((inv) => {
-                          const avail = Math.max(0, inv.inStock - inv.reserved);
-                          return (
-                            <SelectItem key={inv.id} value={inv.id} className={selectItemClass}>
-                              <span className="flex flex-col gap-0.5">
-                                <span className="font-medium leading-snug">{inv.name}</span>
-                                <span className="text-xs text-muted-foreground">
-                                  {inv.sku} · {avail === 0 ? "Out of stock" : `${avail} available`}
-                                </span>
-                              </span>
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  )
-                ) : item.kind === "service" ? (
-                  mobile ? (
-                    <MobileOptionPicker
-                      label="Select service"
-                      placeholder="Select service"
-                      value={item.catalogItemId}
-                      options={serviceOptions}
-                      searchable
-                      searchPlaceholder="Search services…"
-                      onChange={(catalogItemId) => {
-                        const svc = serviceCatalog.find((s) => s.id === catalogItemId);
-                        setRecommendedItems((items) =>
-                          items.map((entry, i) =>
-                            i === index
-                              ? { ...entry, catalogItemId, title: svc?.name ?? entry.title }
-                              : entry,
-                          ),
-                        );
-                      }}
-                    />
-                  ) : (
-                    <Select
-                      value={item.catalogItemId || undefined}
-                      onValueChange={(catalogItemId) => {
-                        const svc = serviceCatalog.find((s) => s.id === catalogItemId);
-                        setRecommendedItems((items) =>
-                          items.map((entry, i) =>
-                            i === index
-                              ? { ...entry, catalogItemId, title: svc?.name ?? entry.title }
-                              : entry,
-                          ),
-                        );
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select service" />
-                      </SelectTrigger>
-                      <SelectContent className={selectContentClass}>
-                        {serviceCatalog.map((svc) => (
-                          <SelectItem key={svc.id} value={svc.id} className={selectItemClass}>
-                            <span className="flex flex-col gap-0.5">
-                              <span className="font-medium leading-snug">{svc.name}</span>
-                              <span className="text-xs text-muted-foreground">
-                                {svc.code} · {svc.unit}
-                              </span>
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )
-                ) : (
-                  <Input
-                    value={item.title}
-                    onChange={(event) =>
-                      setRecommendedItems((items) =>
-                        items.map((entry, i) => (i === index ? { ...entry, title: event.target.value } : entry)),
-                      )
-                    }
-                    placeholder="Describe other requirement"
-                    className={cn(mobile && "h-12 rounded-xl text-base")}
-                  />
-                )}
-
-                <Input
-                  type="number"
-                  min={1}
-                  value={item.quantity}
-                  onChange={(event) =>
-                    setRecommendedItems((items) =>
-                      items.map((entry, i) => (i === index ? { ...entry, quantity: event.target.value } : entry)),
-                    )
-                  }
-                  placeholder="Qty"
-                  aria-label="Quantity"
-                  className={cn(mobile && "h-12 rounded-xl text-base")}
-                />
-
-                {mobile ? (
-                  <MobileOptionPicker
-                    label="Priority"
-                    value={item.priority}
-                    options={[...PRIORITY_OPTIONS]}
-                    onChange={(priority) => {
-                      setRecommendedItems((items) =>
-                        items.map((entry, i) =>
-                          i === index
-                            ? { ...entry, priority: priority as RequirementEntry["priority"] }
-                            : entry,
-                        ),
-                      );
-                    }}
-                  />
-                ) : (
-                  <Select
-                    value={item.priority}
-                    onValueChange={(priority: RequirementEntry["priority"]) => {
-                      setRecommendedItems((items) =>
-                        items.map((entry, i) => (i === index ? { ...entry, priority } : entry)),
-                      );
-                    }}
-                  >
-                    <SelectTrigger aria-label="Priority">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PRIORITY_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className={cn(mobile && "h-12 w-12 shrink-0 rounded-xl")}
-                  onClick={() => setRecommendedItems((items) => items.filter((_, i) => i !== index))}
-                  disabled={recommendedItems.length === 1}
-                  aria-label="Remove requirement"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-              <Textarea
-                value={item.description}
-                onChange={(event) =>
-                  setRecommendedItems((items) =>
-                    items.map((entry, i) => (i === index ? { ...entry, description: event.target.value } : entry)),
-                  )
-                }
-                rows={2}
-                className={cn(mobile && "min-h-[72px] resize-none rounded-xl text-base")}
-                placeholder={item.kind === "other" ? "Details for this requirement…" : "Why needed…"}
-              />
-            </div>
-          ))}
-
-          <Button
-            type="button"
-            size={mobile ? "default" : "sm"}
-            variant="outline"
-            className={cn(mobile && "h-11 w-full rounded-xl")}
-            onClick={() => setRecommendedItems((items) => [...items, emptyRequirement()])}
-          >
-            <Plus className="mr-1 h-4 w-4" />
-            Add requirement
-          </Button>
         </div>
       </InspectionSection>
     </div>

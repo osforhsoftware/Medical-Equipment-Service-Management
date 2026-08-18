@@ -1,5 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import { Image, Loader2, Database, Trash2 } from "lucide-react";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -52,6 +57,15 @@ const AUTOMATION_KEYS = [
   { key: "autoGenerateReport" as const, title: "Auto-generate service report", desc: "Create PDF report on job completion" },
 ];
 
+const orgSchema = z.object({
+  companyName: fieldRules.requiredString("Company name"),
+  supportEmail: fieldRules.email(true),
+  defaultTaxRate: z.string().refine(
+    (v) => !Number.isNaN(Number(v)) && Number(v) >= 0 && Number(v) <= 100,
+    "Enter a tax rate between 0 and 100.",
+  ),
+});
+
 export default function Settings() {
   const { settings, loading, refresh, updateLocal } = useSettings();
   const [companyName, setCompanyName] = useState("");
@@ -67,6 +81,20 @@ export default function Settings() {
   const [loadingDemo, setLoadingDemo] = useState(true);
   const [seedingDemo, setSeedingDemo] = useState(false);
   const [removingDemo, setRemovingDemo] = useState(false);
+  const orgRef = useRef<HTMLDivElement>(null);
+  const {
+    errors: orgErrors,
+    shouldShow: orgShouldShow,
+    validateAll: validateOrg,
+    handleBlur: handleOrgBlur,
+    handleChange: handleOrgChange,
+    applyApiErrors: applyOrgApiErrors,
+  } = useFormValidation({
+    fieldOrder: ["companyName", "supportEmail", "defaultTaxRate"],
+    schema: orgSchema,
+  });
+
+  const orgValues = () => ({ companyName, supportEmail, defaultTaxRate });
 
   const loadDemoStatus = async () => {
     setLoadingDemo(true);
@@ -137,6 +165,7 @@ export default function Settings() {
   }, [settings]);
 
   const saveOrganization = async () => {
+    if (!validateOrg(orgValues(), undefined, orgRef.current)) return;
     setSavingOrg(true);
     try {
       let nextLogoUrl = logoUrl.trim() || null;
@@ -157,7 +186,9 @@ export default function Settings() {
       setLogoFile(null);
       toast.success("Organization saved", { description: "Company details updated." });
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to save organization settings" });
+      if (!applyOrgApiErrors(err, orgRef.current)) {
+        toast.apiError(err, { fallback: "Unable to save organization settings" });
+      }
     } finally {
       setSavingOrg(false);
     }
@@ -219,38 +250,98 @@ export default function Settings() {
         <Card className="shadow-card">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Organization</CardTitle>
-            <Button size="sm" onClick={saveOrganization} disabled={savingOrg}>
+            <Button size="sm" type="submit" form="org-settings-form" disabled={savingOrg}>
               {savingOrg ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Save organization
             </Button>
           </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
-            <div className="flex items-center gap-4 sm:col-span-2">
-              <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-xl border bg-muted">
-                {logoFile ? <img src={URL.createObjectURL(logoFile)} alt="New tenant logo preview" className="h-full w-full object-contain" /> : logoUrl ? <img src={logoUrl} alt="Tenant logo" className="h-full w-full object-contain" /> : <Image className="h-7 w-7 text-muted-foreground" />}
+          <CardContent>
+            <form
+              id="org-settings-form"
+              noValidate
+              onSubmit={(e) => {
+                e.preventDefault();
+                void saveOrganization();
+              }}
+            >
+              <div ref={orgRef} className="grid gap-4 sm:grid-cols-2">
+                <div className="flex items-center gap-4 sm:col-span-2">
+                  <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-xl border bg-muted">
+                    {logoFile ? <img src={URL.createObjectURL(logoFile)} alt="New tenant logo preview" className="h-full w-full object-contain" /> : logoUrl ? <img src={logoUrl} alt="Tenant logo" className="h-full w-full object-contain" /> : <Image className="h-7 w-7 text-muted-foreground" />}
+                  </div>
+                  <div className="grid flex-1 gap-2">
+                    <Label htmlFor="tenant-logo">Tenant logo</Label>
+                    <Input id="tenant-logo" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)} />
+                    <p className="text-xs text-muted-foreground">Used on estimates, invoices and branded service documents.</p>
+                  </div>
+                </div>
+                <div className="grid gap-2" data-field="companyName">
+                  <Label htmlFor="company-name" className={orgShouldShow("companyName") ? "text-destructive" : undefined}>
+                    Company name
+                    <RequiredMark />
+                  </Label>
+                  <Input
+                    id="company-name"
+                    name="companyName"
+                    value={companyName}
+                    className={fieldErrorClass(orgShouldShow("companyName"))}
+                    {...fieldAria("companyName", orgShouldShow("companyName") ? orgErrors.companyName : null)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setCompanyName(value);
+                      handleOrgChange("companyName", { companyName: value, supportEmail, defaultTaxRate });
+                    }}
+                    onBlur={() => handleOrgBlur("companyName", orgValues())}
+                  />
+                  {orgShouldShow("companyName") && <FormFieldError field="companyName" message={orgErrors.companyName} />}
+                </div>
+                <div className="grid gap-2">
+                  <Label>Tenant ID</Label>
+                  <Input readOnly value={settings?.tenantId ?? ""} className="font-mono text-muted-foreground" />
+                </div>
+                <div className="grid gap-2" data-field="supportEmail">
+                  <Label htmlFor="support-email" className={orgShouldShow("supportEmail") ? "text-destructive" : undefined}>
+                    Support email
+                    <RequiredMark />
+                  </Label>
+                  <Input
+                    id="support-email"
+                    name="supportEmail"
+                    type="email"
+                    value={supportEmail}
+                    className={fieldErrorClass(orgShouldShow("supportEmail"))}
+                    {...fieldAria("supportEmail", orgShouldShow("supportEmail") ? orgErrors.supportEmail : null)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSupportEmail(value);
+                      handleOrgChange("supportEmail", { companyName, supportEmail: value, defaultTaxRate });
+                    }}
+                    onBlur={() => handleOrgBlur("supportEmail", orgValues())}
+                  />
+                  {orgShouldShow("supportEmail") && <FormFieldError field="supportEmail" message={orgErrors.supportEmail} />}
+                </div>
+                <div className="grid gap-2" data-field="defaultTaxRate">
+                  <Label htmlFor="tax-rate" className={orgShouldShow("defaultTaxRate") ? "text-destructive" : undefined}>Default tax rate (%)</Label>
+                  <Input
+                    id="tax-rate"
+                    name="defaultTaxRate"
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={defaultTaxRate}
+                    className={fieldErrorClass(orgShouldShow("defaultTaxRate"))}
+                    {...fieldAria("defaultTaxRate", orgShouldShow("defaultTaxRate") ? orgErrors.defaultTaxRate : null)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setDefaultTaxRate(value);
+                      handleOrgChange("defaultTaxRate", { companyName, supportEmail, defaultTaxRate: value });
+                    }}
+                    onBlur={() => handleOrgBlur("defaultTaxRate", orgValues())}
+                  />
+                  {orgShouldShow("defaultTaxRate") && <FormFieldError field="defaultTaxRate" message={orgErrors.defaultTaxRate} />}
+                </div>
               </div>
-              <div className="grid flex-1 gap-2">
-                <Label htmlFor="tenant-logo">Tenant logo</Label>
-                <Input id="tenant-logo" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)} />
-                <p className="text-xs text-muted-foreground">Used on estimates, invoices and branded service documents.</p>
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="company-name">Company name</Label>
-              <Input id="company-name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
-            </div>
-            <div className="grid gap-2">
-              <Label>Tenant ID</Label>
-              <Input readOnly value={settings?.tenantId ?? ""} className="font-mono text-muted-foreground" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="support-email">Support email</Label>
-              <Input id="support-email" type="email" value={supportEmail} onChange={(e) => setSupportEmail(e.target.value)} />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="tax-rate">Default tax rate (%)</Label>
-              <Input id="tax-rate" type="number" min={0} max={100} value={defaultTaxRate} onChange={(e) => setDefaultTaxRate(e.target.value)} />
-            </div>
+            </form>
           </CardContent>
         </Card>
 

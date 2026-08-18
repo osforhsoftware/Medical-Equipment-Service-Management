@@ -8,6 +8,7 @@ export const uploadJobPhotosSchema = z.object({
         mimeType: z.string().min(1).max(200).optional(),
         dataUrl: z.string().min(20).max(5_000_000).optional(),
         fileId: z.string().cuid().optional(),
+        caption: z.string().trim().max(500).optional(),
       }).refine((p) => Boolean(p.fileId || p.dataUrl), { message: "fileId or dataUrl is required" }),
     )
     .min(1, "At least one photo is required")

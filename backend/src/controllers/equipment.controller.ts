@@ -1,13 +1,22 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { equipmentService } from "@/services/equipment.service";
+import { parseEquipmentListQuery, sendPaginatedList } from "@/utils/listQuery";
 import { success } from "@/utils/response";
 
 export class EquipmentController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const filters = { customerId: req.query.customerId as string };
-      const data = await equipmentService.getAll(req.tenantId!, filters);
-      res.json(success("Equipment fetched successfully", data));
+      const query = parseEquipmentListQuery(req);
+      const { data, total } = await equipmentService.getPaginated(req.tenantId!, {
+        customerId: query.customerId,
+        condition: query.condition,
+        category: query.category,
+        search: query.search,
+        skip: query.skip,
+        take: query.take,
+        orderBy: query.orderBy,
+      });
+      sendPaginatedList(res, "Equipment fetched successfully", data, total, query.page, query.limit);
     } catch (err) { next(err); }
   }
 

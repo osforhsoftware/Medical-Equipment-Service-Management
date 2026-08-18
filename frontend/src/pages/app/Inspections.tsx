@@ -13,28 +13,16 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { InspectionCard } from "@/components/inspections/InspectionCard";
 import { InspectionReportPanel } from "@/components/inspections/InspectionReportPanel";
-import type { RequirementEntry } from "@/components/inspections/InspectionReportForm";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { api, type BackendCatalogItem, type BackendServiceRequest, type BackendInspectionReport } from "@/lib/api";
+import { api, type BackendServiceRequest, type BackendInspectionReport } from "@/lib/api";
 import { formatServiceStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
-type RequirementKind = "inventory" | "service" | "other";
 type StatusFilter = "all" | "new" | "inspection" | "estimate";
 type SeverityFilter = "all" | "low" | "medium" | "high" | "critical";
 type SummaryKey = "awaiting" | "inInspection" | "reportsFiled" | "critical";
-
-const emptyRequirement = (): RequirementEntry => ({
-  title: "",
-  description: "",
-  priority: "medium",
-  kind: "inventory",
-  inventoryItemId: "",
-  catalogItemId: "",
-  quantity: "1",
-});
 
 function equipmentLabel(task: BackendServiceRequest) {
   if (task.equipmentItems?.length) {
@@ -56,14 +44,10 @@ export default function Inspections() {
   const [workDetails, setWorkDetails] = useState("");
   const [machineImage, setMachineImage] = useState<File | null>(null);
   const [machineImages, setMachineImages] = useState<File[]>([]);
-  const [inventory, setInventory] = useState<import("@/lib/api").BackendInventoryItem[]>([]);
-  const [serviceCatalog, setServiceCatalog] = useState<BackendCatalogItem[]>([]);
-  const [recommendedItems, setRecommendedItems] = useState([emptyRequirement()]);
+  const [imageCaptions, setImageCaptions] = useState<string[]>([]);
   const [severity, setSeverity] = useState("medium");
   const [saving, setSaving] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
-  const [findingsTouched, setFindingsTouched] = useState(false);
-  const [recommendationTouched, setRecommendationTouched] = useState(false);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -71,18 +55,6 @@ export default function Inspections() {
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [summaryFilter, setSummaryFilter] = useState<SummaryKey | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
-
-  useEffect(() => {
-    void Promise.all([api.listInventory(), api.listServiceCatalog()])
-      .then(([stock, catalog]) => {
-        setInventory(stock);
-        setServiceCatalog(catalog.filter((item) => item.isActive));
-      })
-      .catch(() => {
-        setInventory([]);
-        setServiceCatalog([]);
-      });
-  }, []);
 
   const newImagePreviews = useMemo(
     () => machineImages.map((file) => ({ file, url: URL.createObjectURL(file) })),
@@ -100,10 +72,12 @@ export default function Inspections() {
     setLoading(true);
     setLoadError(false);
     try {
-      const data = await api.listServiceRequests();
-      setRequests(
-        data.filter((r) => ["new", "inspection", "estimate"].includes(formatServiceStatus(r.status))),
-      );
+      const result = await api.listServiceRequests({
+        statuses: "new,inspection,estimate",
+        limit: 100,
+        page: 1,
+      });
+      setRequests(result.data);
     } catch (err) {
       setLoadError(true);
       toast.apiError(err, { fallback: "Failed to load inspections" });
@@ -177,11 +151,9 @@ export default function Inspections() {
     setWorkDetails("");
     setMachineImage(null);
     setMachineImages([]);
-    setRecommendedItems([emptyRequirement()]);
+    setImageCaptions([]);
     setSeverity("medium");
     setExistingReport(null);
-    setFindingsTouched(false);
-    setRecommendationTouched(false);
   };
 
   const startInspection = async (task: BackendServiceRequest) => {
@@ -190,10 +162,15 @@ export default function Inspections() {
 
     if (formatServiceStatus(task.status) === "new") {
       try {
-        await api.updateServiceRequest(task.id, { status: "inspection" });
+        await api.advanceWorkflow(task.id, {
+          status: "inspection",
+          note: "Inspection started",
+        });
         await loadRequests();
-      } catch {
-        /* continue */
+      } catch (err) {
+        toast.apiError(err, { fallback: "Unable to start inspection for this ticket." });
+        setActive(null);
+        return;
       }
     }
 
@@ -205,25 +182,6 @@ export default function Inspections() {
         setFindings(report.findings);
         setRecommendation(report.recommendation);
         setSeverity(report.severity);
-        if (report.recommendations?.length) {
-          setRecommendedItems(
-            report.recommendations.map((rec) => ({
-              title: rec.title,
-              description: rec.description,
-              priority: (["low", "medium", "high", "critical"].includes(rec.priority)
-                ? rec.priority
-                : "medium") as RequirementEntry["priority"],
-              kind: (rec.catalogItemId
-                ? "service"
-                : rec.inventoryItemId
-                  ? "inventory"
-                  : "other") as RequirementKind,
-              inventoryItemId: rec.inventoryItemId ?? "",
-              catalogItemId: rec.catalogItemId ?? "",
-              quantity: String(rec.quantity ?? 1),
-            })),
-          );
-        }
       }
     } catch {
       /* no report yet */
@@ -239,97 +197,30 @@ export default function Inspections() {
 
   const submitReport = async () => {
     if (!active) return;
-
-    setFindingsTouched(true);
-    setRecommendationTouched(true);
-
-    if (findings.trim().length < 10) {
-      toast({
-        title: "Findings required",
-        description: "Enter at least 10 characters of findings.",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (!recommendation.trim()) {
-      toast({
-        title: "Recommendation required",
-        description: "Please provide a recommendation.",
-        variant: "destructive",
-      });
-      return;
-    }
-    const files = [...machineImages, ...(machineImage ? [machineImage] : [])];
-    if (!existingReport?.attachments?.length && files.length === 0) {
-      toast({
-        title: "Inspection images required",
-        description: "Attach at least one inspection photo.",
-        variant: "destructive",
-      });
-      return;
-    }
     if (saving) return;
 
     setSaving(true);
     try {
-      const uploadedIds: string[] = [];
-      for (const file of files) {
-        const uploaded = await api.uploadFile(file);
-        uploadedIds.push(uploaded.id);
+      const files = machineImages.length > 0 ? machineImages : machineImage ? [machineImage] : [];
+      const attachments: { fileId: string; caption?: string }[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const uploaded = await api.uploadFile(files[i]);
+        const caption = imageCaptions[i]?.trim();
+        attachments.push({ fileId: uploaded.id, ...(caption ? { caption } : {}) });
       }
-      const report = await api.saveInspectionReport(active.id, {
+
+      await api.saveInspectionReport(active.id, {
         findings: [findings.trim(), workDetails.trim() ? `Work details:\n${workDetails.trim()}` : ""]
           .filter(Boolean)
           .join("\n\n"),
         recommendation: recommendation.trim(),
         severity,
-        attachmentFileIds: uploadedIds,
+        attachments,
+        attachmentFileIds: attachments.map((item) => item.fileId),
         submit: true,
       });
-      for (const item of recommendedItems.filter(
-        (entry) =>
-          entry.inventoryItemId ||
-          entry.catalogItemId ||
-          (entry.kind === "other" && entry.title.trim()),
-      )) {
-        const inv = inventory.find((i) => i.id === item.inventoryItemId);
-        const svc = serviceCatalog.find((s) => s.id === item.catalogItemId);
-        const qty = Number(item.quantity) || 1;
-        const title =
-          item.title.trim() ||
-          inv?.name ||
-          svc?.name ||
-          (item.kind === "other" ? "Other requirement" : "Requirement");
-        const description = item.description.trim() || title;
-        const estimatedCost =
-          item.kind === "service"
-            ? Number(svc?.unitPrice ?? 0) * qty
-            : item.kind === "inventory"
-              ? Number(inv?.sellingPrice ?? inv?.unitCost ?? 0) * qty
-              : 0;
-        await api.addInspectionRecommendation(report.id, {
-          type: item.kind === "inventory" ? "part" : item.kind === "service" ? "service" : "other",
-          title,
-          description,
-          priority: item.priority,
-          inventoryItemId: item.kind === "inventory" ? item.inventoryItemId || null : null,
-          catalogItemId: item.kind === "service" ? item.catalogItemId || null : null,
-          quantity: qty,
-          estimatedCost,
-        });
-        if (item.kind === "inventory" && item.inventoryItemId && inv && inv.inStock - inv.reserved < qty) {
-          await api
-            .createStockPurchaseRequest({
-              inventoryItemId: item.inventoryItemId,
-              quantity: qty - Math.max(0, inv.inStock - inv.reserved),
-              serviceRequestId: active.id,
-              note: `Shortage from Parts Requirement on ${active.reference}`,
-            })
-            .catch(() => undefined);
-        }
-      }
-      toast({
-        title: "Inspection report submitted",
+
+      toast.success("Inspection report submitted", {
         description: "The service request has moved to Estimate.",
       });
       setActive(null);
@@ -358,7 +249,7 @@ export default function Inspections() {
         {!isMobile ? (
           <PageHeader
             title="Inspections"
-            description="Findings, severity, recommendations, and inspection reports."
+            description="Findings, severity, and inspection reports."
             actions={
               <div className="text-right">
                 <p className="text-sm font-semibold tabular-nums text-foreground">
@@ -372,9 +263,9 @@ export default function Inspections() {
           <div className="pt-1">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h1 className="font-display text-2xl font-bold text-foreground">Inspections</h1>
+                <h1 className="page-title">Inspections</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Capture findings, assess severity, and prepare recommendations.
+                  Capture findings and assess severity.
                 </p>
               </div>
               {!loading ? (
@@ -396,10 +287,10 @@ export default function Inspections() {
                   type="button"
                   onClick={() => toggleSummary(item.key)}
                   className={cn(
-                    "rounded-xl border px-3 py-2.5 text-left transition-colors duration-200",
+                    "rounded-lg border px-3 py-2.5 text-left transition-colors duration-150",
                     activeSummary
-                      ? "border-primary/30 bg-primary/5"
-                      : "border-border/60 bg-card/70 hover:border-primary/20",
+                      ? "border-primary/25 bg-primary-light"
+                      : "border-border bg-card hover:bg-muted/50",
                   )}
                 >
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -589,16 +480,9 @@ export default function Inspections() {
         machineImages={machineImages}
         setMachineImages={setMachineImages}
         setMachineImage={setMachineImage}
+        imageCaptions={imageCaptions}
+        setImageCaptions={setImageCaptions}
         newImagePreviews={newImagePreviews}
-        inventory={inventory}
-        serviceCatalog={serviceCatalog}
-        recommendedItems={recommendedItems}
-        setRecommendedItems={setRecommendedItems}
-        emptyRequirement={emptyRequirement}
-        findingsTouched={findingsTouched}
-        setFindingsTouched={setFindingsTouched}
-        recommendationTouched={recommendationTouched}
-        setRecommendationTouched={setRecommendationTouched}
       />
     </RoleGuard>
   );

@@ -9,36 +9,40 @@ import { roleLabels } from "@/data/mock";
 import { getUserRoles, userCanAccessModule } from "@/lib/userRoles";
 
 interface AppSidebarProps {
-  mobileOpen: boolean;
+  open: boolean;
   onClose: () => void;
 }
 
-export function AppSidebar({ mobileOpen, onClose }: AppSidebarProps) {
+export function AppSidebar({ open, onClose }: AppSidebarProps) {
   const { user } = useAuth();
   const { rbacMatrix } = useSettings();
   const { pathname } = useLocation();
   if (!user) return null;
 
   const visible = navItems.filter((item) => userCanAccessModule(user, item.label, rbacMatrix, item.roles));
+  const closeIfOverlay = () => {
+    if (window.matchMedia("(max-width: 1023px)").matches) onClose();
+  };
 
   return (
     <>
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 bg-foreground/40 backdrop-blur-sm lg:hidden" onClick={onClose} />
+      {open && (
+        <div className="fixed inset-0 z-40 bg-foreground/30 lg:hidden" onClick={onClose} />
       )}
       <aside
         className={cn(
-          "no-print fixed inset-y-0 left-0 z-50 flex w-64 flex-col overflow-hidden bg-sidebar text-sidebar-foreground shadow-2xl transition-transform duration-300 lg:static lg:translate-x-0 lg:shadow-none",
-          mobileOpen ? "translate-x-0" : "-translate-x-full",
+          "no-print fixed inset-y-0 left-0 z-50 flex w-[240px] flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-transform duration-200",
+          open ? "translate-x-0 lg:static" : "-translate-x-full",
         )}
       >
-        <div className="relative flex h-20 items-center justify-between border-b border-sidebar-border px-4">
-          <div className="absolute inset-0 bg-gradient-to-r from-sidebar-primary/10 to-transparent" aria-hidden="true" />
-          <div className="relative rounded-xl bg-white px-3 py-1.5 shadow-md">
-            <MesmsLogo size="md" />
-          </div>
-          <button onClick={onClose} className="relative rounded-lg p-2 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-white lg:hidden" aria-label="Close navigation">
-            <X className="h-5 w-5" />
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-sidebar-border px-4">
+          <MesmsLogo size="md" />
+          <button
+            onClick={onClose}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Hide navigation"
+          >
+            <X className="h-4 w-4" />
           </button>
         </div>
 
@@ -48,7 +52,7 @@ export function AppSidebar({ mobileOpen, onClose }: AppSidebarProps) {
             if (items.length === 0) return null;
             return (
               <div key={group}>
-                <p className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-sidebar-foreground/45">
+                <p className="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/80">
                   {group}
                 </p>
                 <div className="space-y-0.5">
@@ -58,16 +62,16 @@ export function AppSidebar({ mobileOpen, onClose }: AppSidebarProps) {
                       <NavLink
                         key={item.to}
                         to={item.to}
-                        onClick={onClose}
+                        onClick={closeIfOverlay}
                         className={cn(
-                          "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
+                          "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors",
                           active
-                            ? "bg-gradient-to-r from-sidebar-primary/20 to-sidebar-primary/5 text-sidebar-primary shadow-sm"
-                            : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                            ? "bg-sidebar-accent text-sidebar-primary"
+                            : "text-sidebar-foreground hover:bg-muted hover:text-foreground",
                         )}
                       >
-                        <item.icon className="h-[18px] w-[18px] shrink-0 transition-transform group-hover:scale-110" />
-                        {item.label}
+                        <item.icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
+                        <span className="truncate">{item.label}</span>
                       </NavLink>
                     );
                   })}
@@ -78,16 +82,16 @@ export function AppSidebar({ mobileOpen, onClose }: AppSidebarProps) {
         </nav>
 
         <div className="border-t border-sidebar-border p-3">
-          <div className="flex items-center gap-3 rounded-xl border border-sidebar-border bg-sidebar-accent/80 px-3 py-3 shadow-inner">
+          <div className="flex items-center gap-2.5 rounded-md px-2 py-2">
             <div
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
               style={{ backgroundColor: `hsl(${user.avatarColor})` }}
             >
               {user.name.charAt(0)}
             </div>
             <div className="min-w-0 leading-tight">
-              <p className="truncate text-sm font-medium text-sidebar-accent-foreground">{user.name}</p>
-              <p className="truncate text-xs text-sidebar-foreground/60">
+              <p className="truncate text-[13px] font-medium text-foreground">{user.name}</p>
+              <p className="truncate text-[11px] text-muted-foreground">
                 {getUserRoles(user).map((role) => roleLabels[role]).join(" · ")}
               </p>
             </div>

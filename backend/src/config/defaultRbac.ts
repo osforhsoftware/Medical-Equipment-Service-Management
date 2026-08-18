@@ -6,7 +6,7 @@ export const DEFAULT_RBAC_MATRIX: Record<string, string[]> = {
   "Service Tickets": ["admin", "coordinator", "inspector", "estimator", "engineer"],
   "Service Requests": ["admin", "coordinator", "inspector", "estimator", "engineer"],
   Inspections: ["admin", "coordinator", "inspector"],
-  Estimates: ["admin", "coordinator", "estimator", "billing"],
+  Estimates: ["admin", "coordinator", "estimator", "billing", "inspector", "engineer"],
   "Service Jobs": ["admin", "coordinator", "engineer"],
   Inventory: ["admin", "inventory", "engineer", "inspector"],
   "Stock Purchase Requests": ["admin", "inventory", "inspector", "engineer"],
@@ -19,6 +19,8 @@ export const DEFAULT_RBAC_MATRIX: Record<string, string[]> = {
   "QR Tracking": ["admin", "coordinator", "inspector", "engineer", "inventory"],
   "Audit Logs": ["admin"],
   Users: ["admin"],
+  "Office Assets": ["admin"],
+  "Master Data": ["admin", "coordinator"],
   Settings: ["admin"],
 };
 

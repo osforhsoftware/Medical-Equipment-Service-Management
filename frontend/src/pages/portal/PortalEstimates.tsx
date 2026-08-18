@@ -49,8 +49,7 @@ export default function PortalEstimates() {
         {items.map((e) => {
           const actionable = e.status === "sent" || e.status === "revision" || e.status === "pendingAdminApproval";
           return (
-            <Card key={e.id} className="overflow-hidden shadow-card hover:border-primary/20 hover:shadow-elevated">
-              <div className="h-1 bg-gradient-to-r from-accent via-primary to-info" />
+            <Card key={e.id} className="overflow-hidden">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">

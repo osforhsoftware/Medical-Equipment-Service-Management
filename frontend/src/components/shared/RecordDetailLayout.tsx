@@ -23,6 +23,7 @@ type RecordDetailLayoutProps = {
   title: string;
   subtitle?: ReactNode;
   status?: string;
+  statusLabel?: string;
   meta?: DetailMetaItem[];
   actions?: ReactNode;
   tabs?: DetailTab[];
@@ -46,6 +47,7 @@ export function RecordDetailLayout({
   title,
   subtitle,
   status,
+  statusLabel,
   meta,
   actions,
   tabs,
@@ -66,7 +68,7 @@ export function RecordDetailLayout({
     return (
       <div className="space-y-6 animate-pulse">
         <div className="h-10 w-40 rounded-lg bg-muted" />
-        <div className="space-y-3 rounded-2xl border border-border/70 bg-card/80 p-6">
+        <div className="space-y-3 rounded-lg border border-border bg-card p-5">
           <div className="h-8 w-56 rounded bg-muted" />
           <div className="h-4 w-80 max-w-full rounded bg-muted" />
           <div className="mt-4 flex gap-2">
@@ -75,8 +77,8 @@ export function RecordDetailLayout({
           </div>
         </div>
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
-          <div className="h-64 rounded-2xl border border-border/70 bg-card/60" />
-          <div className="h-48 rounded-2xl border border-border/70 bg-card/60" />
+          <div className="h-64 rounded-lg border border-border bg-card" />
+          <div className="h-48 rounded-lg border border-border bg-card" />
         </div>
         <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading…
@@ -132,8 +134,8 @@ export function RecordDetailLayout({
           </Button>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="font-display text-2xl font-bold tracking-tight sm:text-[1.7rem]">{title}</h1>
-              {status ? <StatusBadge status={status} /> : null}
+              <h1 className="page-title">{title}</h1>
+              {status ? <StatusBadge status={status} label={statusLabel} /> : null}
             </div>
             {subtitle ? (
               <div className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{subtitle}</div>
@@ -200,8 +202,8 @@ export function DetailSection({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm sm:p-5", className)}>
-      {title ? <h2 className="mb-3 text-sm font-semibold tracking-wide text-foreground">{title}</h2> : null}
+    <section className={cn("rounded-lg border border-border bg-card p-4 shadow-card sm:p-5", className)}>
+      {title ? <h2 className="section-title mb-3">{title}</h2> : null}
       {children}
     </section>
   );
@@ -215,7 +217,7 @@ export function DetailInfoGrid({
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {items.map((item) => (
-        <div key={item.label} className="rounded-lg border border-border/70 bg-background/50 p-3 text-sm">
+        <div key={item.label} className="rounded-md border border-border bg-muted/30 p-3 text-sm">
           <p className="text-xs text-muted-foreground">{item.label}</p>
           <div className="mt-0.5 font-medium capitalize">{item.value ?? "—"}</div>
         </div>
