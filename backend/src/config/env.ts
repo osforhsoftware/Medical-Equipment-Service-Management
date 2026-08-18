@@ -1,9 +1,15 @@
 import dotenv from "dotenv";
+import { existsSync } from "fs";
 import { z } from "zod";
 import path from "path";
 
-// Load .env from backend root
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+const envPaths = [
+  path.resolve(process.cwd(), ".env"),
+  path.resolve(__dirname, "../../.env"),
+  path.resolve(__dirname, "../../../.env"),
+];
+const envFile = envPaths.find((candidate) => existsSync(candidate));
+dotenv.config(envFile ? { path: envFile } : undefined);
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
