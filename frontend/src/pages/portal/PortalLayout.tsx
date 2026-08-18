@@ -24,14 +24,12 @@ export function PortalLayout() {
   if (user.role !== "customer") return <Navigate to="/app" replace />;
 
   return (
-    <div className="min-h-screen bg-transparent">
-      <header className="sticky top-0 z-30 border-b border-border/70 bg-card/80 shadow-sm backdrop-blur-xl">
-        <div className="mx-auto flex h-[4.5rem] max-w-7xl items-center gap-4 px-4 sm:px-6">
-          <div className="rounded-xl bg-white px-2.5 py-1 shadow-sm ring-1 ring-border/50">
-            <MesmsLogo size="md" />
-          </div>
+    <div className="min-h-screen bg-background">
+      <header className="sticky top-0 z-30 border-b border-border bg-card">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4 sm:px-6">
+          <MesmsLogo size="md" />
 
-          <nav className="ml-6 hidden items-center gap-1 md:flex">
+          <nav className="ml-4 hidden items-center gap-0.5 md:flex">
             {links.map((l) => {
               const active = l.end ? pathname === l.to : pathname.startsWith(l.to);
               return (
@@ -39,41 +37,41 @@ export function PortalLayout() {
                   key={l.to}
                   to={l.to}
                   className={cn(
-                    "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all",
-                    active ? "bg-gradient-to-r from-primary/12 to-accent/10 text-primary shadow-sm" : "text-muted-foreground hover:bg-secondary/70 hover:text-primary",
+                    "flex items-center gap-2 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors",
+                    active ? "bg-primary-light text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground",
                   )}
                 >
-                  <l.icon className="h-4 w-4" /> {l.label}
+                  <l.icon className="h-4 w-4" strokeWidth={1.75} /> {l.label}
                 </NavLink>
               );
             })}
           </nav>
 
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex items-center gap-2">
             <div className="hidden text-right sm:block">
-              <p className="text-sm font-medium">{user.name}</p>
-              <p className="text-xs text-muted-foreground">Customer Portal</p>
+              <p className="text-[13px] font-medium">{user.name}</p>
+              <p className="text-[11px] text-muted-foreground">Customer Portal</p>
             </div>
             <ThemeToggle />
             <Button variant="ghost" size="icon" onClick={() => { void logout().then(() => navigate("/login")); }} title="Sign out">
-              <LogOut className="h-5 w-5" />
+              <LogOut className="h-[18px] w-[18px]" />
             </Button>
-            <button className="rounded-lg p-2 text-muted-foreground hover:bg-secondary md:hidden" onClick={() => setOpen((o) => !o)} aria-label="Toggle portal navigation" aria-expanded={open}>
+            <button className="rounded-md p-1.5 text-muted-foreground hover:bg-muted md:hidden" onClick={() => setOpen((o) => !o)} aria-label="Toggle portal navigation" aria-expanded={open}>
               {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
           </div>
         </div>
 
         {open && (
-          <nav className="border-t border-border/70 bg-card/95 px-4 py-3 shadow-lg md:hidden">
+          <nav className="border-t border-border bg-card px-4 py-2 md:hidden">
             {links.map((l) => (
               <NavLink
                 key={l.to}
                 to={l.to}
                 onClick={() => setOpen(false)}
                 className={cn(
-                  "flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium",
-                  (l.end ? pathname === l.to : pathname.startsWith(l.to)) ? "bg-primary/10 text-primary" : "text-muted-foreground",
+                  "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium",
+                  (l.end ? pathname === l.to : pathname.startsWith(l.to)) ? "bg-primary-light text-primary" : "text-muted-foreground",
                 )}
               >
                 <l.icon className="h-4 w-4" /> {l.label}
@@ -83,7 +81,7 @@ export function PortalLayout() {
         )}
       </header>
 
-      <main className="mx-auto max-w-7xl animate-fade-in px-4 py-6 sm:px-6 lg:py-8">
+      <main className="mx-auto max-w-7xl animate-fade-in px-4 py-6 sm:px-6 lg:py-7">
         <Outlet />
       </main>
     </div>

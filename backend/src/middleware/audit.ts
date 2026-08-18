@@ -1,5 +1,9 @@
 import type { NextFunction, Request, Response } from "express";
 import { prisma } from "@/db/prisma";
+import {
+  formatAuditActionFromRequest,
+  formatAuditEntityFromPath,
+} from "@/utils/auditActionLabels";
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -15,10 +19,10 @@ export function auditMutation(req: Request, res: Response, next: NextFunction) {
     void prisma.auditLog.create({
       data: {
         tenantId: req.tenantId,
-        actor: req.user.userId,
+        actor: req.user.name ?? req.user.email,
         role: req.user.role,
-        action: `${req.method} ${path}`,
-        entity: path.split("/").filter(Boolean).slice(1, 3).join(":") || "unknown",
+        action: formatAuditActionFromRequest(req.method, path),
+        entity: formatAuditEntityFromPath(path),
         ip: req.ip || req.socket.remoteAddress || "unknown",
       },
     }).catch((error) => {

@@ -8,6 +8,8 @@ import { generateReference } from "@/utils/reference";
 import { prisma } from "@/db/prisma";
 import {
   assertTicketAdvance,
+  assertTicketReopen,
+  normalizeTicketStatus,
   resolveTicketEventStatus,
   type TicketEvent,
 } from "@/services/workflow/serviceTicketStateMachine";
@@ -20,6 +22,7 @@ type CreateServiceRequestData = {
   equipmentId?: string;
   equipmentIds?: string[];
   type: string;
+  typeOther?: string | null;
   priority: string;
   description: string;
   assignedTo?: string;
@@ -36,18 +39,94 @@ type UpdateServiceRequestData = {
   timelineNote?: string;
 };
 
+type ServiceRequestRecord = Awaited<ReturnType<typeof serviceRequestsRepository.findById>>;
+
 export class ServiceRequestsService {
+  private async assertNoActiveTicketForEquipment(
+    tenantId: string,
+    equipmentIds: string[],
+  ) {
+    if (equipmentIds.length === 0) return;
+
+    const existing = await prisma.serviceRequest.findFirst({
+      where: {
+        tenantId,
+        status: { notIn: ["closed", "finished"] as never[] },
+        OR: [
+          { equipmentId: { in: equipmentIds } },
+          { equipmentItems: { some: { equipmentId: { in: equipmentIds } } } },
+        ],
+      },
+      include: {
+        equipmentItems: { orderBy: { createdAt: "asc" } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (!existing) return;
+
+    const conflictingEquipment = existing.equipmentItems.find((item) =>
+      equipmentIds.includes(item.equipmentId),
+    );
+    const equipmentLabel =
+      conflictingEquipment?.equipmentName ??
+      existing.equipmentName ??
+      "Selected equipment";
+
+    throw new AppError(
+      `${equipmentLabel} already has an active service ticket (${existing.reference}). Close the existing ticket before creating another one.`,
+      409,
+    );
+  }
+
+  /** Resolve legacy records where createdBy stored a user id instead of a display name. */
+  private async enrichCreatedBy<T extends { createdBy: string }>(
+    tenantId: string,
+    record: T,
+  ): Promise<T> {
+    const user = await usersRepository.findById(record.createdBy, tenantId);
+    if (!user) return record;
+    return { ...record, createdBy: user.name };
+  }
+
+  private async enrichCreatedByList<T extends { createdBy: string }>(
+    tenantId: string,
+    records: T[],
+  ): Promise<T[]> {
+    const ids = [...new Set(records.map((r) => r.createdBy))];
+    const users = await prisma.user.findMany({
+      where: { tenantId, id: { in: ids } },
+      select: { id: true, name: true },
+    });
+    if (users.length === 0) return records;
+    const names = new Map(users.map((u) => [u.id, u.name]));
+    return records.map((r) => ({
+      ...r,
+      createdBy: names.get(r.createdBy) ?? r.createdBy,
+    }));
+  }
+
+  private async enrichServiceRequest(
+    tenantId: string,
+    record: ServiceRequestRecord,
+  ): Promise<NonNullable<ServiceRequestRecord>> {
+    if (!record) throw new AppError("Service ticket not found", 404);
+    return this.enrichCreatedBy(tenantId, record);
+  }
+
   private assertActorAccess(
-    request: { assignedTo: string | null },
+    request: { assignedTo: string | null; assignedInspectorId?: string | null; assignedEngineerId?: string | null },
     actorId?: string,
     actorRole?: string,
   ) {
-    if (
-      actorId &&
-      actorRole &&
-      ASSIGNMENT_SCOPED_ROLES.includes(actorRole) &&
-      request.assignedTo !== actorId
-    ) {
+    if (!actorId || !actorRole) return;
+    const assigneeId =
+      actorRole === "inspector"
+        ? request.assignedInspectorId ?? request.assignedTo
+        : actorRole === "engineer"
+          ? request.assignedEngineerId ?? request.assignedTo
+          : request.assignedTo;
+    if (ASSIGNMENT_SCOPED_ROLES.includes(actorRole) && assigneeId && assigneeId !== actorId) {
       throw new AppError("You can only access service tickets assigned to you", 403);
     }
   }
@@ -56,7 +135,16 @@ export class ServiceRequestsService {
     const assignee = await usersRepository.findById(assignedTo, tenantId);
     if (!assignee) throw new AppError("Staff user not found", 404);
     if (!assignee.isActive) throw new AppError("Assigned staff is not active", 400);
-    if (!ASSIGNABLE_STAFF_ROLES.includes(assignee.role)) {
+    const hasAssignableRole =
+      ASSIGNABLE_STAFF_ROLES.includes(assignee.role) ||
+      !!(await prisma.userRoleAssignment.findFirst({
+        where: {
+          tenantId,
+          userId: assignedTo,
+          role: { key: { in: ASSIGNABLE_STAFF_ROLES } },
+        },
+      }));
+    if (!hasAssignableRole) {
       throw new AppError("This role cannot be assigned work", 400);
     }
     return assignee;
@@ -80,23 +168,57 @@ export class ServiceRequestsService {
     });
   }
 
-  async getAll(tenantId: string, actorId: string, actorRole: string, filters?: { branchId?: string; status?: string }) {
+  async getPaginated(
+    tenantId: string,
+    actorId: string,
+    actorRole: string,
+    filters: import("@/repositories/serviceRequests.repository").ServiceRequestListFilters,
+  ) {
+    const restrictedRoles = ["inspector", "estimator", "engineer", "inventory", "billing"];
+    const assignedToFilter = restrictedRoles.includes(actorRole) ? actorId : filters.assignedTo;
+    const { data, total } = await serviceRequestsRepository.findPaginated(tenantId, {
+      ...filters,
+      assignedTo: assignedToFilter,
+    });
+    return { data: await this.enrichCreatedByList(tenantId, data), total };
+  }
+
+  async getStatusCounts(
+    tenantId: string,
+    actorId: string,
+    actorRole: string,
+    statuses: string[],
+    filters?: { overdue?: boolean; priority?: string; assignee?: string; search?: string },
+  ) {
+    const restrictedRoles = ["inspector", "estimator", "engineer", "inventory", "billing"];
+    const assignedTo = restrictedRoles.includes(actorRole) ? actorId : undefined;
+    return serviceRequestsRepository.countByStatus(tenantId, {
+      assignedTo,
+      priority: filters?.priority,
+      assignee: filters?.assignee,
+      overdue: filters?.overdue,
+      search: filters?.search,
+    }, statuses);
+  }
+
+  async getAll(tenantId: string, actorId: string, actorRole: string, filters?: { status?: string }) {
     const restrictedRoles = ["inspector", "estimator", "engineer", "inventory", "billing"];
     const assignedToFilter = restrictedRoles.includes(actorRole) ? actorId : undefined;
-    return serviceRequestsRepository.findAll(tenantId, { ...filters, assignedTo: assignedToFilter });
+    const rows = await serviceRequestsRepository.findAll(tenantId, { ...filters, assignedTo: assignedToFilter });
+    return this.enrichCreatedByList(tenantId, rows);
   }
 
   async getById(id: string, tenantId: string, actorId?: string, actorRole?: string) {
     const sr = await serviceRequestsRepository.findById(id, tenantId);
     if (!sr) throw new AppError("Service ticket not found", 404);
     this.assertActorAccess(sr, actorId, actorRole);
-    return sr;
+    return this.enrichCreatedBy(tenantId, sr);
   }
 
   async getWithTimeline(id: string, tenantId: string) {
     const sr = await serviceRequestsRepository.findWithTimeline(id, tenantId);
     if (!sr) throw new AppError("Service ticket not found", 404);
-    return sr;
+    return this.enrichCreatedBy(tenantId, sr);
   }
 
   async getTimeline(id: string, tenantId: string, actorId?: string, actorRole?: string) {
@@ -122,6 +244,8 @@ export class ServiceRequestsService {
         ? [data.equipmentId]
         : [];
 
+    await this.assertNoActiveTicketForEquipment(tenantId, equipIds);
+
     let primaryEquipId: string | undefined;
     let primaryEquipName: string | undefined;
     let branchId = customer.branchId;
@@ -142,10 +266,15 @@ export class ServiceRequestsService {
       }
     }
 
+    let assignedInspectorId: string | undefined;
     if (data.assignedTo) {
       const assignee = await this.validateAssignee(data.assignedTo, tenantId);
       data.assignedName = assignee.name;
+      if (assignee.role === "inspector") assignedInspectorId = assignee.id;
     }
+
+    const typeOther = data.type === "Other" ? data.typeOther?.trim() || null : null;
+    const typeLabel = typeOther ? `Other (${typeOther})` : data.type;
 
     const sr = await serviceRequestsRepository.create(tenantId, {
       reference,
@@ -155,11 +284,13 @@ export class ServiceRequestsService {
       equipmentName: primaryEquipName,
       branchId,
       type: data.type as never,
+      typeOther,
       priority: data.priority as never,
       description: data.description,
       createdBy,
       assignedTo: data.assignedTo,
       assignedName: data.assignedName,
+      assignedInspectorId,
       slaDue,
     });
 
@@ -171,7 +302,7 @@ export class ServiceRequestsService {
       sr.id,
       createdBy,
       "Service ticket created",
-      `Type: ${data.type}, Priority: ${data.priority}`,
+      `Type: ${typeLabel}, Priority: ${data.priority}`,
     );
 
     if (data.assignedTo) {
@@ -189,7 +320,7 @@ export class ServiceRequestsService {
       data: { activeJobs: { increment: 1 } },
     });
 
-    return serviceRequestsRepository.findById(sr.id, tenantId);
+    return this.enrichServiceRequest(tenantId, await serviceRequestsRepository.findById(sr.id, tenantId));
   }
 
   async update(id: string, tenantId: string, actorId: string, actorRole: string, data: UpdateServiceRequestData) {
@@ -217,7 +348,10 @@ export class ServiceRequestsService {
 
     const hasUpdates = Object.keys(updateData).length > 0;
     const updated = hasUpdates
-      ? await serviceRequestsRepository.update(id, tenantId, updateData as never)
+      ? await this.enrichServiceRequest(
+          tenantId,
+          await serviceRequestsRepository.update(id, tenantId, updateData as never),
+        )
       : await this.getById(id, tenantId, actorId, actorRole);
 
     if ((!status || status === existing.status) && timelineNote) {
@@ -232,10 +366,23 @@ export class ServiceRequestsService {
     const actor = await usersRepository.findById(actorId, tenantId);
     const assignee = await this.validateAssignee(assignedTo, tenantId);
 
-    await serviceRequestsRepository.update(id, tenantId, {
+    const updateData: {
+      assignedTo: string;
+      assignedName: string;
+      assignedInspectorId?: string;
+      assignedEngineerId?: string;
+    } = {
       assignedTo,
       assignedName: assignee.name,
-    });
+    };
+    if (assignee.role === "inspector") {
+      updateData.assignedInspectorId = assignee.id;
+    }
+    if (assignee.role === "engineer") {
+      updateData.assignedEngineerId = assignee.id;
+    }
+
+    await serviceRequestsRepository.update(id, tenantId, updateData);
 
     await serviceRequestsRepository.addTimelineEvent(
       id,
@@ -252,7 +399,7 @@ export class ServiceRequestsService {
       existing.equipmentName ?? "Equipment",
     );
 
-    return serviceRequestsRepository.findById(id, tenantId);
+    return this.enrichServiceRequest(tenantId, await serviceRequestsRepository.findById(id, tenantId));
   }
 
   async advanceWorkflow(
@@ -269,7 +416,19 @@ export class ServiceRequestsService {
 
     assertTicketAdvance(existing.status, targetStatus, actorRole);
 
-    if (targetStatus === "inProgress") {
+    if (targetStatus === "inspection") {
+      const assignedInspector = existing.assignedInspectorId ?? existing.assignedTo;
+      if (actorRole !== "admin") {
+        if (!assignedInspector) {
+          throw new AppError("An inspector must be assigned before moving to inspection", 403);
+        }
+        if (assignedInspector !== actorId) {
+          throw new AppError("Only the assigned inspector may start inspection on this ticket", 403);
+        }
+      }
+    }
+
+    if (targetStatus === "assigned_engineer") {
       const estimate = await prisma.estimate.findFirst({
         where: {
           tenantId,
@@ -284,7 +443,7 @@ export class ServiceRequestsService {
         throw new AppError("An approved estimate and scheduled job are required before in-progress", 409);
       }
     }
-    if (targetStatus === "completed") {
+    if (targetStatus === "pending_final_approval") {
       const job = await prisma.serviceJob.findFirst({
         where: {
           tenantId,
@@ -294,7 +453,7 @@ export class ServiceRequestsService {
         include: { signature: true },
       });
       if (!job?.signature) {
-        throw new AppError("Customer sign-off is required before completing the ticket", 409);
+        throw new AppError("Customer sign-off is required before pending final approval", 409);
       }
     }
     if (targetStatus === "invoiced") {
@@ -303,19 +462,73 @@ export class ServiceRequestsService {
       });
       if (!invoice) throw new AppError("An invoice is required before marking invoiced", 409);
     }
-    if (targetStatus === "finished") {
-      if (existing.status !== "invoiced") {
-        throw new AppError("Ticket must be invoiced before finishing", 409);
+    if (targetStatus === "closed") {
+      if (normalizeTicketStatus(existing.status) !== "invoiced") {
+        throw new AppError("Ticket must be invoiced before closing", 409);
       }
     }
 
-    const updated = await serviceRequestsRepository.update(id, tenantId, {
-      status: targetStatus as never,
-    });
+    const updated = await this.enrichServiceRequest(
+      tenantId,
+      await serviceRequestsRepository.update(id, tenantId, {
+        status: targetStatus as never,
+      }),
+    );
 
     const label = targetStatus.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase());
     await serviceRequestsRepository.addTimelineEvent(id, actorName, `Moved to ${label}`, note);
     await notificationsService.notifyWorkflowAdvanced(tenantId, existing.reference, targetStatus, actorName);
+
+    return updated;
+  }
+
+  /**
+   * Explicit audited reopen — the only allowed way to move backward in the lifecycle.
+   */
+  async reopen(
+    id: string,
+    tenantId: string,
+    actorId: string,
+    actorRole: string,
+    targetStatus: string,
+    note: string,
+  ) {
+    const existing = await this.getById(id, tenantId, actorId, actorRole);
+    assertTicketReopen(existing.status, targetStatus, actorRole);
+
+    const actor = await usersRepository.findById(actorId, tenantId);
+    const actorName = actor?.name ?? actorId;
+
+    const updated = await this.enrichServiceRequest(
+      tenantId,
+      await serviceRequestsRepository.update(id, tenantId, {
+        status: targetStatus as never,
+      }),
+    );
+
+    await serviceRequestsRepository.addTimelineEvent(
+      id,
+      actorName,
+      `Reopened to ${targetStatus}`,
+      note,
+    );
+    await notificationsService.notifyWorkflowAdvanced(
+      tenantId,
+      existing.reference,
+      targetStatus,
+      actorName,
+    );
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        actor: actorName,
+        role: actorRole,
+        action: "Reopened service ticket",
+        entity: existing.reference,
+        ip: "workflow",
+      },
+    }).catch(() => undefined);
 
     return updated;
   }

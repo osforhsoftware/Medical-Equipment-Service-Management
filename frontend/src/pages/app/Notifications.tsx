@@ -4,11 +4,10 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ApiError } from "@/lib/api";
 import { api, type BackendNotification } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/format";
 import { emitNotificationsUpdated } from "@/lib/notifications-events";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
 
 const iconMap = {
   amc: ShieldCheck,
@@ -37,8 +36,7 @@ export default function Notifications() {
       const data = await api.listNotifications();
       setItems(data);
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load notifications";
-      toast({ title: "Error", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to load notifications" });
       setItems([]);
     } finally {
       setLoading(false);
@@ -59,8 +57,7 @@ export default function Notifications() {
       emitNotificationsUpdated();
     } catch (err) {
       setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: false } : n)));
-      const message = err instanceof ApiError ? err.message : "Failed to mark notification as read";
-      toast({ title: "Error", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to mark notification as read" });
     }
   };
 
@@ -75,8 +72,7 @@ export default function Notifications() {
       emitNotificationsUpdated();
     } catch (err) {
       setItems(previous);
-      const message = err instanceof ApiError ? err.message : "Failed to mark all as read";
-      toast({ title: "Error", description: message, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to mark all as read" });
     } finally {
       setMarkingAll(false);
     }
@@ -94,7 +90,7 @@ export default function Notifications() {
     <div className="space-y-6">
       <PageHeader
         title="Notifications"
-        description="AMC reminders, low-stock alerts, approvals and job updates."
+        description="Low-stock alerts, approvals and job updates."
         actions={
           items.length > 0 ? (
             <Button variant="outline" onClick={() => void markAll()} disabled={markingAll || items.every((n) => n.read)}>

@@ -2,10 +2,58 @@ import { type Request, type Response, type NextFunction } from "express";
 import { billingRepository } from "@/repositories/billing.repository";
 import { success } from "@/utils/response";
 import { domainService } from "@/services/domain.service";
+import { billingService, type BillingQueueKey } from "@/services/billing.service";
 import { AppError } from "@/middleware/errorHandler";
 import { prisma } from "@/db/prisma";
 
+function actor(req: Request) {
+  return { userId: req.user!.userId, role: req.user!.role };
+}
+
 export class BillingController {
+  async getQueue(req: Request, res: Response, next: NextFunction) {
+    try {
+      const queue = req.query.queue as BillingQueueKey | undefined;
+      const data = await billingService.getQueue(req.tenantId!, queue);
+      res.json(success("Billing queue fetched", data));
+    } catch (err) { next(err); }
+  }
+
+  async getJobContext(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await billingService.getJobContext(req.tenantId!, req.params.jobId);
+      res.json(success("Billing job context fetched", data));
+    } catch (err) { next(err); }
+  }
+
+  async verifyJob(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await billingService.verifyJob(req.tenantId!, req.params.jobId, actor(req));
+      res.json(success("Job billing verification recorded", data));
+    } catch (err) { next(err); }
+  }
+
+  async submitForApproval(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await billingService.submitInvoiceForApproval(req.tenantId!, req.params.id, actor(req));
+      res.json(success("Invoice submitted for approval", data));
+    } catch (err) { next(err); }
+  }
+
+  async approveInvoice(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await billingService.approveInvoice(req.tenantId!, req.params.id, actor(req));
+      res.json(success("Invoice approved", data));
+    } catch (err) { next(err); }
+  }
+
+  async markSent(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await billingService.markInvoiceSent(req.tenantId!, req.params.id, actor(req));
+      res.json(success("Invoice marked as sent", data));
+    } catch (err) { next(err); }
+  }
+
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
       const data = await billingRepository.findAll(req.tenantId!, req.query.status as string);
@@ -62,13 +110,19 @@ export class BillingController {
 
   async update(req: Request, res: Response, next: NextFunction) {
     try {
-      if (["amount", "tax", "total", "paidTotal", "balanceDue", "lineItems"].some((key) => key in req.body)) {
-        throw new AppError("Authoritative invoice financial fields cannot be edited", 409);
+      if ("status" in req.body) {
+        throw new AppError("Use workflow endpoints to change invoice status", 409);
       }
-      const allowed: Record<string, unknown> = {};
-      if (req.body.status) allowed.status = req.body.status;
-      if (req.body.dueAt) allowed.dueAt = new Date(req.body.dueAt);
-      const result = await billingRepository.update(req.params.id, req.tenantId!, allowed as never);
+      if (["amount", "tax", "total", "paidTotal", "balanceDue"].some((key) => key in req.body)) {
+        throw new AppError("Invoice totals are calculated server-side from line items", 409);
+      }
+      const dueAt = req.body.dueAt
+        ? new Date(String(req.body.dueAt).includes("T") ? req.body.dueAt : `${req.body.dueAt}T00:00:00.000Z`)
+        : undefined;
+      const result = await billingService.updateInvoice(req.tenantId!, req.params.id, actor(req), {
+        dueAt,
+        lineItems: req.body.lineItems,
+      });
       res.json(success("Invoice updated successfully", result));
     } catch (err) { next(err); }
   }

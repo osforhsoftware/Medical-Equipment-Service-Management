@@ -27,35 +27,37 @@ MESMS is a multi-tenant, multi-branch platform for medical-equipment service com
 Canonical ticket status flow:
 
 ```
-new → inspection → estimate → approval → in-progress → completed → invoiced → finished
+new → inspection → estimate → pending_approval → assigned_engineer
+  ↔ change_pending_approval → pending_final_approval → pending_invoice → invoiced → closed
 ```
 
-Admin/Coordinator approve estimates (with engineer assignment). Customer portal may acknowledge but does not alone unlock jobs.
+Admin/Coordinator approve estimates (with engineer assignment). Rejection from `pending_approval` returns the ticket to **estimate** or **inspection** with a required reason logged on the timeline. Customer portal may acknowledge but does not alone unlock jobs.
 
 ```mermaid
 flowchart LR
   A[Request intake] --> B[Inspection]
   B --> C[Estimate]
-  C --> D[Customer approval]
-  D --> E[Job scheduling]
+  C --> D[Admin approval]
+  D --> E[Engineer assigned]
   E --> F[Job execution]
-  F --> G[Parts / inventory]
-  G --> H[Completion & sign-off]
-  H --> I[Invoicing & payment]
+  F --> G[Change request loop]
+  G --> H[Final admin approval]
+  H --> I[Invoice generation]
+  I --> J[Closed]
 ```
 
 ### Stage-by-stage detail
 
 | # | Stage | Owner | What should happen | Current status |
 |---|--------|--------|--------------------|----------------|
-| 1 | **Request intake** | Coordinator (or customer) | Create request with customer, equipment, priority, SLA, assignee | Staff create works (reference, multi-equipment, SLA, timeline, assign). Customer self-service missing. |
-| 2 | **Inspection** | Inspector | Capture findings, severity, media; submit report; move to estimate | Findings/recommendation/severity persist; advances to `estimate`. Camera/video “coming soon”; no media storage. |
-| 3 | **Estimate** | Estimator / Coordinator | Itemized labor + parts; send to customer; approve/reject/revise | Aggregate labor/parts totals + statuses exist. No line items, real send, or customer API decision. |
-| 4 | **Approval** | Customer | Approve, reject, or request revision | Portal UI exists; decisions are mock/local state only (lost on refresh). |
-| 5 | **Job scheduling** | Coordinator | Create job linked to approved request/estimate; assign engineer | Job create + assign works. Not strictly gated on approved estimate; FK links incomplete. |
-| 6 | **Job execution** | Engineer | Start/update progress, evidence, parts use, customer sign-off | Assigned jobs, activities, photos (data URL), parts request, name sign-off, stock deduction exist. Drawn signature & PDF report simulated. |
-| 7 | **Inventory / procurement** | Inventory staff | Reserve parts, POs, transfers, fulfill engineer requests | CRUD for inventory, suppliers, POs, transfers. Receiving, line items, reservation, ledger incomplete. |
-| 8 | **Completion & billing** | Engineer, Coordinator, Billing | Complete job/request; invoice; track payment | Job complete + invoice CRUD. No reliable invoice↔job links; payments missing; PDFs simulated. |
+| 1 | **Request intake** | Coordinator (or customer) | Create request with customer, equipment, priority, SLA; assign inspector | Staff create works (reference, multi-equipment, SLA, timeline, assign). `assignedInspectorId` stored when an inspector is assigned. Customer self-service missing. |
+| 2 | **Inspection** | Inspector | Capture findings, severity, photos, recommended parts; submit report; move to estimate | Findings/recommendation/severity persist; photos stored via `StoredFile`; severity-scaled validation (photos + findings length); spare parts with stock check; auto purchase request on shortfall; advances to `estimate`. Only the assigned inspector (or admin) may start inspection. |
+| 3 | **Estimate** | Estimator / Coordinator | Itemized labor + parts; send for admin approval | Aggregate labor/parts totals + line items; sending moves ticket to `pending_approval`. |
+| 4 | **Approval** | Admin / Coordinator | Approve (assign engineer) or reject back to estimate/inspection with reason | `POST /api/service-requests/:id/approve-estimate` and `reject-estimate` with timeline logging. Engineer auto-assigned on approval; ticket → `assigned_engineer`. |
+| 5 | **Job execution** | Engineer | Start/update progress, evidence, parts use, customer sign-off; submit change requests | Assigned jobs, activities, photos, parts request, sign-off, stock deduction. Change requests move ticket to `change_pending_approval`; admin approve/reject returns to `assigned_engineer`. |
+| 6 | **Final approval** | Admin / Coordinator | Review completed work; grant final approval | Job completion → `pending_final_approval`. Admin `final-approval` → `pending_invoice`, auto-generates invoice → `invoiced`. Reject returns to `assigned_engineer` with reason. |
+| 7 | **Billing & close** | Billing / Admin | Invoice, payment, administrative close | Invoice from job (service + parts + extras); `POST /api/service-requests/:id/close` moves `invoiced` → `closed`. Payments via billing module can also close ticket. |
+| 8 | **Inventory / procurement** | Inventory staff | Reserve parts, POs, fulfill shortages | Stock purchase requests auto-created from inspection part shortfalls; admin/procurement notified. PO convert/receive partially implemented. |
 
 ### Supporting workflows
 
@@ -146,8 +148,8 @@ Custom tenant roles (`Role` + `UserRoleAssignment`) exist in the schema for futu
 - **Current:** request create, assign, timeline, workflow advance, job scheduling UI/API exist; business rules incomplete.
 
 #### Inspector
-- **Intended:** assigned work only → inspect → submit report → hand off to estimate.
-- **Current:** assigned filtering + report persistence + stage advance; media/camera incomplete; assignment checks incomplete on some detail routes.
+- **Intended:** assigned work only → inspect → submit report with photos and recommended parts → hand off to estimate.
+- **Current:** assigned filtering via `assignedInspectorId`; report persistence with photo upload to `StoredFile`; severity-scaled validation; recommended spare parts with stock check and auto purchase request on shortfall; assignment lock on `new → inspection` (403 if not assigned inspector or admin); stage advance to `estimate` on submit.
 
 #### Estimator
 - **Intended:** review inspection → itemized estimate → send → revise/approve path.
@@ -240,11 +242,16 @@ Status key:
 |---------|--------|
 | Assigned inspection list | Live |
 | Findings, severity, recommendation | Live |
+| Severity-scaled validation (photos + findings length) | Live |
 | Submit → move request to estimate | Live |
-| Checklist / measurements | Missing |
-| Photo / video capture & storage | Simulated / Missing |
+| Photo capture & storage (`StoredFile`) | Live |
+| Recommended spare parts (inventory item + qty) | Live |
+| Stock check + auto purchase request on shortfall | Live |
+| Procurement status on part lines (`pending_procurement`) | Live |
+| Assignment lock (`assignedInspectorId`) | Live |
+| Checklist / measurements JSON fields | Partial (schema only) |
 | Inspection PDF | Missing |
-| Immutable revision history | Missing |
+| Immutable revision history UI | Partial (version bump on admin revise) |
 
 ### 4.6 Estimates
 

@@ -1,10 +1,11 @@
-import { type ApiResponse } from "@/types";
+import { type ApiResponse, type PaginationMeta } from "@/types";
+import { buildPaginationMeta } from "@/utils/pagination";
 
 /** Send a standardized success response */
 export const success = <T>(
   message: string,
   data?: T,
-  meta?: ApiResponse["meta"]
+  meta?: PaginationMeta,
 ): ApiResponse<T> => ({
   success: true,
   message,
@@ -19,13 +20,5 @@ export const failure = (message: string): ApiResponse<null> => ({
   data: null,
 });
 
-/** Calculate pagination meta */
-export const paginate = (
-  total: number,
-  page: number,
-  limit: number
-): ApiResponse["meta"] => ({
-  total,
-  page,
-  limit,
-});
+/** Calculate pagination meta (legacy alias) */
+export const paginate = buildPaginationMeta;

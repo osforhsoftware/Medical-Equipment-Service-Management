@@ -2,6 +2,7 @@ import { PrismaClient, type UserRole } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 import path from "path";
+import { DEFAULT_TAXONOMY_TERMS, TAXONOMY_TYPES } from "../src/config/taxonomyDefaults";
 
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
@@ -30,6 +31,26 @@ async function main() {
     update: { name: "MedTech Services Inc." },
     create: { id: TENANT_ID, name: "MedTech Services Inc." },
   });
+
+  for (const type of TAXONOMY_TYPES) {
+    for (const term of DEFAULT_TAXONOMY_TERMS[type]) {
+      const existing = await prisma.taxonomyTerm.findFirst({
+        where: { tenantId: TENANT_ID, type, slug: term.slug },
+      });
+      if (existing) continue;
+      await prisma.taxonomyTerm.create({
+        data: {
+          tenantId: TENANT_ID,
+          type,
+          name: term.name,
+          slug: term.slug,
+          sortOrder: term.sortOrder,
+          isActive: true,
+          isSystem: true,
+        },
+      });
+    }
+  }
 
   // ── Branches ──────────────────────────────────────────────────────────────
   const branchDefs = [
@@ -243,7 +264,7 @@ async function main() {
         Equipment: ["admin", "coordinator", "inspector", "engineer", "inventory"],
         "Service Requests": ["admin", "coordinator", "inspector", "engineer"],
         Inspections: ["admin", "coordinator", "inspector"],
-        Estimates: ["admin", "coordinator", "estimator", "billing"],
+        Estimates: ["admin", "coordinator", "estimator", "billing", "inspector", "engineer"],
         "Service Jobs": ["admin", "coordinator", "engineer"],
         Inventory: ["admin", "inventory", "engineer"],
         Suppliers: ["admin", "inventory"],
@@ -255,7 +276,6 @@ async function main() {
         Notifications: ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
         "QR Tracking": ["admin", "coordinator", "inspector", "engineer", "inventory"],
         "Audit Logs": ["admin"],
-        Branches: ["admin"],
         Users: ["admin"],
         Settings: ["admin"],
       },
@@ -296,7 +316,9 @@ async function main() {
       contactPerson: "Dr. Rachel Adams",
       email: "rachel.adams@citygen.example",
       phone: "555-1001",
+      address: "100 Hospital Way",
       city: "New York",
+      country: "United States",
       branchKey: "hq" as const,
     },
     {
@@ -306,7 +328,9 @@ async function main() {
       contactPerson: "Tom Bradley",
       email: "tom.bradley@sunrise.example",
       phone: "555-1002",
+      address: "42 Sunrise Blvd",
       city: "Brooklyn",
+      country: "United States",
       branchKey: "hq" as const,
     },
     {
@@ -316,7 +340,9 @@ async function main() {
       contactPerson: "Linda Cho",
       email: "linda.cho@pacificdx.example",
       phone: "555-1003",
+      address: "900 Pacific Ave",
       city: "Los Angeles",
+      country: "United States",
       branchKey: "west" as const,
     },
     {
@@ -326,7 +352,9 @@ async function main() {
       contactPerson: "Dr. Omar Hassan",
       email: "omar.hassan@mri.example",
       phone: "555-1004",
+      address: "55 Research Park Dr",
       city: "Chicago",
+      country: "United States",
       branchKey: "midwest" as const,
     },
     {
@@ -336,7 +364,9 @@ async function main() {
       contactPerson: "Dr. Nina Park",
       email: "nina.park@brightsmile.example",
       phone: "555-1005",
+      address: "12 Smile Lane",
       city: "Queens",
+      country: "United States",
       branchKey: "hq" as const,
     },
   ];
@@ -355,7 +385,9 @@ async function main() {
           contactPerson: c.contactPerson,
           email: c.email,
           phone: c.phone,
+          address: c.address,
           city: c.city,
+          country: c.country,
           branchId: branches[c.branchKey].id,
           status: "active",
         },
@@ -375,7 +407,7 @@ async function main() {
       name: "MRI Scanner",
       model: "Magnetom Vida",
       manufacturer: "Siemens",
-      category: "Imaging",
+      category: "imaging",
       serialNumber: "SN-MRI-88421",
       customerKey: "citygen",
       location: "Radiology Wing A",
@@ -390,7 +422,7 @@ async function main() {
       name: "CT Scanner",
       model: "Revolution Ascend",
       manufacturer: "GE Healthcare",
-      category: "Imaging",
+      category: "imaging",
       serialNumber: "SN-CT-55210",
       customerKey: "citygen",
       location: "Radiology Wing B",
@@ -405,7 +437,7 @@ async function main() {
       name: "Ultrasound System",
       model: "LOGIQ E10",
       manufacturer: "GE Healthcare",
-      category: "Imaging",
+      category: "imaging",
       serialNumber: "SN-US-11902",
       customerKey: "sunrise",
       location: "Exam Room 3",
@@ -450,7 +482,7 @@ async function main() {
       name: "Digital X-Ray",
       model: "DRX-Evolution",
       manufacturer: "Carestream",
-      category: "Imaging",
+      category: "imaging",
       serialNumber: "SN-XR-44088",
       customerKey: "midwest-research",
       location: "Imaging Suite 1",
@@ -801,7 +833,7 @@ async function main() {
         priority: r.priority,
         status: r.status,
         description: r.description,
-        createdBy: admin.id,
+        createdBy: admin.name,
         assignedTo: assignee?.id ?? null,
         assignedName: assignee?.name ?? null,
         slaDue: r.slaDue,
@@ -818,7 +850,7 @@ async function main() {
         priority: r.priority,
         status: r.status,
         description: r.description,
-        createdBy: admin.id,
+        createdBy: admin.name,
         assignedTo: assignee?.id ?? null,
         assignedName: assignee?.name ?? null,
         slaDue: r.slaDue,
@@ -1395,6 +1427,14 @@ async function main() {
           taxRate: 8,
           lineTotal: inv.amount,
         },
+      });
+    } else {
+      await prisma.invoiceLineItem.updateMany({
+        where: {
+          invoiceId: invoice.id,
+          description: { startsWith: "Service for JOB-" },
+        },
+        data: { description: `Service for ${job.reference}` },
       });
     }
 

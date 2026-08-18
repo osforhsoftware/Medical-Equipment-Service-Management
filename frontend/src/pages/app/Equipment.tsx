@@ -1,5 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { z } from "zod";
 import { HardDrive, Loader2, Plus, QrCode } from "lucide-react";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -21,47 +26,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { useBranch } from "@/context/BranchContext";
-import { ApiError } from "@/lib/api";
-import {
   api,
-  type BackendCustomer,
   type BackendEquipment,
 } from "@/lib/api";
-import { toast } from "@/hooks/use-toast";
-
-const EQUIPMENT_CATEGORIES = [
-  "Imaging",
-  "Life Support",
-  "Diagnostics",
-  "Laboratory",
-  "Surgical",
-  "Monitoring",
-  "Other",
-] as const;
-
-const AMC_OPTIONS = [
-  { value: "active", label: "Active" },
-  { value: "expiring", label: "Expiring" },
-  { value: "expired", label: "Expired" },
-  { value: "none", label: "None" },
-] as const;
-
-const CONDITION_OPTIONS = [
-  { value: "operational", label: "Operational" },
-  { value: "needsService", label: "Needs Service" },
-  { value: "down", label: "Down" },
-] as const;
-
-function formatCondition(condition: string) {
-  return condition === "needsService" ? "needs-service" : condition;
-}
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useListingUrlState } from "@/hooks/useListingUrlState";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
+import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
+import { EMPTY_PAGINATION_META } from "@/lib/listing";
+import { toast } from "@/lib/toast";
+import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
+import { userCanAccessModule } from "@/lib/userRoles";
+import { activeTerms, termLabel } from "@/lib/taxonomy";
+import { navItems } from "@/config/nav";
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "—";
@@ -90,93 +69,161 @@ type FormState = {
   category: string;
   serialNumber: string;
   customerId: string;
-  branchId: string;
   location: string;
   installDate: string;
   warrantyEnd: string;
-  amcStatus: string;
   condition: string;
   lastServiceDate: string;
 };
+
+const equipmentSchema = z.object({
+  assetTag: fieldRules.requiredString("Asset tag"),
+  name: fieldRules.requiredString("Equipment name"),
+  model: fieldRules.requiredString("Model"),
+  manufacturer: fieldRules.requiredString("Manufacturer"),
+  category: fieldRules.selectRequired("a category"),
+  serialNumber: fieldRules.requiredString("Serial number"),
+  customerId: fieldRules.selectRequired("a customer"),
+  location: fieldRules.requiredString("Location"),
+  installDate: fieldRules.requiredString("Install date"),
+  warrantyEnd: fieldRules.requiredString("Warranty end date"),
+  condition: fieldRules.selectRequired("a condition"),
+  lastServiceDate: fieldRules.optionalString(),
+});
 
 const emptyForm = (): FormState => ({
   assetTag: "",
   name: "",
   model: "",
   manufacturer: "",
-  category: "Imaging",
+  category: "",
   serialNumber: "",
   customerId: "",
-  branchId: "",
   location: "",
   installDate: todayInputValue(),
   warrantyEnd: defaultWarrantyEnd(),
-  amcStatus: "none",
-  condition: "operational",
+  condition: "",
   lastServiceDate: "",
 });
 
 export default function EquipmentPage() {
-  const { branchId } = useBranch();
-  const [equipment, setEquipment] = useState<BackendEquipment[]>([]);
-  const [customers, setCustomers] = useState<BackendCustomer[]>([]);
-  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const { rbacMatrix } = useSettings();
+  const canManageMasterData = Boolean(
+    user && userCanAccessModule(
+      user,
+      "Master Data",
+      rbacMatrix,
+      navItems.find((item) => item.label === "Master Data")?.roles,
+    ),
+  );
+  const {
+    search,
+    setSearch,
+    filters,
+    setFilter,
+    listParams,
+    setPage,
+    setLimit,
+  } = useListingUrlState({ filterKeys: ["condition", "customerId", "category"] });
+
+  const debouncedSearch = useDebouncedValue(search);
+  const queryParams = useMemo(
+    () => ({ ...listParams, search: debouncedSearch || undefined }),
+    [listParams, debouncedSearch],
+  );
+
+  const equipmentQuery = usePaginatedQuery({
+    queryKey: "equipment",
+    params: queryParams,
+    queryFn: (params) => api.listEquipment(params),
+  });
+
+  const customersQuery = useQuery({
+    queryKey: ["customers", "options"],
+    queryFn: () => api.listCustomersOptions(),
+    staleTime: 60_000,
+  });
+
+  const categoriesQuery = useQuery({
+    queryKey: ["taxonomy", "equipment_category"],
+    queryFn: () => api.listTaxonomy({ type: "equipment_category" }),
+    staleTime: 30_000,
+  });
+
+  const conditionsQuery = useQuery({
+    queryKey: ["taxonomy", "equipment_condition"],
+    queryFn: () => api.listTaxonomy({ type: "equipment_condition" }),
+    staleTime: 30_000,
+  });
+
+  const equipment = equipmentQuery.data?.data ?? [];
+  const pagination = equipmentQuery.data?.meta ?? EMPTY_PAGINATION_META;
+  const customers = (customersQuery.data ?? []).filter((c) => c.status === "active");
+  const categories = categoriesQuery.data ?? [];
+  const conditions = conditionsQuery.data ?? [];
+  const activeCategories = activeTerms(categories);
+  const activeConditions = activeTerms(conditions);
+
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [selected, setSelected] = useState<BackendEquipment | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const {
+    errors,
+    shouldShow,
+    reset: resetValidation,
+    validateAll,
+    handleBlur,
+    handleChange,
+    applyApiErrors,
+    clearError,
+  } = useFormValidation({
+    fieldOrder: [
+      "assetTag",
+      "serialNumber",
+      "name",
+      "manufacturer",
+      "model",
+      "category",
+      "customerId",
+      "location",
+      "installDate",
+      "warrantyEnd",
+      "condition",
+    ],
+    schema: equipmentSchema,
+  });
 
-  const loadEquipment = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await api.listEquipment({ branchId });
-      setEquipment(data);
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load equipment";
-      toast({ title: "Error", description: message, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  }, [branchId]);
+  const loadEquipment = () => void queryClient.invalidateQueries({ queryKey: ["equipment"] });
 
-  const loadCustomers = useCallback(async () => {
-    try {
-      const data = await api.listCustomers(branchId);
-      setCustomers(data.filter((c) => c.status === "active"));
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load customers";
-      toast({ title: "Error", description: message, variant: "destructive" });
-    }
-  }, [branchId]);
-
-  useEffect(() => {
-    void loadEquipment();
-  }, [loadEquipment]);
-
-  useEffect(() => {
-    void loadCustomers();
-  }, [loadCustomers]);
+  const defaultCategory = activeCategories.find((t) => t.slug === "imaging")?.slug ?? activeCategories[0]?.slug ?? "";
+  const defaultCondition = activeConditions.find((t) => t.slug === "operational")?.slug ?? activeConditions[0]?.slug ?? "";
 
   const openCreate = () => {
     const firstCustomer = customers[0];
     setForm({
       ...emptyForm(),
       customerId: firstCustomer?.id ?? "",
-      branchId: firstCustomer?.branchId ?? (branchId !== "all" ? branchId : ""),
+      category: defaultCategory,
+      condition: defaultCondition,
     });
+    resetValidation();
     setDialogOpen(true);
   };
 
   const onCustomerChange = (customerId: string) => {
-    const customer = customers.find((c) => c.id === customerId);
-    setForm((prev) => ({
-      ...prev,
-      customerId,
-      branchId: customer?.branchId ?? prev.branchId,
-    }));
+    const next = { ...form, customerId };
+    setForm(next);
+    clearError("customerId");
+    handleChange("customerId", next);
   };
 
   const saveEquipment = async () => {
+    if (!validateAll(form, undefined, dialogRef.current)) return;
+
     setSaving(true);
     try {
       await api.createEquipment({
@@ -187,11 +234,9 @@ export default function EquipmentPage() {
         category: form.category,
         serialNumber: form.serialNumber.trim(),
         customerId: form.customerId,
-        branchId: form.branchId || undefined,
         location: form.location.trim(),
         installDate: form.installDate,
         warrantyEnd: form.warrantyEnd,
-        amcStatus: form.amcStatus,
         condition: form.condition,
         ...(form.lastServiceDate ? { lastServiceDate: form.lastServiceDate } : {}),
       });
@@ -200,14 +245,12 @@ export default function EquipmentPage() {
         description: `${form.name.trim()} (${form.assetTag.trim()}) was added successfully.`,
       });
       setDialogOpen(false);
-      await loadEquipment();
-      await loadCustomers();
-    } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.errors?.join(", ") || err.message
-          : "Unable to register equipment";
-      toast({ title: "Save failed", description: message, variant: "destructive" });
+      resetValidation();
+      await queryClient.invalidateQueries({ queryKey: ["equipment"] });
+      await queryClient.invalidateQueries({ queryKey: ["customers", "options"] });    } catch (err) {
+      if (!applyApiErrors(err, dialogRef.current)) {
+        toast.apiError(err, { fallback: "Unable to register equipment" });
+      }
     } finally {
       setSaving(false);
     }
@@ -243,7 +286,7 @@ export default function EquipmentPage() {
     {
       key: "category",
       header: "Category",
-      render: (e) => <span className="text-sm text-muted-foreground">{e.category}</span>,
+      render: (e) => <span className="text-sm text-muted-foreground">{termLabel(categories, e.category)}</span>,
     },
     {
       key: "location",
@@ -253,12 +296,7 @@ export default function EquipmentPage() {
     {
       key: "condition",
       header: "Condition",
-      render: (e) => <StatusBadge status={formatCondition(e.condition)} />,
-    },
-    {
-      key: "amcStatus",
-      header: "AMC",
-      render: (e) => <StatusBadge status={e.amcStatus} />,
+      render: (e) => <StatusBadge status={e.condition} label={termLabel(conditions, e.condition)} />,
     },
     {
       key: "lastServiceDate",
@@ -274,11 +312,8 @@ export default function EquipmentPage() {
     [customers],
   );
 
-  const categoryFilterOptions = useMemo(() => {
-    const fromData = [...new Set(equipment.map((e) => e.category))];
-    const merged = [...new Set([...EQUIPMENT_CATEGORIES, ...fromData])];
-    return merged.map((c) => ({ label: c, value: c }));
-  }, [equipment]);
+  const categoryFilterOptions = categories.map((c) => ({ label: c.name, value: c.slug }));
+  const conditionFilterOptions = conditions.map((c) => ({ label: c.name, value: c.slug }));
 
   return (
     <div className="space-y-6">
@@ -296,155 +331,214 @@ export default function EquipmentPage() {
         }
       />
 
-      {loading ? (
-        <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" /> Loading equipment…
-        </div>
-      ) : (
-        <DataTable
-          data={equipment}
-          columns={columns}
-          searchKeys={["name", "model", "manufacturer", "assetTag", "serialNumber", "customerName", "category", "location"]}
-          searchPlaceholder="Search by name, asset tag, serial, customer…"
-          emptyMessage="No equipment registered yet. Register your first device to get started."
-          filters={[
-            {
-              label: "Condition",
-              options: CONDITION_OPTIONS.map((o) => ({ label: o.label, value: o.value })),
-              predicate: (e, v) => e.condition === v,
-            },
-            {
-              label: "AMC",
-              options: AMC_OPTIONS.map((o) => ({ label: o.label, value: o.value })),
-              predicate: (e, v) => e.amcStatus === v,
-            },
-            ...(customerFilterOptions.length > 0
-              ? [
-                  {
-                    label: "Customer",
-                    options: customerFilterOptions,
-                    predicate: (e: BackendEquipment, v: string) => e.customerId === v,
-                  },
-                ]
-              : []),
-            {
-              label: "Category",
-              options: categoryFilterOptions,
-              predicate: (e, v) => e.category === v,
-            },
-          ]}
-          onRowClick={setSelected}
-        />
-      )}
-
-      <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-md">
-          {selected && (
-            <>
-              <SheetHeader>
-                <div className="flex items-center gap-2">
-                  <SheetTitle>{selected.name}</SheetTitle>
-                  <StatusBadge status={formatCondition(selected.condition)} />
-                </div>
-                <SheetDescription>
-                  {selected.assetTag} · {selected.customerName}
-                </SheetDescription>
-              </SheetHeader>
-              <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                <Info label="Manufacturer" value={selected.manufacturer} />
-                <Info label="Model" value={selected.model} />
-                <Info label="Category" value={selected.category} />
-                <Info label="Serial no." value={selected.serialNumber} />
-                <Info label="Location" value={selected.location} />
-                <Info label="AMC" value={selected.amcStatus} />
-                <Info label="Installed" value={formatDate(selected.installDate)} />
-                <Info label="Warranty ends" value={formatDate(selected.warrantyEnd)} />
-                <Info label="Last service" value={formatDate(selected.lastServiceDate)} />
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
-
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DataTable
+        mode="server"
+        data={equipment}
+        columns={columns}
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search by name, asset tag, serial, customer…"
+        emptyMessage="No equipment found."
+        emptyHint="Try changing your search or filters."
+        filterValues={filters}
+        onFilterChange={setFilter}
+        filters={[
+          {
+            key: "condition",
+            label: "Condition",
+            options: conditionFilterOptions,
+          },
+          ...(customerFilterOptions.length > 0
+            ? [{
+                key: "customerId",
+                label: "Customer",
+                options: customerFilterOptions,
+              }]
+            : []),
+          {
+            key: "category",
+            label: "Category",
+            options: categoryFilterOptions,
+          },
+        ]}
+        pagination={pagination}
+        onPageChange={setPage}
+        onLimitChange={setLimit}
+        loading={equipmentQuery.isLoading}
+        isFetching={equipmentQuery.isFetching}
+        error={equipmentQuery.error as Error | null}
+        onRetry={() => loadEquipment()}
+        onRowClick={(e) => navigate(`/app/equipment/${e.id}`)}
+      />
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetValidation(); setDialogOpen(open); }}>
+        <DialogContent ref={dialogRef} className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <HardDrive className="h-5 w-5" /> Register Equipment
             </DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4 py-2">
+          <form
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void saveEquipment();
+            }}
+            className="grid gap-4 py-2"
+          >
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="asset-tag">Asset tag (QR)</Label>
+              <div className="grid gap-2" data-field="assetTag">
+                <Label htmlFor="asset-tag" className={shouldShow("assetTag") ? "text-destructive" : undefined}>
+                  Asset tag (QR)
+                  <RequiredMark />
+                </Label>
                 <Input
                   id="asset-tag"
                   value={form.assetTag}
-                  onChange={(e) => setForm({ ...form, assetTag: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, assetTag: e.target.value };
+                    setForm(next);
+                    handleChange("assetTag", next);
+                  }}
+                  onBlur={() => handleBlur("assetTag", form)}
                   placeholder="MED-AX-2207"
-                  className="font-mono"
+                  className={fieldErrorClass(shouldShow("assetTag"), "font-mono")}
+                  {...fieldAria("assetTag", shouldShow("assetTag") ? errors.assetTag : null)}
                 />
+                {shouldShow("assetTag") && <FormFieldError field="assetTag" message={errors.assetTag} />}
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="serial-number">Serial number</Label>
+              <div className="grid gap-2" data-field="serialNumber">
+                <Label htmlFor="serial-number" className={shouldShow("serialNumber") ? "text-destructive" : undefined}>
+                  Serial number
+                  <RequiredMark />
+                </Label>
                 <Input
                   id="serial-number"
                   value={form.serialNumber}
-                  onChange={(e) => setForm({ ...form, serialNumber: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, serialNumber: e.target.value };
+                    setForm(next);
+                    handleChange("serialNumber", next);
+                  }}
+                  onBlur={() => handleBlur("serialNumber", form)}
                   placeholder="SN-MRI-99201"
-                  className="font-mono"
+                  className={fieldErrorClass(shouldShow("serialNumber"), "font-mono")}
+                  {...fieldAria("serialNumber", shouldShow("serialNumber") ? errors.serialNumber : null)}
                 />
+                {shouldShow("serialNumber") && <FormFieldError field="serialNumber" message={errors.serialNumber} />}
               </div>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="equipment-name">Equipment name</Label>
+            <div className="grid gap-2" data-field="name">
+              <Label htmlFor="equipment-name" className={shouldShow("name") ? "text-destructive" : undefined}>
+                Equipment name
+                <RequiredMark />
+              </Label>
               <Input
                 id="equipment-name"
                 value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onChange={(e) => {
+                  const next = { ...form, name: e.target.value };
+                  setForm(next);
+                  handleChange("name", next);
+                }}
+                onBlur={() => handleBlur("name", form)}
                 placeholder="MRI Scanner"
+                className={fieldErrorClass(shouldShow("name"))}
+                {...fieldAria("name", shouldShow("name") ? errors.name : null)}
               />
+              {shouldShow("name") && <FormFieldError field="name" message={errors.name} />}
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="manufacturer">Manufacturer</Label>
+              <div className="grid gap-2" data-field="manufacturer">
+                <Label htmlFor="manufacturer" className={shouldShow("manufacturer") ? "text-destructive" : undefined}>
+                  Manufacturer
+                  <RequiredMark />
+                </Label>
                 <Input
                   id="manufacturer"
                   value={form.manufacturer}
-                  onChange={(e) => setForm({ ...form, manufacturer: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, manufacturer: e.target.value };
+                    setForm(next);
+                    handleChange("manufacturer", next);
+                  }}
+                  onBlur={() => handleBlur("manufacturer", form)}
                   placeholder="Siemens"
+                  className={fieldErrorClass(shouldShow("manufacturer"))}
+                  {...fieldAria("manufacturer", shouldShow("manufacturer") ? errors.manufacturer : null)}
                 />
+                {shouldShow("manufacturer") && <FormFieldError field="manufacturer" message={errors.manufacturer} />}
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="model">Model</Label>
+              <div className="grid gap-2" data-field="model">
+                <Label htmlFor="model" className={shouldShow("model") ? "text-destructive" : undefined}>
+                  Model
+                  <RequiredMark />
+                </Label>
                 <Input
                   id="model"
                   value={form.model}
-                  onChange={(e) => setForm({ ...form, model: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, model: e.target.value };
+                    setForm(next);
+                    handleChange("model", next);
+                  }}
+                  onBlur={() => handleBlur("model", form)}
                   placeholder="Magnetom Vida"
+                  className={fieldErrorClass(shouldShow("model"))}
+                  {...fieldAria("model", shouldShow("model") ? errors.model : null)}
                 />
+                {shouldShow("model") && <FormFieldError field="model" message={errors.model} />}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Category</Label>
-                <Select value={form.category} onValueChange={(value) => setForm({ ...form, category: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
+              <div className="grid gap-2" data-field="category">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className={shouldShow("category") ? "text-destructive" : undefined}>
+                    Category
+                    <RequiredMark />
+                  </Label>
+                  {canManageMasterData ? (
+                    <Link to="/app/master-data?type=equipment_category" className="text-xs text-primary hover:underline">
+                      Manage
+                    </Link>
+                  ) : null}
+                </div>
+                <Select
+                  value={form.category}
+                  onValueChange={(value) => {
+                    const next = { ...form, category: value };
+                    setForm(next);
+                    clearError("category");
+                    handleChange("category", next);
+                  }}
+                >
+                  <SelectTrigger
+                    id="category"
+                    className={fieldErrorClass(shouldShow("category"))}
+                    {...fieldAria("category", shouldShow("category") ? errors.category : null)}
+                  >
+                    <SelectValue placeholder="Select category" />
                   </SelectTrigger>
                   <SelectContent>
-                    {EQUIPMENT_CATEGORIES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
+                    {activeCategories.map((c) => (
+                      <SelectItem key={c.id} value={c.slug}>
+                        {c.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {shouldShow("category") && <FormFieldError field="category" message={errors.category} />}
               </div>
-              <div className="grid gap-2">
-                <Label>Customer</Label>
+              <div className="grid gap-2" data-field="customerId">
+                <Label className={shouldShow("customerId") ? "text-destructive" : undefined}>
+                  Customer
+                  <RequiredMark />
+                </Label>
                 <Select value={form.customerId} onValueChange={onCustomerChange}>
-                  <SelectTrigger>
+                  <SelectTrigger
+                    id="customerId"
+                    className={fieldErrorClass(shouldShow("customerId"))}
+                    {...fieldAria("customerId", shouldShow("customerId") ? errors.customerId : null)}
+                  >
                     <SelectValue placeholder="Select customer" />
                   </SelectTrigger>
                   <SelectContent>
@@ -455,67 +549,102 @@ export default function EquipmentPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                {shouldShow("customerId") && <FormFieldError field="customerId" message={errors.customerId} />}
               </div>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="location">Location at site</Label>
+            <div className="grid gap-2" data-field="location">
+              <Label htmlFor="location" className={shouldShow("location") ? "text-destructive" : undefined}>
+                Location at site
+                <RequiredMark />
+              </Label>
               <Input
                 id="location"
                 value={form.location}
-                onChange={(e) => setForm({ ...form, location: e.target.value })}
+                onChange={(e) => {
+                  const next = { ...form, location: e.target.value };
+                  setForm(next);
+                  handleChange("location", next);
+                }}
+                onBlur={() => handleBlur("location", form)}
                 placeholder="Radiology Wing 2"
+                className={fieldErrorClass(shouldShow("location"))}
+                {...fieldAria("location", shouldShow("location") ? errors.location : null)}
               />
+              {shouldShow("location") && <FormFieldError field="location" message={errors.location} />}
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="install-date">Install date</Label>
+              <div className="grid gap-2" data-field="installDate">
+                <Label htmlFor="install-date" className={shouldShow("installDate") ? "text-destructive" : undefined}>
+                  Install date
+                  <RequiredMark />
+                </Label>
                 <Input
                   id="install-date"
                   type="date"
                   value={form.installDate}
-                  onChange={(e) => setForm({ ...form, installDate: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, installDate: e.target.value };
+                    setForm(next);
+                    handleChange("installDate", next);
+                  }}
+                  onBlur={() => handleBlur("installDate", form)}
+                  className={fieldErrorClass(shouldShow("installDate"))}
+                  {...fieldAria("installDate", shouldShow("installDate") ? errors.installDate : null)}
                 />
+                {shouldShow("installDate") && <FormFieldError field="installDate" message={errors.installDate} />}
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="warranty-end">Warranty end</Label>
+              <div className="grid gap-2" data-field="warrantyEnd">
+                <Label htmlFor="warranty-end" className={shouldShow("warrantyEnd") ? "text-destructive" : undefined}>
+                  Warranty end
+                  <RequiredMark />
+                </Label>
                 <Input
                   id="warranty-end"
                   type="date"
                   value={form.warrantyEnd}
-                  onChange={(e) => setForm({ ...form, warrantyEnd: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, warrantyEnd: e.target.value };
+                    setForm(next);
+                    handleChange("warrantyEnd", next);
+                  }}
+                  onBlur={() => handleBlur("warrantyEnd", form)}
+                  className={fieldErrorClass(shouldShow("warrantyEnd"))}
+                  {...fieldAria("warrantyEnd", shouldShow("warrantyEnd") ? errors.warrantyEnd : null)}
                 />
+                {shouldShow("warrantyEnd") && <FormFieldError field="warrantyEnd" message={errors.warrantyEnd} />}
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="grid gap-2">
-                <Label>Condition</Label>
-                <Select value={form.condition} onValueChange={(value) => setForm({ ...form, condition: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2" data-field="condition">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className={shouldShow("condition") ? "text-destructive" : undefined}>
+                    Condition
+                    <RequiredMark />
+                  </Label>
+                  {canManageMasterData ? (
+                    <Link to="/app/master-data?type=equipment_condition" className="text-xs text-primary hover:underline">
+                      Manage
+                    </Link>
+                  ) : null}
+                </div>
+                <Select value={form.condition} onValueChange={(value) => {
+                  const next = { ...form, condition: value };
+                  setForm(next);
+                  clearError("condition");
+                  handleChange("condition", next);
+                }}>
+                  <SelectTrigger className={fieldErrorClass(shouldShow("condition"))}>
+                    <SelectValue placeholder="Select condition" />
                   </SelectTrigger>
                   <SelectContent>
-                    {CONDITION_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
+                    {activeConditions.map((o) => (
+                      <SelectItem key={o.id} value={o.slug}>
+                        {o.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>AMC status</Label>
-                <Select value={form.amcStatus} onValueChange={(value) => setForm({ ...form, amcStatus: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AMC_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {shouldShow("condition") && <FormFieldError field="condition" message={errors.condition} />}
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="last-service">Last service (optional)</Label>
@@ -527,30 +656,18 @@ export default function EquipmentPage() {
                 />
               </div>
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={saveEquipment}
-              disabled={saving || !form.customerId || !form.assetTag.trim() || !form.name.trim()}
-            >
-              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Register equipment
-            </Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Register equipment
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border p-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-medium capitalize">{value}</p>
     </div>
   );
 }

@@ -1,25 +1,51 @@
-import { useEffect, useState } from "react";
-import { FolderKanban, Loader2 } from "lucide-react";
+import { useMemo } from "react";
+import { FolderKanban } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Progress } from "@/components/ui/progress";
-import { ApiError, api, type BackendServiceJob } from "@/lib/api";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useListingUrlState } from "@/hooks/useListingUrlState";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
+import { api, type BackendServiceJob } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { EMPTY_PAGINATION_META } from "@/lib/listing";
+
+const JOB_STATUS_FILTERS = [
+  { label: "Scheduled", value: "scheduled" },
+  { label: "In Progress", value: "inProgress" },
+  { label: "Parts Pending", value: "partsPending" },
+  { label: "Review", value: "review" },
+  { label: "Completed", value: "completed" },
+];
 
 export default function Projects() {
   const navigate = useNavigate();
-  const [jobs, setJobs] = useState<BackendServiceJob[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    search,
+    setSearch,
+    filters,
+    setFilter,
+    listParams,
+    setPage,
+    setLimit,
+  } = useListingUrlState({ filterKeys: ["status"] });
 
-  useEffect(() => {
-    void api.listJobs()
-      .then(setJobs)
-      .catch((error) => toast({ title: "Unable to load projects", description: error instanceof ApiError ? error.message : "Request failed", variant: "destructive" }))
-      .finally(() => setLoading(false));
-  }, []);
+  const debouncedSearch = useDebouncedValue(search);
+  const queryParams = useMemo(
+    () => ({ ...listParams, search: debouncedSearch || undefined }),
+    [listParams, debouncedSearch],
+  );
+
+  const jobsQuery = usePaginatedQuery({
+    queryKey: "jobs",
+    params: queryParams,
+    queryFn: (params) => api.listJobs(params),
+  });
+
+  const jobs = jobsQuery.data?.data ?? [];
+  const pagination = jobsQuery.data?.meta ?? EMPTY_PAGINATION_META;
 
   const columns: Column<BackendServiceJob>[] = [
     { key: "reference", header: "Project", render: (job) => <div className="flex items-center gap-2"><FolderKanban className="h-4 w-4 text-primary" /><div><p className="font-mono text-sm font-medium">{job.reference}</p><p className="text-xs text-muted-foreground">{job.requestRef}</p></div></div> },
@@ -33,9 +59,27 @@ export default function Projects() {
   return (
     <div className="space-y-6">
       <PageHeader title="Projects" description="Job-centred delivery view for staffing, work logs, extras and project expenses." />
-      {loading ? <div className="flex justify-center gap-2 py-16 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /> Loading projects…</div> : (
-        <DataTable data={jobs} columns={columns} searchKeys={["reference", "requestRef", "customerName", "equipmentName", "engineer"]} searchPlaceholder="Search projects…" emptyMessage="No service projects found." onRowClick={(job) => navigate(`/app/projects/${job.id}`)} />
-      )}
+      <DataTable
+        mode="server"
+        data={jobs}
+        columns={columns}
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search projects…"
+        emptyMessage="No service projects found."
+        emptyHint="Try changing your search or filters."
+        filterValues={filters}
+        onFilterChange={setFilter}
+        filters={[{ key: "status", label: "Status", options: JOB_STATUS_FILTERS }]}
+        pagination={pagination}
+        onPageChange={setPage}
+        onLimitChange={setLimit}
+        loading={jobsQuery.isLoading}
+        isFetching={jobsQuery.isFetching}
+        error={jobsQuery.error as Error | null}
+        onRetry={() => void jobsQuery.refetch()}
+        onRowClick={(job) => navigate(`/app/projects/${job.id}`)}
+      />
     </div>
   );
 }

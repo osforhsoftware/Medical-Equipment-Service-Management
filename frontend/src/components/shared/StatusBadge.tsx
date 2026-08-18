@@ -3,11 +3,11 @@ import { cn } from "@/lib/utils";
 type Tone = "success" | "warning" | "destructive" | "info" | "muted" | "accent";
 
 const toneClasses: Record<Tone, string> = {
-  success: "bg-success/12 text-success border-success/20",
-  warning: "bg-warning/15 text-warning-foreground border-warning/30",
-  destructive: "bg-destructive/12 text-destructive border-destructive/20",
-  info: "bg-info/12 text-info border-info/20",
-  accent: "bg-accent/12 text-accent border-accent/20",
+  success: "bg-[hsl(var(--success-light))] text-success border-success/15",
+  warning: "bg-[hsl(var(--warning-light))] text-warning-foreground border-warning/20",
+  destructive: "bg-destructive/10 text-destructive border-destructive/15",
+  info: "bg-[hsl(var(--info-light))] text-info border-info/15",
+  accent: "bg-primary-light text-primary border-primary/15",
   muted: "bg-muted text-muted-foreground border-border",
 };
 
@@ -32,16 +32,19 @@ const statusMap: Record<string, Tone> = {
   expired: "destructive",
   none: "muted",
   operational: "success",
+  needsService: "warning",
   "needs-service": "warning",
   down: "destructive",
   // estimates / invoices / po
   draft: "muted",
-  sent: "info",
+  pendingApproval: "warning",
   approved: "success",
+  sent: "info",
   rejected: "destructive",
   revision: "warning",
   paid: "success",
   overdue: "destructive",
+  closed: "muted",
   received: "success",
   partial: "warning",
   cancelled: "muted",
@@ -50,21 +53,31 @@ const statusMap: Record<string, Tone> = {
   scheduled: "info",
   "parts-pending": "warning",
   review: "accent",
+  verified: "success",
+  passed: "info",
 };
 
-export function StatusBadge({ status, className }: { status: string; className?: string }) {
-  const tone = statusMap[status] ?? "muted";
-  const label = status.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+export function StatusBadge({ status, label, className }: { status: string; label?: string; className?: string }) {
+  const normalized = status === "needsService" ? "needs-service" : status;
+  const tone = statusMap[normalized] ?? statusMap[status] ?? "muted";
+  const text = label ?? humanizeStatus(status);
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize",
+        "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium capitalize",
         toneClasses[tone],
         className,
       )}
     >
       <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-      {label}
+      {text}
     </span>
   );
+}
+
+function humanizeStatus(status: string) {
+  return status
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }

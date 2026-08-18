@@ -1,13 +1,14 @@
 import { inventoryRepository } from "@/repositories/inventory.repository";
 import { AppError } from "@/middleware/errorHandler";
 import { prisma } from "@/db/prisma";
+import { getDefaultBranchId } from "@/utils/defaultBranch";
 
 type CreateInventoryData = {
   sku: string;
   name: string;
   category: string;
   description?: string | null;
-  branchId: string;
+  branchId?: string;
   inStock?: number;
   reorderLevel?: number;
   unitCost?: number;
@@ -21,12 +22,29 @@ type CreateInventoryData = {
 };
 
 export class InventoryService {
-  async getAll(tenantId: string, branchId?: string) {
-    return prisma.inventoryItem.findMany({
-      where: { tenantId, ...(branchId && branchId !== "all" ? { branchId } : {}) },
+  private withAvailability<T extends { inStock: number; reserved: number }>(item: T) {
+    return {
+      ...item,
+      available: Math.max(0, item.inStock - item.reserved),
+    };
+  }
+
+  async getPaginated(tenantId: string, filters: import("@/repositories/inventory.repository").InventoryListFilters) {
+    const { data, total } = await inventoryRepository.findPaginated(tenantId, filters);
+    return {
+      data: data.map((item) => this.withAvailability(item)),
+      total,
+    };
+  }
+
+  async getAll(tenantId: string) {
+    const items = await prisma.inventoryItem.findMany({
+      where: { tenantId },
       include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
       orderBy: { name: "asc" },
+      take: 100,
     });
+    return items.map((item) => this.withAvailability(item));
   }
 
   async getLowStock(tenantId: string) {
@@ -39,11 +57,12 @@ export class InventoryService {
       include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
     });
     if (!item) throw new AppError("Inventory item not found", 404);
-    return item;
+    return this.withAvailability(item);
   }
 
   async create(tenantId: string, data: CreateInventoryData) {
     const { imageFileIds, ...rest } = data;
+    const branchId = rest.branchId || await getDefaultBranchId(tenantId);
     if (rest.supplierId) {
       const supplier = await prisma.supplier.findFirst({ where: { id: rest.supplierId, tenantId } });
       if (!supplier) throw new AppError("Supplier not found", 404);
@@ -57,7 +76,7 @@ export class InventoryService {
           name: rest.name,
           category: rest.category,
           description: rest.description ?? null,
-          branchId: rest.branchId,
+          branchId,
           inStock: rest.inStock ?? 0,
           reserved: 0,
           reorderLevel: rest.reorderLevel ?? 0,
@@ -83,10 +102,12 @@ export class InventoryService {
           })),
         });
       }
-      return tx.inventoryItem.findUniqueOrThrow({
-        where: { id: item.id },
-        include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
-      });
+      return this.withAvailability(
+        await tx.inventoryItem.findUniqueOrThrow({
+          where: { id: item.id },
+          include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
+        }),
+      );
     });
   }
 
@@ -137,10 +158,12 @@ export class InventoryService {
           });
         }
       }
-      return tx.inventoryItem.findUniqueOrThrow({
-        where: { id },
-        include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
-      });
+      return this.withAvailability(
+        await tx.inventoryItem.findUniqueOrThrow({
+          where: { id },
+          include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
+        }),
+      );
     });
   }
 

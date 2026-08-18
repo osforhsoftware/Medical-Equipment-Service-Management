@@ -1,12 +1,20 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { estimatesService } from "@/services/estimates.service";
+import { parseEstimateListQuery, sendPaginatedList } from "@/utils/listQuery";
 import { success } from "@/utils/response";
 
 export class EstimatesController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await estimatesService.getAll(req.tenantId!);
-      res.json(success("Estimates fetched successfully", data));
+      const query = parseEstimateListQuery(req);
+      const { data, total } = await estimatesService.getPaginated(req.tenantId!, {
+        status: query.status,
+        search: query.search,
+        skip: query.skip,
+        take: query.take,
+        orderBy: query.orderBy,
+      });
+      sendPaginatedList(res, "Estimates fetched successfully", data, total, query.page, query.limit);
     } catch (err) { next(err); }
   }
 

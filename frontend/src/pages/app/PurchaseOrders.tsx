@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { z } from "zod";
 import { Plus, ShoppingCart, Loader2 } from "lucide-react";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,24 +27,52 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError } from "@/lib/api";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useListingUrlState } from "@/hooks/useListingUrlState";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { api, type BackendPurchaseOrder } from "@/lib/api";
 import { defaultDatePlusDays, formatDate, formatCurrency } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { EMPTY_PAGINATION_META } from "@/lib/listing";
+import { toast } from "@/lib/toast";
+
+const poSchema = z.object({
+  supplier: fieldRules.requiredString("Supplier"),
+  items: z.string().refine((v) => Number(v) >= 1, "Enter at least 1 line item."),
+  total: z.string().refine((v) => v.trim() !== "" && !Number.isNaN(Number(v)) && Number(v) >= 0, "Enter a valid total."),
+  expectedDate: fieldRules.requiredString("Expected date"),
+  status: fieldRules.requiredString("Status"),
+});
 
 export default function PurchaseOrders() {
-  const [orders, setOrders] = useState<BackendPurchaseOrder[]>([]);
-  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const {
+    search,
+    setSearch,
+    filters,
+    setFilter,
+    listParams,
+    setPage,
+    setLimit,
+  } = useListingUrlState({ filterKeys: ["status"] });
+
+  const debouncedSearch = useDebouncedValue(search);
+  const queryParams = useMemo(
+    () => ({ ...listParams, search: debouncedSearch || undefined }),
+    [listParams, debouncedSearch],
+  );
+
+  const ordersQuery = usePaginatedQuery({
+    queryKey: "purchase-orders",
+    params: queryParams,
+    queryFn: (params) => api.listPurchaseOrders(params),
+  });
+
+  const orders = ordersQuery.data?.data ?? [];
+  const pagination = ordersQuery.data?.meta ?? EMPTY_PAGINATION_META;
+
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [selected, setSelected] = useState<BackendPurchaseOrder | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     supplier: "",
@@ -46,25 +81,24 @@ export default function PurchaseOrders() {
     expectedDate: defaultDatePlusDays(7),
     status: "draft",
   });
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const {
+    errors,
+    shouldShow,
+    validateAll,
+    handleBlur,
+    handleChange,
+    applyApiErrors,
+    reset: resetValidation,
+  } = useFormValidation({
+    fieldOrder: ["supplier", "items", "total", "expectedDate"],
+    schema: poSchema,
+  });
 
-  const loadOrders = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await api.listPurchaseOrders();
-      setOrders(data);
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load purchase orders";
-      toast({ title: "Error", description: message, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadOrders();
-  }, [loadOrders]);
+  const loadOrders = () => void queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
 
   const saveOrder = async () => {
+    if (!validateAll(form, undefined, dialogRef.current)) return;
     setSaving(true);
     try {
       await api.createPurchaseOrder({
@@ -77,10 +111,12 @@ export default function PurchaseOrders() {
       toast({ title: "Purchase order created", description: "PO saved to the database." });
       setDialogOpen(false);
       setForm({ supplier: "", items: "1", total: "", expectedDate: defaultDatePlusDays(7), status: "draft" });
-      await loadOrders();
+      resetValidation();
+      await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
     } catch (err) {
-      const message = err instanceof ApiError ? err.errors?.join(", ") || err.message : "Unable to save PO";
-      toast({ title: "Save failed", description: message, variant: "destructive" });
+      if (!applyApiErrors(err, dialogRef.current)) {
+        toast.apiError(err, { fallback: "Unable to save PO" });
+      }
     } finally {
       setSaving(false);
     }
@@ -112,84 +148,132 @@ export default function PurchaseOrders() {
           title="Purchase Orders"
           description="Procurement of spare parts and consumables."
           actions={
-            <Button onClick={() => setDialogOpen(true)} variant="brand">
+            <Button onClick={() => { resetValidation(); setDialogOpen(true); }} variant="brand">
               <Plus className="mr-1 h-4 w-4" /> New PO
             </Button>
           }
         />
 
-        {loading ? (
-          <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" /> Loading purchase orders…
-          </div>
-        ) : (
-          <DataTable
-            data={orders}
-            columns={columns}
-            searchKeys={["reference", "supplier"]}
-            searchPlaceholder="Search purchase orders…"
-            emptyMessage="No purchase orders yet."
-            filters={[
-              {
-                label: "Status",
-                options: [
-                  { label: "Draft", value: "draft" },
-                  { label: "Sent", value: "sent" },
-                  { label: "Received", value: "received" },
-                  { label: "Partial", value: "partial" },
-                  { label: "Cancelled", value: "cancelled" },
-                ],
-                predicate: (p, v) => p.status === v,
-              },
-            ]}
-            onRowClick={setSelected}
-          />
-        )}
+        <DataTable
+          mode="server"
+          data={orders}
+          columns={columns}
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search purchase orders…"
+          emptyMessage="No purchase orders yet."
+          emptyHint="Try changing your search or filters."
+          filterValues={filters}
+          onFilterChange={setFilter}
+          filters={[
+            {
+              key: "status",
+              label: "Status",
+              options: [
+                { label: "Draft", value: "draft" },
+                { label: "Sent", value: "sent" },
+                { label: "Received", value: "received" },
+                { label: "Partial", value: "partial" },
+                { label: "Cancelled", value: "cancelled" },
+              ],
+            },
+          ]}
+          pagination={pagination}
+          onPageChange={setPage}
+          onLimitChange={setLimit}
+          loading={ordersQuery.isLoading}
+          isFetching={ordersQuery.isFetching}
+          error={ordersQuery.error as Error | null}
+          onRetry={() => loadOrders()}
+          onRowClick={(order) => navigate(`/app/purchase-orders/${order.id}`)}
+        />
 
-        <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-          <SheetContent className="sm:max-w-md">
-            {selected && (
-              <>
-                <SheetHeader>
-                  <div className="flex items-center gap-2">
-                    <SheetTitle>{selected.reference}</SheetTitle>
-                    <StatusBadge status={selected.status} />
-                  </div>
-                  <SheetDescription>{selected.supplier}</SheetDescription>
-                </SheetHeader>
-                <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                  <Info label="Items" value={String(selected.items)} />
-                  <Info label="Total" value={formatCurrency(selected.total)} />
-                  <Info label="Expected" value={formatDate(selected.expectedDate)} />
-                  <Info label="Created" value={formatDate(selected.createdAt)} />
-                </div>
-              </>
-            )}
-          </SheetContent>
-        </Sheet>
-
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetValidation(); setDialogOpen(open); }}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader><DialogTitle>New Purchase Order</DialogTitle></DialogHeader>
-            <div className="grid gap-4 py-2">
-              <div className="grid gap-2">
-                <Label htmlFor="supplier">Supplier</Label>
-                <Input id="supplier" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
+            <form noValidate onSubmit={(e) => { e.preventDefault(); void saveOrder(); }}>
+            <div ref={dialogRef} className="grid gap-4 py-2">
+              <div className="grid gap-2" data-field="supplier">
+                <Label htmlFor="supplier" className={shouldShow("supplier") ? "text-destructive" : undefined}>
+                  Supplier
+                  <RequiredMark />
+                </Label>
+                <Input
+                  id="supplier"
+                  name="supplier"
+                  value={form.supplier}
+                  className={fieldErrorClass(shouldShow("supplier"))}
+                  {...fieldAria("supplier", shouldShow("supplier") ? errors.supplier : null)}
+                  onChange={(e) => {
+                    const next = { ...form, supplier: e.target.value };
+                    setForm(next);
+                    handleChange("supplier", next);
+                  }}
+                  onBlur={() => handleBlur("supplier", form)}
+                />
+                {shouldShow("supplier") && <FormFieldError field="supplier" message={errors.supplier} />}
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="items">Line items</Label>
-                  <Input id="items" type="number" min={1} value={form.items} onChange={(e) => setForm({ ...form, items: e.target.value })} />
+                <div className="grid gap-2" data-field="items">
+                  <Label htmlFor="items" className={shouldShow("items") ? "text-destructive" : undefined}>Line items</Label>
+                  <Input
+                    id="items"
+                    name="items"
+                    type="number"
+                    min={1}
+                    value={form.items}
+                    className={fieldErrorClass(shouldShow("items"))}
+                    {...fieldAria("items", shouldShow("items") ? errors.items : null)}
+                    onChange={(e) => {
+                      const next = { ...form, items: e.target.value };
+                      setForm(next);
+                      handleChange("items", next);
+                    }}
+                    onBlur={() => handleBlur("items", form)}
+                  />
+                  {shouldShow("items") && <FormFieldError field="items" message={errors.items} />}
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="total">Total (₹)</Label>
-                  <Input id="total" type="number" min={0} value={form.total} onChange={(e) => setForm({ ...form, total: e.target.value })} />
+                <div className="grid gap-2" data-field="total">
+                  <Label htmlFor="total" className={shouldShow("total") ? "text-destructive" : undefined}>Total (₹)</Label>
+                  <Input
+                    id="total"
+                    name="total"
+                    type="number"
+                    min={0}
+                    value={form.total}
+                    className={fieldErrorClass(shouldShow("total"))}
+                    {...fieldAria("total", shouldShow("total") ? errors.total : null)}
+                    onChange={(e) => {
+                      const next = { ...form, total: e.target.value };
+                      setForm(next);
+                      handleChange("total", next);
+                    }}
+                    onBlur={() => handleBlur("total", form)}
+                  />
+                  {shouldShow("total") && <FormFieldError field="total" message={errors.total} />}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="expected">Expected date</Label>
-                  <Input id="expected" type="date" value={form.expectedDate} onChange={(e) => setForm({ ...form, expectedDate: e.target.value })} />
+                <div className="grid gap-2" data-field="expectedDate">
+                  <Label htmlFor="expected" className={shouldShow("expectedDate") ? "text-destructive" : undefined}>
+                    Expected date
+                    <RequiredMark />
+                  </Label>
+                  <Input
+                    id="expected"
+                    name="expectedDate"
+                    type="date"
+                    value={form.expectedDate}
+                    className={fieldErrorClass(shouldShow("expectedDate"))}
+                    {...fieldAria("expectedDate", shouldShow("expectedDate") ? errors.expectedDate : null)}
+                    onChange={(e) => {
+                      const next = { ...form, expectedDate: e.target.value };
+                      setForm(next);
+                      handleChange("expectedDate", next);
+                    }}
+                    onBlur={() => handleBlur("expectedDate", form)}
+                  />
+                  {shouldShow("expectedDate") && <FormFieldError field="expectedDate" message={errors.expectedDate} />}
                 </div>
                 <div className="grid gap-2">
                   <Label>Status</Label>
@@ -205,24 +289,16 @@ export default function PurchaseOrders() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={saveOrder} disabled={saving || !form.supplier.trim()}>
+              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button type="submit" disabled={saving}>
                 {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Create PO
               </Button>
             </DialogFooter>
+            </form>
           </DialogContent>
         </Dialog>
       </div>
     </RoleGuard>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border p-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-medium">{value}</p>
-    </div>
   );
 }

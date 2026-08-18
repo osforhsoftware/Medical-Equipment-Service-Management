@@ -1,12 +1,22 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { inventoryService } from "@/services/inventory.service";
+import { parseInventoryListQuery, sendPaginatedList } from "@/utils/listQuery";
 import { success } from "@/utils/response";
 
 export class InventoryController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await inventoryService.getAll(req.tenantId!, req.query.branchId as string);
-      res.json(success("Inventory fetched successfully", data));
+      const query = parseInventoryListQuery(req);
+      const { data, total } = await inventoryService.getPaginated(req.tenantId!, {
+        category: query.category,
+        stockStatus: query.stockStatus,
+        supplierId: query.supplierId,
+        search: query.search,
+        skip: query.skip,
+        take: query.take,
+        orderBy: query.orderBy,
+      });
+      sendPaginatedList(res, "Inventory fetched successfully", data, total, query.page, query.limit);
     } catch (err) { next(err); }
   }
 

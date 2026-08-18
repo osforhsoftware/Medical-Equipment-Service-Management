@@ -23,6 +23,16 @@ function normalizeRbac(raw: unknown): Record<string, string[]> {
   for (const key of Object.keys(DEFAULT_RBAC_MATRIX)) {
     if (Array.isArray(matrix[key])) merged[key] = matrix[key];
   }
+
+  const estimates = merged.Estimates ?? [];
+  const legacyEstimateRoles = ["admin", "coordinator", "estimator", "billing"];
+  const isLegacyEstimates =
+    estimates.length === legacyEstimateRoles.length &&
+    legacyEstimateRoles.every((role) => estimates.includes(role));
+  if (isLegacyEstimates) {
+    merged.Estimates = [...DEFAULT_RBAC_MATRIX.Estimates];
+  }
+
   return merged;
 }
 

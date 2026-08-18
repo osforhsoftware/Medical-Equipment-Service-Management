@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AppUser, Role } from "@/data/types";
 import { api, ApiError, getStoredUser, setStoredUser, type BackendUser } from "@/lib/api";
+import { userHasAnyRole } from "@/lib/userRoles";
 
 interface AuthState {
   user: AppUser | null;
@@ -22,6 +23,7 @@ function mapUser(user: BackendUser): AppUser {
     username: user.username,
     email: user.email,
     role: user.role as Role,
+    roles: user.roles?.length ? (user.roles as Role[]) : undefined,
     branchId: user.branchId ?? undefined,
     avatarColor: user.avatarColor,
     customerId: user.customerId ?? undefined,
@@ -73,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         persist(null);
       },
-      hasRole: (roles: Role[]) => (user ? roles.includes(user.role) : false),
+      hasRole: (roles: Role[]) => (user ? userHasAnyRole(user, roles) : false),
       refreshUser: async () => {
         const profile = await api.me();
         persist(mapUser(profile));

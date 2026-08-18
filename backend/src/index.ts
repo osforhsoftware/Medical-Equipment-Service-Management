@@ -7,7 +7,6 @@ import { auditMutation } from "@/middleware/audit";
 
 // Routes
 import authRoutes from "@/routes/auth.routes";
-import branchesRoutes from "@/routes/branches.routes";
 import customersRoutes from "@/routes/customers.routes";
 import equipmentRoutes from "@/routes/equipment.routes";
 import serviceRequestsRoutes from "@/routes/serviceRequests.routes";
@@ -27,6 +26,7 @@ import dashboardRoutes from "@/routes/dashboard.routes";
 import inspectionsRoutes from "@/routes/inspections.routes";
 import domainRoutes from "@/routes/domain.routes";
 import filesRoutes from "@/routes/files.routes";
+import taxonomyRoutes from "@/routes/taxonomy.routes";
 
 const app = express();
 
@@ -45,7 +45,6 @@ app.get("/api/health", (_req, res) => {
 // ── API Routes ────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/users", usersRoutes);
-app.use("/api/branches", branchesRoutes);
 app.use("/api/customers", customersRoutes);
 app.use("/api/equipment", equipmentRoutes);
 app.use("/api/service-requests", serviceRequestsRoutes);
@@ -65,6 +64,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/inspections", inspectionsRoutes);
 app.use("/api/domain", domainRoutes);
 app.use("/api/files", filesRoutes);
+app.use("/api/taxonomy", taxonomyRoutes);
 
 // ── 404 Catch-All ─────────────────────────────────────────────
 app.use((_req, res) => {
@@ -75,11 +75,11 @@ app.use((_req, res) => {
 app.use(errorHandler);
 
 // ── Start Server ──────────────────────────────────────────────
-app.listen(env.PORT, () => {
+app.listen(env.PORT, env.HOST, () => {
   console.log(`
 ╔════════════════════════════════════════════╗
 ║   MESMS Prisma API Server                  ║
-║   http://localhost:${env.PORT}/api/health        ║
+║   http://${env.HOST}:${env.PORT}/api/health        ║
 ║   Environment: ${env.NODE_ENV}                 ║
 ╚════════════════════════════════════════════╝
   `);

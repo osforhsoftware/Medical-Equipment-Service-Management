@@ -21,7 +21,7 @@ function cookieOptions(): CookieOptions {
   return {
     httpOnly: true,
     secure: env.NODE_ENV === "production",
-    sameSite: env.NODE_ENV === "production" ? "strict" : "lax",
+    sameSite: "lax",
     path: "/",
     maxAge: parseExpiresInMs(env.JWT_EXPIRES_IN),
   };
@@ -35,7 +35,7 @@ export function clearAuthCookie(res: Response): void {
   res.clearCookie(AUTH_COOKIE_NAME, {
     httpOnly: true,
     secure: env.NODE_ENV === "production",
-    sameSite: env.NODE_ENV === "production" ? "strict" : "lax",
+    sameSite: "lax",
     path: "/",
   });
 }

@@ -16,3 +16,6 @@ yarn-error.log
 .DS_Store
 .idea/
 .vscode/
+backend/storage/private/**
+!backend/storage/private/.gitkeep
+frontend/wellen.sql

@@ -1,4 +1,5 @@
 import { prisma } from "@/db/prisma";
+import { notificationsService } from "@/services/notifications.service";
 
 const CLOSED_REQUEST_STATUSES = ["completed", "invoiced"] as const;
 
@@ -67,32 +68,13 @@ function mapJobStatus(status: string) {
 }
 
 export class DashboardService {
-  async getOverview(tenantId: string, userId: string, role: string, branchId?: string) {
-    const scopedBranch = branchId && branchId !== "all" ? branchId : undefined;
+  async getOverview(tenantId: string, userId: string, role: string) {
     const staffRole = (role as StaffRole) || "admin";
 
-    const requestWhere = {
-      tenantId,
-      ...(scopedBranch ? { branchId: scopedBranch } : {}),
-    };
-    const inventoryWhere = {
-      tenantId,
-      ...(scopedBranch ? { branchId: scopedBranch } : {}),
-    };
+    const requestWhere = { tenantId };
+    const inventoryWhere = { tenantId };
 
-    const branchRequestRefs = scopedBranch
-      ? (
-          await prisma.serviceRequest.findMany({
-            where: requestWhere,
-            select: { reference: true },
-          })
-        ).map((r) => r.reference)
-      : null;
-
-    const jobScope = {
-      tenantId,
-      ...(branchRequestRefs ? { requestRef: { in: branchRequestRefs } } : {}),
-    };
+    const jobScope = { tenantId };
 
     const now = new Date();
     const todayStart = startOfDay(now);
@@ -112,7 +94,6 @@ export class DashboardService {
       paidInvoices,
       timelineEvents,
       auditLogs,
-      unreadNotifications,
       pendingEstimates,
       approvedEstimates,
       rejectedEstimates,
@@ -168,9 +149,7 @@ export class DashboardService {
         select: { total: true, issuedAt: true, status: true },
       }),
       prisma.timelineEvent.findMany({
-        where: scopedBranch
-          ? { request: { tenantId, branchId: scopedBranch } }
-          : { request: { tenantId } },
+        where: { request: { tenantId } },
         orderBy: { at: "desc" },
         take: 6,
         select: { id: true, action: true, actor: true, at: true },
@@ -180,9 +159,6 @@ export class DashboardService {
         orderBy: { createdAt: "desc" },
         take: 6,
         select: { id: true, action: true, actor: true, createdAt: true },
-      }),
-      prisma.notification.count({
-        where: { tenantId, read: false },
       }),
       prisma.estimate.count({
         where: { tenantId, status: { in: ["draft", "revision"] } },
@@ -254,6 +230,8 @@ export class DashboardService {
         },
       }),
     ]);
+
+    const unreadNotifications = await notificationsService.unreadCount(tenantId, userId, role);
 
     const lowStock = lowStockItems.filter((i) => i.inStock <= i.reorderLevel);
 

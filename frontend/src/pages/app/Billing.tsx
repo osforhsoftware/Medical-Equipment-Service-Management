@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import { AlertCircle, Clock, Download, IndianRupee, Loader2, Plus, Receipt } from "lucide-react";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -15,10 +18,27 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError } from "@/lib/api";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import { api, type BackendInvoice } from "@/lib/api";
 import { formatCurrency, formatCurrencyShort } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "@/lib/toast";
+
+const nonNegativeAmount = (label: string) =>
+  z.string().refine((v) => {
+    if (!v.trim()) return true;
+    const n = parseFloat(v);
+    return !Number.isNaN(n) && n >= 0;
+  }, `${label} cannot be negative.`);
+
+const invoiceSchema = z.object({
+  reference: fieldRules.requiredString("Reference"),
+  customerName: fieldRules.requiredString("Customer name"),
+  jobRef: fieldRules.optionalString(),
+  amount: nonNegativeAmount("Amount"),
+  tax: nonNegativeAmount("Tax"),
+  dueAt: fieldRules.requiredString("Due date"),
+});
 
 type FormState = {
   reference: string;
@@ -44,6 +64,20 @@ export default function Billing() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  const {
+    errors,
+    shouldShow,
+    reset: resetValidation,
+    validateAll,
+    handleBlur,
+    handleChange,
+    applyApiErrors,
+  } = useFormValidation({
+    fieldOrder: ["reference", "customerName", "jobRef", "amount", "tax", "dueAt"],
+    schema: invoiceSchema,
+  });
 
   const load = async () => {
     setLoading(true);
@@ -51,8 +85,7 @@ export default function Billing() {
       const data = await api.listInvoices();
       setInvoices(data);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Failed to load invoices";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      toast.apiError(err, { fallback: "Failed to load invoices" });
     } finally {
       setLoading(false);
     }
@@ -60,28 +93,38 @@ export default function Billing() {
 
   useEffect(() => { void load(); }, []);
 
+  const openCreate = () => {
+    setForm(emptyForm);
+    resetValidation();
+    setDialogOpen(true);
+  };
+
   const save = async () => {
+    if (!validateAll(form, undefined, dialogRef.current)) return;
+
     setSaving(true);
     const amount = parseFloat(form.amount) || 0;
     const tax = parseFloat(form.tax) || 0;
     try {
       await api.createInvoice({
-        reference: form.reference,
-        customerName: form.customerName,
-        jobRef: form.jobRef,
+        reference: form.reference.trim(),
+        customerName: form.customerName.trim(),
+        jobRef: form.jobRef.trim(),
         amount,
         tax,
         total: amount + tax,
         status: "draft",
         dueAt: new Date(form.dueAt).toISOString(),
       });
-      toast({ title: "Invoice created", description: `${form.reference} saved as draft.` });
+      toast({ title: "Invoice created", description: `${form.reference.trim()} saved as draft.` });
       setDialogOpen(false);
       setForm(emptyForm);
+      resetValidation();
       await load();
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Unable to save invoice";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      if (!applyApiErrors(err, dialogRef.current)) {
+        toast.apiError(err, { fallback: "Unable to save invoice" });
+      }
     } finally {
       setSaving(false);
     }
@@ -137,7 +180,7 @@ export default function Billing() {
           title="Billing & Invoicing"
           description="Generate invoices from completed jobs and track payments."
           actions={
-            <Button onClick={() => { setForm(emptyForm); setDialogOpen(true); }} variant="brand">
+            <Button onClick={openCreate} variant="brand">
               <Plus className="mr-1 h-4 w-4" /> New Invoice
             </Button>
           }
@@ -176,51 +219,138 @@ export default function Billing() {
         )}
       </div>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetValidation(); setDialogOpen(open); }}>
+        <DialogContent ref={dialogRef} className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>New Invoice</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-3 py-2">
+          <form
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+            className="grid gap-3 py-2"
+          >
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label>Reference</Label>
-                <Input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="INV-2026-001" />
+              <div className="grid gap-2" data-field="reference">
+                <Label htmlFor="invoice-reference" className={shouldShow("reference") ? "text-destructive" : undefined}>
+                  Reference
+                  <RequiredMark />
+                </Label>
+                <Input
+                  id="invoice-reference"
+                  value={form.reference}
+                  onChange={(e) => {
+                    const next = { ...form, reference: e.target.value };
+                    setForm(next);
+                    handleChange("reference", next);
+                  }}
+                  onBlur={() => handleBlur("reference", form)}
+                  placeholder="INV-2026-001"
+                  className={fieldErrorClass(shouldShow("reference"))}
+                  {...fieldAria("reference", shouldShow("reference") ? errors.reference : null)}
+                />
+                {shouldShow("reference") && <FormFieldError field="reference" message={errors.reference} />}
               </div>
-              <div className="grid gap-2">
-                <Label>Job Reference</Label>
-                <Input value={form.jobRef} onChange={(e) => setForm({ ...form, jobRef: e.target.value })} placeholder="JOB-2026-001" />
+              <div className="grid gap-2" data-field="jobRef">
+                <Label htmlFor="invoice-job-ref">Job Reference</Label>
+                <Input
+                  id="invoice-job-ref"
+                  value={form.jobRef}
+                  onChange={(e) => setForm({ ...form, jobRef: e.target.value })}
+                  placeholder="JOB-2026-001"
+                />
               </div>
             </div>
-            <div className="grid gap-2">
-              <Label>Customer Name</Label>
-              <Input value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} />
+            <div className="grid gap-2" data-field="customerName">
+              <Label htmlFor="invoice-customer" className={shouldShow("customerName") ? "text-destructive" : undefined}>
+                Customer Name
+                <RequiredMark />
+              </Label>
+              <Input
+                id="invoice-customer"
+                value={form.customerName}
+                onChange={(e) => {
+                  const next = { ...form, customerName: e.target.value };
+                  setForm(next);
+                  handleChange("customerName", next);
+                }}
+                onBlur={() => handleBlur("customerName", form)}
+                className={fieldErrorClass(shouldShow("customerName"))}
+                {...fieldAria("customerName", shouldShow("customerName") ? errors.customerName : null)}
+              />
+              {shouldShow("customerName") && <FormFieldError field="customerName" message={errors.customerName} />}
             </div>
             <div className="grid grid-cols-3 gap-3">
-              <div className="grid gap-2">
-                <Label>Amount (₹)</Label>
-                <Input type="number" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+              <div className="grid gap-2" data-field="amount">
+                <Label htmlFor="invoice-amount">Amount (₹)</Label>
+                <Input
+                  id="invoice-amount"
+                  type="number"
+                  min="0"
+                  value={form.amount}
+                  onChange={(e) => {
+                    const next = { ...form, amount: e.target.value };
+                    setForm(next);
+                    handleChange("amount", next);
+                  }}
+                  onBlur={() => handleBlur("amount", form)}
+                  className={fieldErrorClass(shouldShow("amount"))}
+                  {...fieldAria("amount", shouldShow("amount") ? errors.amount : null)}
+                />
+                {shouldShow("amount") && <FormFieldError field="amount" message={errors.amount} />}
               </div>
-              <div className="grid gap-2">
-                <Label>Tax (₹)</Label>
-                <Input type="number" min="0" value={form.tax} onChange={(e) => setForm({ ...form, tax: e.target.value })} />
+              <div className="grid gap-2" data-field="tax">
+                <Label htmlFor="invoice-tax">Tax (₹)</Label>
+                <Input
+                  id="invoice-tax"
+                  type="number"
+                  min="0"
+                  value={form.tax}
+                  onChange={(e) => {
+                    const next = { ...form, tax: e.target.value };
+                    setForm(next);
+                    handleChange("tax", next);
+                  }}
+                  onBlur={() => handleBlur("tax", form)}
+                  className={fieldErrorClass(shouldShow("tax"))}
+                  {...fieldAria("tax", shouldShow("tax") ? errors.tax : null)}
+                />
+                {shouldShow("tax") && <FormFieldError field="tax" message={errors.tax} />}
               </div>
               <div className="grid gap-2">
                 <Label>Total</Label>
                 <Input readOnly value={`₹${(parseFloat(form.amount || "0") + parseFloat(form.tax || "0")).toLocaleString("en-IN")}`} className="bg-muted text-muted-foreground" />
               </div>
             </div>
-            <div className="grid gap-2">
-              <Label>Due Date</Label>
-              <Input type="date" value={form.dueAt} onChange={(e) => setForm({ ...form, dueAt: e.target.value })} />
+            <div className="grid gap-2" data-field="dueAt">
+              <Label htmlFor="invoice-due" className={shouldShow("dueAt") ? "text-destructive" : undefined}>
+                Due Date
+                <RequiredMark />
+              </Label>
+              <Input
+                id="invoice-due"
+                type="date"
+                value={form.dueAt}
+                onChange={(e) => {
+                  const next = { ...form, dueAt: e.target.value };
+                  setForm(next);
+                  handleChange("dueAt", next);
+                }}
+                onBlur={() => handleBlur("dueAt", form)}
+                className={fieldErrorClass(shouldShow("dueAt"))}
+                {...fieldAria("dueAt", shouldShow("dueAt") ? errors.dueAt : null)}
+              />
+              {shouldShow("dueAt") && <FormFieldError field="dueAt" message={errors.dueAt} />}
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={save} disabled={saving}>
-              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Create Invoice
-            </Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Create Invoice
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </RoleGuard>

@@ -5,6 +5,7 @@ import type { JwtPayload } from "@/types";
 import { failure } from "@/utils/response";
 import { AUTH_COOKIE_NAME } from "@/utils/authCookie";
 import { prisma } from "@/db/prisma";
+import { rolesFor, type ApiWritePermission } from "@/config/apiAccess";
 
 export const STAFF_ROLES = [
   "admin",
@@ -32,21 +33,41 @@ function extractToken(req: Request): string | null {
   return null;
 }
 
-/** JWT authentication — reads httpOnly cookie or Bearer header */
+/** JWT authentication — reads httpOnly cookie or Bearer header; rejects inactive users. */
 export const authenticate = (req: Request, res: Response, next: NextFunction): void => {
   const token = extractToken(req);
   if (!token) {
     res.status(401).json(failure("Authentication required"));
     return;
   }
-  try {
-    const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
-    req.user = payload;
-    req.tenantId = payload.tenantId;
-    next();
-  } catch {
-    res.status(401).json(failure("Invalid or expired token"));
-  }
+  void (async () => {
+    try {
+      const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+      const user = await prisma.user.findFirst({
+        where: { id: payload.userId, tenantId: payload.tenantId },
+        select: { id: true, name: true, isActive: true, role: true, tenantId: true, email: true },
+      });
+      if (!user) {
+        res.status(401).json(failure("Invalid or expired token"));
+        return;
+      }
+      if (!user.isActive) {
+        res.status(403).json(failure("This account is inactive"));
+        return;
+      }
+      req.user = {
+        userId: user.id,
+        tenantId: user.tenantId,
+        role: user.role,
+        email: user.email,
+        name: user.name,
+      };
+      req.tenantId = user.tenantId;
+      next();
+    } catch {
+      res.status(401).json(failure("Invalid or expired token"));
+    }
+  })();
 };
 
 /** Sign a JWT for a user */
@@ -64,19 +85,27 @@ export const requireRole = (...roles: readonly string[]) =>
       next();
       return;
     }
-    const assignment = await prisma.userRoleAssignment.findFirst({
-      where: {
-        tenantId: req.user.tenantId,
-        userId: req.user.userId,
-        role: { key: { in: [...roles] } },
-      },
-    });
-    if (!assignment) {
+    try {
+      const assignment = await prisma.userRoleAssignment.findFirst({
+        where: {
+          tenantId: req.user.tenantId,
+          userId: req.user.userId,
+          role: { key: { in: [...roles] } },
+        },
+      });
+      if (!assignment) {
+        res.status(403).json(failure("Insufficient permissions"));
+        return;
+      }
+      next();
+    } catch {
       res.status(403).json(failure("Insufficient permissions"));
-      return;
     }
-    next();
   };
+
+/** Permission helper backed by the canonical API write-access matrix. */
+export const requirePermission = (permission: ApiWritePermission) =>
+  requireRole(...rolesFor(permission));
 
 /** Prevent customer sessions from reaching staff-only API modules. */
 export const requireStaff = requireRole(...STAFF_ROLES);

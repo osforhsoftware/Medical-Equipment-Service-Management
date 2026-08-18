@@ -1,5 +1,9 @@
-import { useEffect, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { z } from "zod";
 import { Loader2, Plus, Star, Trash2, Truck } from "lucide-react";
+import { FormFieldError } from "@/components/shared/FormFieldError";
+import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { Button } from "@/components/ui/button";
@@ -23,54 +27,105 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError } from "@/lib/api";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useListingUrlState } from "@/hooks/useListingUrlState";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
+import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import { api, type BackendSupplier } from "@/lib/api";
-import { toast } from "@/hooks/use-toast";
+import { EMPTY_PAGINATION_META } from "@/lib/listing";
+import { toast } from "@/lib/toast";
+
+const supplierSchema = z.object({
+  name: fieldRules.requiredString("Company name"),
+  contact: fieldRules.optionalString(),
+  email: fieldRules.email(false),
+  phone: fieldRules.phone(false),
+  category: fieldRules.optionalString(),
+  rating: z.string().refine((v) => {
+    if (!v.trim()) return true;
+    const n = parseFloat(v);
+    return !Number.isNaN(n) && n >= 0 && n <= 5;
+  }, "Rating must be between 0 and 5."),
+});
 
 type FormState = { name: string; contact: string; email: string; phone: string; category: string; rating: string };
 const emptyForm: FormState = { name: "", contact: "", email: "", phone: "", category: "", rating: "0" };
 
 export default function Suppliers() {
-  const [suppliers, setSuppliers] = useState<BackendSupplier[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const {
+    search,
+    setSearch,
+    listParams,
+    setPage,
+    setLimit,
+  } = useListingUrlState();
+
+  const debouncedSearch = useDebouncedValue(search);
+  const queryParams = useMemo(
+    () => ({ ...listParams, search: debouncedSearch || undefined }),
+    [listParams, debouncedSearch],
+  );
+
+  const suppliersQuery = usePaginatedQuery({
+    queryKey: "suppliers",
+    params: queryParams,
+    queryFn: (params) => api.listSuppliers(params),
+  });
+
+  const suppliers = suppliersQuery.data?.data ?? [];
+  const pagination = suppliersQuery.data?.meta ?? EMPTY_PAGINATION_META;
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<BackendSupplier | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const data = await api.listSuppliers();
-      setSuppliers(data);
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Failed to load suppliers";
-      toast({ title: "Error", description: msg, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
+  const {
+    errors,
+    shouldShow,
+    reset: resetValidation,
+    validateAll,
+    handleBlur,
+    handleChange,
+    applyApiErrors,
+  } = useFormValidation({
+    fieldOrder: ["name", "email", "phone", "rating"],
+    schema: supplierSchema,
+  });
+
+  const load = () => void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+
+  const openCreate = () => {
+    setForm(emptyForm);
+    resetValidation();
+    setDialogOpen(true);
   };
 
-  useEffect(() => { void load(); }, []);
-
   const save = async () => {
+    if (!validateAll(form, undefined, dialogRef.current)) return;
+
     setSaving(true);
     try {
       await api.createSupplier({
-        name: form.name,
-        contact: form.contact,
-        email: form.email,
-        phone: form.phone,
-        category: form.category,
+        name: form.name.trim(),
+        contact: form.contact.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim(),
+        category: form.category.trim(),
         rating: parseFloat(form.rating) || 0,
       });
-      toast({ title: "Supplier added", description: `${form.name} has been added.` });
+      toast({ title: "Supplier added", description: `${form.name.trim()} has been added.` });
       setDialogOpen(false);
       setForm(emptyForm);
-      await load();
+      resetValidation();
+      await queryClient.invalidateQueries({ queryKey: ["suppliers"] });
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Unable to save supplier";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      if (!applyApiErrors(err, dialogRef.current)) {
+        toast.apiError(err, { fallback: "Unable to save supplier" });
+      }
     } finally {
       setSaving(false);
     }
@@ -82,10 +137,9 @@ export default function Suppliers() {
       await api.deleteSupplier(deleteTarget.id);
       toast({ title: "Supplier removed", description: `${deleteTarget.name} deleted.` });
       setDeleteTarget(null);
-      await load();
+      await queryClient.invalidateQueries({ queryKey: ["suppliers"] });
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Unable to delete";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      toast.apiError(err, { fallback: "Unable to delete" });
     }
   };
 
@@ -149,68 +203,145 @@ export default function Suppliers() {
           title="Suppliers"
           description="Parts vendors and OEM suppliers."
           actions={
-            <Button onClick={() => { setForm(emptyForm); setDialogOpen(true); }} variant="brand">
+            <Button onClick={openCreate} variant="brand">
               <Plus className="mr-1 h-4 w-4" /> Add Supplier
             </Button>
           }
         />
 
-        {loading ? (
-          <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" /> Loading suppliers…
-          </div>
-        ) : (
-          <DataTable
-            data={suppliers}
-            columns={columns}
-            searchKeys={["name", "contact", "email", "category"]}
-            searchPlaceholder="Search suppliers…"
-            onRowClick={(s) => toast({ title: s.name, description: `${s.category} · ${s.email}` })}
-          />
-        )}
+        <DataTable
+          mode="server"
+          data={suppliers}
+          columns={columns}
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search suppliers…"
+          emptyMessage="No suppliers found."
+          emptyHint="Try changing your search."
+          pagination={pagination}
+          onPageChange={setPage}
+          onLimitChange={setLimit}
+          loading={suppliersQuery.isLoading}
+          isFetching={suppliersQuery.isFetching}
+          error={suppliersQuery.error as Error | null}
+          onRetry={() => load()}
+          onRowClick={(s) => toast({ title: s.name, description: `${s.category} · ${s.email}` })}
+        />
       </div>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetValidation(); setDialogOpen(open); }}>
+        <DialogContent ref={dialogRef} className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Add Supplier</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-3 py-2">
-            <div className="grid gap-2">
-              <Label>Company Name</Label>
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <form
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+            className="grid gap-3 py-2"
+          >
+            <div className="grid gap-2" data-field="name">
+              <Label htmlFor="supplier-name" className={shouldShow("name") ? "text-destructive" : undefined}>
+                Company Name
+                <RequiredMark />
+              </Label>
+              <Input
+                id="supplier-name"
+                value={form.name}
+                onChange={(e) => {
+                  const next = { ...form, name: e.target.value };
+                  setForm(next);
+                  handleChange("name", next);
+                }}
+                onBlur={() => handleBlur("name", form)}
+                className={fieldErrorClass(shouldShow("name"))}
+                {...fieldAria("name", shouldShow("name") ? errors.name : null)}
+              />
+              {shouldShow("name") && <FormFieldError field="name" message={errors.name} />}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
-                <Label>Contact Person</Label>
-                <Input value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} />
+                <Label htmlFor="supplier-contact">Contact Person</Label>
+                <Input
+                  id="supplier-contact"
+                  value={form.contact}
+                  onChange={(e) => setForm({ ...form, contact: e.target.value })}
+                />
               </div>
-              <div className="grid gap-2">
-                <Label>Phone</Label>
-                <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+              <div className="grid gap-2" data-field="phone">
+                <Label htmlFor="supplier-phone">Phone</Label>
+                <Input
+                  id="supplier-phone"
+                  value={form.phone}
+                  onChange={(e) => {
+                    const next = { ...form, phone: e.target.value };
+                    setForm(next);
+                    handleChange("phone", next);
+                  }}
+                  onBlur={() => handleBlur("phone", form)}
+                  className={fieldErrorClass(shouldShow("phone"))}
+                  {...fieldAria("phone", shouldShow("phone") ? errors.phone : null)}
+                />
+                {shouldShow("phone") && <FormFieldError field="phone" message={errors.phone} />}
               </div>
             </div>
-            <div className="grid gap-2">
-              <Label>Email</Label>
-              <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <div className="grid gap-2" data-field="email">
+              <Label htmlFor="supplier-email">Email</Label>
+              <Input
+                id="supplier-email"
+                type="email"
+                value={form.email}
+                onChange={(e) => {
+                  const next = { ...form, email: e.target.value };
+                  setForm(next);
+                  handleChange("email", next);
+                }}
+                onBlur={() => handleBlur("email", form)}
+                className={fieldErrorClass(shouldShow("email"))}
+                {...fieldAria("email", shouldShow("email") ? errors.email : null)}
+              />
+              {shouldShow("email") && <FormFieldError field="email" message={errors.email} />}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
-                <Label>Category</Label>
-                <Input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="e.g. Medical Parts" />
+                <Label htmlFor="supplier-category">Category</Label>
+                <Input
+                  id="supplier-category"
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  placeholder="e.g. Medical Parts"
+                />
               </div>
-              <div className="grid gap-2">
-                <Label>Rating (0–5)</Label>
-                <Input type="number" min="0" max="5" step="0.1" value={form.rating} onChange={(e) => setForm({ ...form, rating: e.target.value })} />
+              <div className="grid gap-2" data-field="rating">
+                <Label htmlFor="supplier-rating">Rating (0–5)</Label>
+                <Input
+                  id="supplier-rating"
+                  type="number"
+                  min="0"
+                  max="5"
+                  step="0.1"
+                  value={form.rating}
+                  onChange={(e) => {
+                    const next = { ...form, rating: e.target.value };
+                    setForm(next);
+                    handleChange("rating", next);
+                  }}
+                  onBlur={() => handleBlur("rating", form)}
+                  className={fieldErrorClass(shouldShow("rating"))}
+                  {...fieldAria("rating", shouldShow("rating") ? errors.rating : null)}
+                />
+                {shouldShow("rating") && <FormFieldError field="rating" message={errors.rating} />}
               </div>
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={save} disabled={saving}>
-              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Add Supplier
-            </Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Add Supplier
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

@@ -2,17 +2,28 @@ import bcrypt from "bcryptjs";
 import { usersRepository, toSafeUser } from "@/repositories/users.repository";
 import { authRepository } from "@/repositories/auth.repository";
 import { AppError } from "@/middleware/errorHandler";
+import { enrichUserWithRoles, syncUserRoleAssignments } from "@/utils/userRoles";
+
+function resolveRoleSelection(data: { role?: string; roles?: string[]; primaryRole?: string }) {
+  const roles = data.roles?.length ? data.roles : data.role ? [data.role] : undefined;
+  if (!roles?.length) return undefined;
+  const primaryRole = data.primaryRole ?? data.role ?? roles[0];
+  if (!roles.includes(primaryRole)) {
+    throw new AppError("Primary role must be one of the selected roles", 400);
+  }
+  return { roles, primaryRole };
+}
 
 export class UsersService {
   async list(tenantId: string, filters?: { role?: string; isActive?: boolean }) {
     const users = await usersRepository.findAllByTenant(tenantId, filters);
-    return users.map(toSafeUser);
+    return Promise.all(users.map((user) => enrichUserWithRoles(user, tenantId)));
   }
 
   async getById(id: string, tenantId: string) {
     const user = await usersRepository.findById(id, tenantId);
     if (!user) throw new AppError("User not found", 404);
-    return toSafeUser(user);
+    return enrichUserWithRoles(user, tenantId);
   }
 
   async create(
@@ -23,6 +34,8 @@ export class UsersService {
       email: string;
       password: string;
       role: string;
+      roles?: string[];
+      primaryRole?: string;
       phone?: string;
       isActive?: boolean;
       branchId?: string;
@@ -40,6 +53,10 @@ export class UsersService {
       throw new AppError("Email already registered", 409);
     }
 
+    const roleSelection = resolveRoleSelection(data);
+    const primaryRole = roleSelection?.primaryRole ?? data.role;
+    const roleKeys = roleSelection?.roles ?? [primaryRole];
+
     const passwordHash = await bcrypt.hash(data.password, 10);
     const user = await usersRepository.create({
       tenantId,
@@ -47,7 +64,7 @@ export class UsersService {
       username,
       email,
       passwordHash,
-      role: data.role as never,
+      role: primaryRole as never,
       phone: data.phone,
       isActive: data.isActive ?? true,
       branchId: data.branchId,
@@ -55,7 +72,8 @@ export class UsersService {
       customerId: data.customerId,
     });
 
-    return toSafeUser(user);
+    await syncUserRoleAssignments(tenantId, user.id, roleKeys);
+    return enrichUserWithRoles(user, tenantId);
   }
 
   async update(
@@ -66,6 +84,8 @@ export class UsersService {
       username?: string;
       email?: string;
       role?: string;
+      roles?: string[];
+      primaryRole?: string;
       phone?: string | null;
       isActive?: boolean;
       branchId?: string | null;
@@ -87,12 +107,15 @@ export class UsersService {
       if (taken && taken.id !== id) throw new AppError("Email already registered", 409);
     }
 
+    const roleSelection = resolveRoleSelection(data);
+    const primaryRole = roleSelection?.primaryRole ?? data.role;
+
     const passwordHash = data.password ? await bcrypt.hash(data.password, 10) : undefined;
     const user = await usersRepository.update(id, tenantId, {
       name: data.name,
       username: data.username?.toLowerCase(),
       email: data.email?.toLowerCase(),
-      role: data.role as never,
+      ...(primaryRole ? { role: primaryRole as never } : {}),
       phone: data.phone,
       isActive: data.isActive,
       branchId: data.branchId,
@@ -101,7 +124,15 @@ export class UsersService {
       ...(passwordHash ? { passwordHash } : {}),
     });
 
-    return toSafeUser(user);
+    if (roleSelection) {
+      await syncUserRoleAssignments(tenantId, id, roleSelection.roles);
+    } else if (primaryRole && primaryRole !== existing.role) {
+      const currentRoles = await enrichUserWithRoles(existing, tenantId);
+      const nextRoles = [...new Set(currentRoles.roles.map((role) => (role === existing.role ? primaryRole : role)))];
+      await syncUserRoleAssignments(tenantId, id, nextRoles);
+    }
+
+    return enrichUserWithRoles(user, tenantId);
   }
 
   async delete(id: string, tenantId: string, actorId: string) {

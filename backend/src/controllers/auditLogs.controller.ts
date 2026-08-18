@@ -1,20 +1,20 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { auditLogsRepository } from "@/repositories/auditLogs.repository";
+import { auditLogsService } from "@/services/auditLogs.service";
+import { sendPaginatedList } from "@/utils/listQuery";
+import { parsePaginationQuery, parseSearchQuery } from "@/utils/pagination";
 
 export class AuditLogsController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const page = Math.max(1, parseInt(req.query.page as string ?? "1"));
-      const limit = Math.min(100, parseInt(req.query.limit as string ?? "50"));
+      const { page, limit } = parsePaginationQuery(req.query);
+      const search = parseSearchQuery(req.query);
+      const role = typeof req.query.role === "string" && req.query.role !== "all" ? req.query.role : undefined;
 
-      const { data, total } = await auditLogsRepository.findAll(req.tenantId!, page, limit);
+      const { data, total } = await auditLogsRepository.findAll(req.tenantId!, page, limit, search, role);
+      const enriched = await auditLogsService.enrichLogs(data, req.tenantId!);
 
-      res.json({
-        success: true,
-        message: "Audit logs fetched successfully",
-        data,
-        meta: { total, page, limit },
-      });
+      sendPaginatedList(res, "Audit logs fetched successfully", enriched, total, page, limit);
     } catch (err) { next(err); }
   }
 

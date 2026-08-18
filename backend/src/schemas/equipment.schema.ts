@@ -1,14 +1,14 @@
 import { z } from "zod";
 
 export const amcStatusSchema = z.enum(["active", "expiring", "expired", "none"]);
-export const conditionSchema = z.enum(["operational", "needsService", "down"]);
+export const conditionSchema = z.string().trim().min(1, "Condition is required").max(80);
 
 export const createEquipmentSchema = z.object({
   assetTag: z.string().min(2, "Asset tag is required").max(64),
   name: z.string().min(2, "Name is required").max(200),
   model: z.string().min(1, "Model is required").max(120),
   manufacturer: z.string().min(1, "Manufacturer is required").max(120),
-  category: z.string().min(1, "Category is required").max(80),
+  category: z.string().trim().min(1, "Category is required").max(80),
   serialNumber: z.string().min(1, "Serial number is required").max(120),
   customerId: z.string().min(1, "Customer is required"),
   branchId: z.string().optional(),

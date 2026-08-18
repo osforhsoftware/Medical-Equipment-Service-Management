@@ -28,6 +28,30 @@ export class AuthController {
       next(err);
     }
   }
+
+  async forgotPassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await authService.requestPasswordReset(req.body.email);
+      res.json(success(result.message, envSafePayload(result)));
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async resetPassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { token, password } = req.body as { token: string; password: string };
+      await authService.resetPassword(token, password);
+      res.json(success("Password has been reset. You can now sign in.", null));
+    } catch (err) {
+      next(err);
+    }
+  }
+}
+
+function envSafePayload(result: { message: string; resetToken?: string }) {
+  if (result.resetToken) return { resetToken: result.resetToken };
+  return null;
 }
 
 export const authController = new AuthController();

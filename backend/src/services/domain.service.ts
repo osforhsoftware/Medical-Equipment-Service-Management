@@ -3,9 +3,12 @@ import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
 import {
   assertEstimateDecisionAllowed,
+  normalizeTicketStatus,
   resolveTicketEventStatus,
 } from "@/services/workflow/serviceTicketStateMachine";
 import { generateReference } from "@/utils/reference";
+import { ESTIMATE_STAFF_APPROVER_ROLES } from "@/config/apiAccess";
+import { userHasAnyRoleKey } from "@/utils/userRoles";
 
 type Actor = { userId: string; role: string };
 type JsonObject = Record<string, unknown>;
@@ -201,7 +204,12 @@ export class DomainService {
       if (!estimate) throw new AppError("Estimate not found", 404);
       assertEstimateDecisionAllowed(estimate.status);
 
-      const isStaffApprover = ["admin", "coordinator"].includes(actor.role);
+      const isStaffApprover = await userHasAnyRoleKey(
+        actor.userId,
+        tenantId,
+        actor.role,
+        ESTIMATE_STAFF_APPROVER_ROLES,
+      );
       if (actor.role === "customer") {
         const user = await tx.user.findFirst({ where: { id: actor.userId, tenantId } });
         if (!user?.customerId || user.customerId !== estimate.customerId) {
@@ -226,7 +234,7 @@ export class DomainService {
         }
       }
       if (input.decision === "approved" && !isStaffApprover && actor.role !== "estimator") {
-        throw new AppError("Only admin or coordinator can approve estimates for job scheduling", 403);
+        throw new AppError("Only admin, coordinator, inspection staff, or service staff can approve estimates", 403);
       }
       if (input.decision === "approved" && isStaffApprover && !input.engineerId) {
         throw new AppError("engineerId is required when approving an estimate", 422);
@@ -251,8 +259,16 @@ export class DomainService {
                 ? "estimateRejected"
                 : "estimatePendingApproval";
           const next = resolveTicketEventStatus(sr.status, event);
-          if (next !== sr.status) {
-            await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
+          if (next !== normalizeTicketStatus(sr.status)) {
+            await tx.serviceRequest.update({
+              where: { id: sr.id },
+              data: {
+                status: next as never,
+                ...(status === "approved" && input.engineerId
+                  ? { assignedEngineerId: input.engineerId }
+                  : {}),
+              },
+            });
           }
         }
       }
@@ -394,6 +410,7 @@ export class DomainService {
                 engineer: engineer.name,
                 engineerId: engineer.id,
                 type: sr.type,
+                typeOther: sr.typeOther,
                 status: "scheduled",
                 scheduledFor,
                 progress: 0,
@@ -419,8 +436,11 @@ export class DomainService {
               where: { tenantId, estimateId, jobId: null, status: { in: ["active", "shortage"] } },
               data: { jobId: job.id },
             });
-            const next = resolveTicketEventStatus(sr.status === "approval" ? "approval" : sr.status, "jobScheduled");
-            await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
+            const next = resolveTicketEventStatus(
+              normalizeTicketStatus(sr?.status ?? "pending_approval"),
+              "jobScheduled",
+            );
+            await tx.serviceRequest.update({ where: { id: sr!.id }, data: { status: next as never } });
             await tx.notification.create({
               data: {
                 tenantId,
@@ -455,10 +475,10 @@ export class DomainService {
 
   async addWorkLog(tenantId: string, jobId: string, actor: Actor, input: any) {
     await assertJobAccess(tenantId, jobId, actor);
-    const endedAt = input.endedAt ? new Date(input.endedAt) : null;
     const startedAt = new Date(input.startedAt);
-    if (endedAt && endedAt < startedAt) throw new AppError("Work log end must follow start", 422);
-    const minutes = endedAt ? Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 60000)) : 0;
+    const endedAt = input.endedAt ? new Date(input.endedAt) : new Date();
+    if (endedAt < startedAt) throw new AppError("Work log end must follow start", 422);
+    const minutes = Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 60000));
     return prisma.jobWorkLog.create({
       data: { ...input, tenantId, jobId, userId: actor.userId, startedAt, endedAt, minutes },
     });
@@ -835,7 +855,10 @@ export class DomainService {
       if (!job?.estimate || job.estimate.status !== "approved") {
         throw new AppError("Completed job with an approved estimate is required", 409);
       }
-      const existing = await tx.invoice.findFirst({ where: { tenantId, jobId: job.id, status: { not: "overdue" } } });
+      if (!input.skipBillingVerification && !job.billingVerifiedAt) {
+        throw new AppError("Billing verification must be completed before generating an invoice", 409);
+      }
+      const existing = await tx.invoice.findFirst({ where: { tenantId, jobId: job.id, status: { not: "closed" } } });
       if (existing) throw new AppError("An invoice already exists for this job", 409);
 
       const sourceLines = [
@@ -894,6 +917,15 @@ export class DomainService {
           if (next !== sr.status) {
             await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
           }
+          const user = await tx.user.findFirst({ where: { id: actor.userId, tenantId } });
+          await tx.timelineEvent.create({
+            data: {
+              requestId: sr.id,
+              actor: user?.name ?? actor.userId,
+              action: "Invoice generated",
+              note: invoice.reference,
+            },
+          });
         }
       }
       return invoice;
@@ -902,20 +934,74 @@ export class DomainService {
 
   async recordPayment(tenantId: string, invoiceId: string, actor: Actor, input: any) {
     return prisma.$transaction(async (tx) => {
-      const invoice = await tx.invoice.findFirst({ where: { id: invoiceId, tenantId } });
+      const invoice = await tx.invoice.findFirst({
+        where: { id: invoiceId, tenantId },
+        include: { job: { include: { equipment: true } }, serviceRequest: true },
+      });
       if (!invoice) throw new AppError("Invoice not found", 404);
-      if (invoice.status === "draft") throw new AppError("Draft invoices cannot receive payments", 409);
+      if (invoice.status === "draft" || invoice.status === "pendingApproval") {
+        throw new AppError("Invoice must be approved and sent before receiving payments", 409);
+      }
       if (money(input.amount).greaterThan(invoice.balanceDue)) throw new AppError("Payment exceeds balance due", 409);
+
+      const user = await tx.user.findFirst({ where: { id: actor.userId, tenantId } });
+      const actorName = user?.name ?? actor.userId;
+
       await tx.invoicePayment.create({
         data: { tenantId, invoiceId, ...input, recordedBy: actor.userId },
       });
       const paidTotal = money(invoice.paidTotal.plus(input.amount));
       const balanceDue = money(invoice.total.minus(paidTotal));
-      return tx.invoice.update({
+      const fullyPaid = balanceDue.isZero();
+      const nextStatus = fullyPaid ? "paid" : invoice.status === "overdue" ? "overdue" : "sent";
+
+      const updated = await tx.invoice.update({
         where: { id: invoiceId },
-        data: { paidTotal, balanceDue, status: balanceDue.isZero() ? "paid" : "sent" },
+        data: { paidTotal, balanceDue, status: nextStatus },
         include: { payments: true, lineItems: true },
       });
+
+      if (invoice.serviceRequestId) {
+        await tx.timelineEvent.create({
+          data: {
+            requestId: invoice.serviceRequestId,
+            actor: actorName,
+            action: fullyPaid ? "Payment received — service paid in full" : "Partial payment received",
+            note: `${input.method}${input.reference ? ` · ${input.reference}` : ""} · ${money(input.amount).toString()}`,
+          },
+        });
+      }
+
+      if (fullyPaid) {
+        if (invoice.serviceRequestId && invoice.serviceRequest?.status === "invoiced") {
+          const next = resolveTicketEventStatus(
+            normalizeTicketStatus(invoice.serviceRequest.status),
+            "ticketClosed",
+          );
+          await tx.serviceRequest.update({
+            where: { id: invoice.serviceRequestId },
+            data: { status: next as never },
+          });
+          await tx.timelineEvent.create({
+            data: {
+              requestId: invoice.serviceRequestId,
+              actor: actorName,
+              action: "Service closed",
+              note: `Invoice ${invoice.reference} paid in full`,
+            },
+          });
+        }
+        await tx.invoice.update({ where: { id: invoiceId }, data: { status: "closed" } });
+
+        if (invoice.job?.equipmentId) {
+          await tx.equipment.update({
+            where: { id: invoice.job.equipmentId },
+            data: { lastServiceDate: new Date() },
+          });
+        }
+      }
+
+      return { ...updated, status: fullyPaid ? "closed" as const : updated.status };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
@@ -1394,7 +1480,7 @@ export class DomainService {
     const sr = await prisma.serviceRequest.findFirst({ where: { id: serviceRequestId, tenantId } });
     if (!sr) throw new AppError("Service ticket not found", 404);
     if (sr.status !== "invoiced") throw new AppError("Ticket must be invoiced before finishing", 409);
-    const next = resolveTicketEventStatus(sr.status, "ticketFinished");
+    const next = resolveTicketEventStatus(normalizeTicketStatus(sr.status), "ticketClosed");
     return prisma.serviceRequest.update({
       where: { id: serviceRequestId },
       data: { status: next as never },

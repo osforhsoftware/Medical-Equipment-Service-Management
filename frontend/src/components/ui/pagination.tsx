@@ -34,13 +34,14 @@ type PaginationLinkProps = {
 const PaginationLink = ({ className, isActive, size = "icon", ...props }: PaginationLinkProps) => (
   <a
     aria-current={isActive ? "page" : undefined}
-    className={cn(
-      buttonVariants({
-        variant: isActive ? "outline" : "ghost",
-        size,
-      }),
-      className,
-    )}
+      className={cn(
+        buttonVariants({
+          variant: isActive ? "secondary" : "ghost",
+          size,
+        }),
+        isActive && "bg-primary-light text-primary hover:bg-primary-light hover:text-primary",
+        className,
+      )}
     {...props}
   />
 );

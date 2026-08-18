@@ -1,15 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, LogOut, Menu, Search } from "lucide-react";
+import { Bell, LogOut, PanelLeft, PanelLeftClose, Search, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,17 +14,20 @@ import {
 import { MesmsLogo } from "@/components/shared/MesmsLogo";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { useAuth } from "@/context/AuthContext";
-import { useBranch } from "@/context/BranchContext";
-import { api, type BackendBranch } from "@/lib/api";
+import { api } from "@/lib/api";
 import { NOTIFICATIONS_UPDATED } from "@/lib/notifications-events";
 import { roleLabels } from "@/data/mock";
 
-export function Topbar({ onMenu }: { onMenu: () => void }) {
+export function Topbar({
+  sidebarOpen,
+  onToggleSidebar,
+}: {
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
+}) {
   const { user, logout } = useAuth();
-  const { branchId, setBranchId } = useBranch();
   const navigate = useNavigate();
   const [unread, setUnread] = useState(0);
-  const [branches, setBranches] = useState<BackendBranch[]>([]);
 
   const loadUnreadCount = async () => {
     try {
@@ -45,7 +41,6 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
   useEffect(() => {
     if (!user) return;
     void loadUnreadCount();
-    void api.listBranches().then(setBranches).catch(() => { /* ignore */ });
 
     const onUpdated = () => {
       void loadUnreadCount();
@@ -53,42 +48,51 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
     window.addEventListener(NOTIFICATIONS_UPDATED, onUpdated);
     return () => window.removeEventListener(NOTIFICATIONS_UPDATED, onUpdated);
   }, [user]);
+
   if (!user) return null;
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/70 bg-card/75 px-4 shadow-sm backdrop-blur-xl lg:px-6">
-      <button onClick={onMenu} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-primary lg:hidden" aria-label="Open navigation">
-        <Menu className="h-5 w-5" />
+    <header className="no-print sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-card px-4 lg:px-6">
+      <button
+        onClick={onToggleSidebar}
+        className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+        aria-label={sidebarOpen ? "Hide navigation" : "Show navigation"}
+        title={sidebarOpen ? "Hide sidebar (Ctrl+B)" : "Show sidebar (Ctrl+B)"}
+      >
+        {sidebarOpen ? <PanelLeftClose className="h-5 w-5" /> : <PanelLeft className="h-5 w-5" />}
       </button>
 
-      <div className="relative hidden max-w-sm flex-1 md:block">
+      {!sidebarOpen && (
+        <div>
+          <MesmsLogo size="sm" />
+        </div>
+      )}
+
+      <div className="relative hidden max-w-md flex-1 md:block">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder="Search requests, equipment, customers…" className="border-border/70 bg-background/70 pl-9 shadow-sm" />
+        <Input
+          placeholder="Search requests, equipment, customers…"
+          className="h-9 border-border bg-background pl-9 pr-10 text-[13px] shadow-none"
+        />
+        <kbd className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded border border-border bg-card px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline">
+          /
+        </kbd>
       </div>
 
-      <div className="ml-auto flex items-center gap-2">
-        <MesmsLogo size="sm" className="mr-1 hidden md:block" />
-        <Select value={branchId} onValueChange={setBranchId}>
-          <SelectTrigger className="hidden w-44 sm:flex">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {branches.map((b) => (
-              <SelectItem key={b.id} value={b.id}>
-                {b.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
+      <div className="ml-auto flex items-center gap-1">
         <ThemeToggle />
 
-        <Button variant="ghost" size="icon" className="relative" onClick={() => navigate("/app/notifications")} aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ""}`}>
-          <Bell className="h-5 w-5" />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative h-9 w-9 text-muted-foreground"
+          onClick={() => navigate("/app/notifications")}
+          aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ""}`}
+        >
+          <Bell className="h-[18px] w-[18px]" strokeWidth={1.75} />
           {unread > 0 && (
-            <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground">
-              {unread}
+            <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-accent-foreground">
+              {unread > 9 ? "9+" : unread}
             </span>
           )}
         </Button>
@@ -96,7 +100,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
-              className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold text-white"
+              className="ml-1 flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white ring-2 ring-border"
               style={{ backgroundColor: `hsl(${user.avatarColor})` }}
               aria-label="Open user menu"
             >
@@ -109,7 +113,9 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
               <p className="text-xs font-normal text-muted-foreground">{roleLabels[user.role]}</p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => navigate("/app/settings")}>Settings</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate("/app/settings")}>
+              <Settings className="mr-2 h-4 w-4" /> Settings
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
                 void logout().then(() => navigate("/login"));

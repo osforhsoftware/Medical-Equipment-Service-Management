@@ -1,18 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Check, Eye, FileText, Loader2, MessageSquare, Plus, Send, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Eye, FileText } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ProfessionalDocument } from "@/components/shared/ProfessionalDocument";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -22,82 +19,64 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError, api, type BackendEstimate, type BackendServiceRequest, type BackendUser } from "@/lib/api";
-import { useBranch } from "@/context/BranchContext";
 import { useAuth } from "@/context/AuthContext";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useListingUrlState } from "@/hooks/useListingUrlState";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
+import { api, type BackendEstimate } from "@/lib/api";
 import { formatDate, formatCurrency } from "@/lib/format";
-import { toast } from "@/hooks/use-toast";
+import { EMPTY_PAGINATION_META } from "@/lib/listing";
+
+const ESTIMATE_STATUS_FILTERS = [
+  { label: "Draft", value: "draft" },
+  { label: "Pending Admin", value: "pendingAdminApproval" },
+  { label: "Sent", value: "sent" },
+  { label: "Approved", value: "approved" },
+  { label: "Rejected", value: "rejected" },
+  { label: "Revision", value: "revision" },
+];
 
 export default function Estimates() {
   const navigate = useNavigate();
-  const { branchId } = useBranch();
-  const { user } = useAuth();
-  const [estimates, setEstimates] = useState<BackendEstimate[]>([]);
-  const [requests, setRequests] = useState<BackendServiceRequest[]>([]);
-  const [engineers, setEngineers] = useState<BackendUser[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<BackendEstimate | null>(null);
-  const [preview, setPreview] = useState<BackendEstimate | null>(null);
-  const [decisionNote, setDecisionNote] = useState("");
-  const [engineerId, setEngineerId] = useState("");
-  const [saving, setSaving] = useState(false);
+  const { hasRole } = useAuth();
+  const canBuild = hasRole(["admin", "coordinator", "estimator"]);
+  const {
+    search,
+    setSearch,
+    filters,
+    setFilter,
+    listParams,
+    setPage,
+    setLimit,
+  } = useListingUrlState({ filterKeys: ["status"] });
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [est, sr, users] = await Promise.all([
-        api.listEstimates(),
-        api.listServiceRequests({ branchId }),
-        api.listUsers({ role: "engineer", isActive: true }).catch(() => []),
-      ]);
-      setEstimates(est);
-      setRequests(sr.filter((r) => ["inspection", "estimate", "approval", "new"].includes(r.status)));
-      setEngineers(users);
-    } catch (err) {
-      toast({
-        title: "Error",
-        description: err instanceof ApiError ? err.message : "Failed to load estimates",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [branchId]);
-
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
-
-  const eligibleRequests = useMemo(
-    () => requests.filter((r) => ["inspection", "estimate", "approval", "new"].includes(r.status)),
-    [requests],
+  const debouncedSearch = useDebouncedValue(search);
+  const queryParams = useMemo(
+    () => ({ ...listParams, search: debouncedSearch || undefined }),
+    [listParams, debouncedSearch],
   );
 
-  const act = async (estimate: BackendEstimate, action: "approved" | "rejected" | "revision") => {
-    if (action === "approved" && ["admin", "coordinator"].includes(user?.role ?? "") && !engineerId) {
-      toast({ title: "Engineer required", description: "Select a service engineer to auto-assign the job.", variant: "destructive" });
-      return;
-    }
-    setSaving(true);
-    try {
-      await api.decideEstimate(estimate.id, action, decisionNote || undefined, {
-        engineerId: action === "approved" ? engineerId : undefined,
-      });
-      setSelected(null);
-      setDecisionNote("");
-      setEngineerId("");
-      await loadData();
-      toast({ title: `Estimate ${action}` });
-    } catch (error) {
-      toast({
-        title: "Workflow update failed",
-        description: error instanceof ApiError ? error.message : "Request failed",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
+  const estimatesQuery = usePaginatedQuery({
+    queryKey: "estimates",
+    params: queryParams,
+    queryFn: (params) => api.listEstimates(params),
+  });
+
+  const eligibleQuery = useQuery({
+    queryKey: ["service-requests", "estimate-eligible"],
+    queryFn: () => api.listServiceRequests({
+      statuses: "inspection,estimate,approval,new",
+      limit: 100,
+      page: 1,
+    }),
+    staleTime: 30_000,
+    enabled: canBuild,
+  });
+
+  const estimates = estimatesQuery.data?.data ?? [];
+  const pagination = estimatesQuery.data?.meta ?? EMPTY_PAGINATION_META;
+  const eligibleRequests = eligibleQuery.data?.data ?? [];
+  const [preview, setPreview] = useState<BackendEstimate | null>(null);
 
   const openPreview = async (estimate: BackendEstimate) => {
     try {
@@ -152,7 +131,7 @@ export default function Estimates() {
       header: "",
       render: (estimate) => (
         <div className="flex gap-1">
-          {estimate.serviceRequestId ? (
+          {canBuild && estimate.serviceRequestId ? (
             <Button size="sm" variant="outline" asChild onClick={(e) => e.stopPropagation()}>
               <Link to={`/app/estimates/${estimate.serviceRequestId}/build`}>Build</Link>
             </Button>
@@ -173,12 +152,13 @@ export default function Estimates() {
   ];
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "estimator", "billing"]}>
+    <RoleGuard roles={["admin", "coordinator", "estimator", "billing", "inspector", "engineer"]}>
       <div className="space-y-6">
         <PageHeader
           title="Estimates & Approvals"
-          description="Itemized estimates with admin approval and automatic engineer assignment."
+          description="Itemized estimates with staff approval and automatic engineer assignment."
           actions={
+            canBuild ? (
             <Select
               onValueChange={(ticketId) => navigate(`/app/estimates/${ticketId}/build`)}
               disabled={eligibleRequests.length === 0}
@@ -194,114 +174,31 @@ export default function Estimates() {
                 ))}
               </SelectContent>
             </Select>
+            ) : undefined
           }
         />
 
-        {loading ? (
-          <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" /> Loading estimates…
-          </div>
-        ) : (
-          <DataTable
-            data={estimates}
-            columns={columns}
-            searchKeys={["reference", "customerName", "equipmentName", "requestRef"]}
-            searchPlaceholder="Search estimates…"
-            emptyMessage="No estimates yet. Open the Estimate Builder from a service ticket."
-            filters={[
-              {
-                label: "Status",
-                options: [
-                  { label: "Draft", value: "draft" },
-                  { label: "Pending Admin", value: "pendingAdminApproval" },
-                  { label: "Sent", value: "sent" },
-                  { label: "Approved", value: "approved" },
-                  { label: "Rejected", value: "rejected" },
-                  { label: "Revision", value: "revision" },
-                ],
-                predicate: (e, v) => e.status === v,
-              },
-            ]}
-            onRowClick={setSelected}
-          />
-        )}
-
-        <Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-          <DialogContent className="sm:max-w-lg">
-            {selected && (
-              <>
-                <DialogHeader>
-                  <div className="flex items-center gap-2">
-                    <DialogTitle>{selected.reference}</DialogTitle>
-                    <StatusBadge status={selected.status} />
-                  </div>
-                </DialogHeader>
-                <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                  <Info label="Ticket" value={selected.requestRef} />
-                  <Info label="Revision" value={String(selected.revision)} />
-                  <Info label="Labor" value={formatCurrency(selected.laborCost)} />
-                  <Info label="Parts" value={formatCurrency(selected.partsCost)} />
-                  <Info label="Total" value={formatCurrency(selected.total)} />
-                  <Info label="Valid until" value={formatDate(selected.validUntil)} />
-                </div>
-                {["pendingAdminApproval", "sent", "revision"].includes(selected.status) &&
-                ["admin", "coordinator"].includes(user?.role ?? "") ? (
-                  <div className="grid gap-2">
-                    <Label>Assign service engineer (required to approve)</Label>
-                    <Select value={engineerId} onValueChange={setEngineerId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select engineer" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {engineers.map((eng) => (
-                          <SelectItem key={eng.id} value={eng.id}>
-                            {eng.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : null}
-                <div className="grid gap-2">
-                  <Label>Decision note</Label>
-                  <Textarea value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)} />
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" onClick={() => void openPreview(selected)}>
-                    <Eye className="mr-1 h-4 w-4" /> Preview
-                  </Button>
-                  {selected.serviceRequestId ? (
-                    <Button variant="outline" asChild>
-                      <Link to={`/app/estimates/${selected.serviceRequestId}/build`}>
-                        <Plus className="mr-1 h-4 w-4" /> Open Builder
-                      </Link>
-                    </Button>
-                  ) : null}
-                  {["pendingAdminApproval", "sent", "revision"].includes(selected.status) ? (
-                    <>
-                      <Button className="bg-success text-success-foreground" onClick={() => void act(selected, "approved")} disabled={saving}>
-                        <Check className="mr-1 h-4 w-4" /> Approve
-                      </Button>
-                      <Button variant="outline" onClick={() => void act(selected, "revision")} disabled={saving}>
-                        <MessageSquare className="mr-1 h-4 w-4" /> Revision
-                      </Button>
-                      <Button variant="outline" className="text-destructive" onClick={() => void act(selected, "rejected")} disabled={saving}>
-                        <X className="mr-1 h-4 w-4" /> Reject
-                      </Button>
-                    </>
-                  ) : null}
-                  {selected.status === "draft" && selected.serviceRequestId ? (
-                    <Button asChild>
-                      <Link to={`/app/estimates/${selected.serviceRequestId}/build`}>
-                        <Send className="mr-1 h-4 w-4" /> Continue in Builder
-                      </Link>
-                    </Button>
-                  ) : null}
-                </div>
-              </>
-            )}
-          </DialogContent>
-        </Dialog>
+        <DataTable
+          mode="server"
+          data={estimates}
+          columns={columns}
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search estimates…"
+          emptyMessage="No estimates yet. Open the Estimate Builder from a service ticket."
+          emptyHint="Try changing your search or filters."
+          filterValues={filters}
+          onFilterChange={setFilter}
+          filters={[{ key: "status", label: "Status", options: ESTIMATE_STATUS_FILTERS }]}
+          pagination={pagination}
+          onPageChange={setPage}
+          onLimitChange={setLimit}
+          loading={estimatesQuery.isLoading}
+          isFetching={estimatesQuery.isFetching}
+          error={estimatesQuery.error as Error | null}
+          onRetry={() => void estimatesQuery.refetch()}
+          onRowClick={(e) => navigate(`/app/estimates/${e.id}`)}
+        />
 
         <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
           <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto p-0">
@@ -321,14 +218,5 @@ export default function Estimates() {
         </Dialog>
       </div>
     </RoleGuard>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border p-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-medium">{value}</p>
-    </div>
   );
 }

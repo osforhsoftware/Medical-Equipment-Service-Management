@@ -1,12 +1,20 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { purchaseOrdersService } from "@/services/purchaseOrders.service";
+import { parsePurchaseOrderListQuery, sendPaginatedList } from "@/utils/listQuery";
 import { success } from "@/utils/response";
 
 export class PurchaseOrdersController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await purchaseOrdersService.getAll(req.tenantId!, req.query.status as string);
-      res.json(success("Purchase orders fetched successfully", data));
+      const query = parsePurchaseOrderListQuery(req);
+      const { data, total } = await purchaseOrdersService.getPaginated(req.tenantId!, {
+        status: query.status,
+        search: query.search,
+        skip: query.skip,
+        take: query.take,
+        orderBy: query.orderBy,
+      });
+      sendPaginatedList(res, "Purchase orders fetched successfully", data, total, query.page, query.limit);
     } catch (err) { next(err); }
   }
 

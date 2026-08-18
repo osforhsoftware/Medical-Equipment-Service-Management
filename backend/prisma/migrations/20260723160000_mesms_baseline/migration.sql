@@ -466,7 +466,7 @@ CREATE TABLE `job_photos` (
     `job_id` VARCHAR(191) NOT NULL,
     `filename` VARCHAR(191) NOT NULL,
     `mime_type` VARCHAR(191) NOT NULL,
-    `data_url` TEXT NOT NULL DEFAULT '',
+    `data_url` TEXT NOT NULL,
     `file_id` VARCHAR(191) NULL,
     `uploaded_by` VARCHAR(191) NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),

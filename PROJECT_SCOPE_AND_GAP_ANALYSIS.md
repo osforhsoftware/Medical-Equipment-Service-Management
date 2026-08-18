@@ -131,6 +131,7 @@ Expected workflow:
 - submit a signed/traceable inspection report;
 - move the request to estimation.
 
+
 Current state:
 
 - assigned request filtering and inspection-report persistence exist;
