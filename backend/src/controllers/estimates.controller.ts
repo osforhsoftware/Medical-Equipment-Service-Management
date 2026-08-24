@@ -10,6 +10,9 @@ export class EstimatesController {
       const { data, total } = await estimatesService.getPaginated(req.tenantId!, {
         status: query.status,
         search: query.search,
+        customerId: query.customerId,
+        createdFrom: query.createdFrom,
+        createdTo: query.createdTo,
         skip: query.skip,
         take: query.take,
         orderBy: query.orderBy,

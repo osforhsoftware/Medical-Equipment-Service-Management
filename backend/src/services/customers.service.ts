@@ -17,7 +17,7 @@ export class CustomersService {
   }
 
   async create(tenantId: string, data: {
-    name: string; type: string; typeOther?: string | null; contactPerson: string; email: string;
+    name: string; type: string; typeOther?: string | null; contactPerson: string; email?: string;
     phone: string; address: string; city: string; country: string; licenseGst?: string | null;
     note?: string | null;
     branchId?: string; status?: string;
@@ -28,6 +28,7 @@ export class CustomersService {
     const note = data.note?.trim() || null;
     return customersRepository.create(tenantId, {
       ...data,
+      email: data.email?.trim() ?? "",
       type,
       typeOther: data.typeOther?.trim() || null,
       address: data.address.trim(),

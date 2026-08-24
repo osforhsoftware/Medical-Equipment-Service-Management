@@ -2,6 +2,8 @@ export const TAXONOMY_TYPES = [
   "equipment_category",
   "equipment_condition",
   "customer_type",
+  "inventory_category",
+  "inventory_subcategory",
 ] as const;
 
 export type TaxonomyTypeName = (typeof TAXONOMY_TYPES)[number];
@@ -10,6 +12,7 @@ export type DefaultTaxonomyTerm = {
   name: string;
   slug: string;
   sortOrder: number;
+  parentSlug?: string;
 };
 
 export const DEFAULT_TAXONOMY_TERMS: Record<TaxonomyTypeName, DefaultTaxonomyTerm[]> = {
@@ -35,6 +38,23 @@ export const DEFAULT_TAXONOMY_TERMS: Record<TaxonomyTypeName, DefaultTaxonomyTer
     { name: "Dental", slug: "Dental", sortOrder: 50 },
     { name: "Other", slug: "Other", sortOrder: 60 },
   ],
+  inventory_category: [
+    { name: "Modules", slug: "modules", sortOrder: 10 },
+    { name: "Sensors", slug: "sensors", sortOrder: 20 },
+    { name: "Consumables", slug: "consumables", sortOrder: 30 },
+    { name: "Boards", slug: "boards", sortOrder: 40 },
+    { name: "Tools", slug: "tools", sortOrder: 50 },
+  ],
+  inventory_subcategory: [
+    { name: "Pump modules", slug: "pump-modules", sortOrder: 10, parentSlug: "modules" },
+    { name: "Control modules", slug: "control-modules", sortOrder: 20, parentSlug: "modules" },
+    { name: "Probes", slug: "probes", sortOrder: 10, parentSlug: "sensors" },
+    { name: "Temperature sensors", slug: "temperature-sensors", sortOrder: 20, parentSlug: "sensors" },
+    { name: "Filters", slug: "filters", sortOrder: 10, parentSlug: "consumables" },
+    { name: "Cables", slug: "cables", sortOrder: 20, parentSlug: "consumables" },
+    { name: "Control boards", slug: "control-boards", sortOrder: 10, parentSlug: "boards" },
+    { name: "Calibration kits", slug: "calibration-kits", sortOrder: 10, parentSlug: "tools" },
+  ],
 };
 
 /** Historical stored values → canonical slugs. */
@@ -55,6 +75,14 @@ export const TAXONOMY_LEGACY_ALIASES: Record<TaxonomyTypeName, Record<string, st
     Down: "down",
   },
   customer_type: {},
+  inventory_category: {
+    Modules: "modules",
+    Sensors: "sensors",
+    Consumables: "consumables",
+    Boards: "boards",
+    Tools: "tools",
+  },
+  inventory_subcategory: {},
 };
 
 export function slugifyTerm(name: string): string {

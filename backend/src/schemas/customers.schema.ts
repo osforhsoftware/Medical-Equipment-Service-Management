@@ -5,8 +5,13 @@ const customerFields = {
   type: z.string().trim().min(1, "Type is required").max(100),
   typeOther: z.string().trim().max(100).optional().nullable(),
   contactPerson: z.string().min(2, "Contact person is required").max(120),
-  email: z.string().email("Invalid email address"),
-  phone: z.string().min(5, "Phone number is required").max(30),
+  email: z
+    .string()
+    .trim()
+    .max(254)
+    .refine((value) => !value || z.string().email().safeParse(value).success, "Invalid email address")
+    .optional(),
+  phone: z.string().trim().min(5, "Phone number is required").max(30),
   address: z.string().trim().min(2, "Site address is required").max(300),
   city: z.string().trim().max(100).optional().default(""),
   country: z.string().trim().max(100).optional().default(""),

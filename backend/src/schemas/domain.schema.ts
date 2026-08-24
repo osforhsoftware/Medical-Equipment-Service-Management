@@ -23,7 +23,7 @@ export const estimateRevisionSchema = z.object({
     notes: z.string().max(10000).nullable().optional(),
     discount: money.default(0),
     sendForApproval: z.boolean().optional(),
-    status: z.enum(["draft", "pendingAdminApproval"]).optional(),
+    status: z.enum(["draft", "pendingAdminApproval", "sent"]).optional(),
     lines: z.array(z.object({
       type: z.enum(["labor", "part", "transport", "testing", "calibration", "service", "other"]),
       description: z.string().trim().min(1).max(500),

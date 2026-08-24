@@ -1,12 +1,15 @@
 import { estimatesRepository } from "@/repositories/estimates.repository";
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
+import { customersRepository } from "@/repositories/customers.repository";
 import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
 import { resolveTicketEventStatus } from "@/services/workflow/serviceTicketStateMachine";
 import { prisma } from "@/db/prisma";
 
 type CreateEstimateData = {
-  serviceRequestId: string;
+  serviceRequestId?: string;
+  customerId?: string;
+  equipmentId?: string;
   laborCost: number;
   partsCost: number;
   validUntil: string;
@@ -29,11 +32,40 @@ export class EstimatesService {
   }
 
   async create(tenantId: string, data: CreateEstimateData) {
-    const sr = await serviceRequestsRepository.findById(data.serviceRequestId, tenantId);
-    if (!sr) throw new AppError("Service ticket not found", 404);
-
     const reference = await generateReference(tenantId, "EST", "estimate");
     const total = (Number(data.laborCost) || 0) + (Number(data.partsCost) || 0);
+
+    if (!data.serviceRequestId) {
+      const customer = await customersRepository.findById(data.customerId!, tenantId);
+      if (!customer) throw new AppError("Customer not found", 404);
+
+      let equipmentName = "Sales quotation";
+      if (data.equipmentId) {
+        const equipment = await prisma.equipment.findFirst({
+          where: { id: data.equipmentId, tenantId, customerId: customer.id },
+        });
+        if (!equipment) throw new AppError("Equipment not found for this customer", 404);
+        equipmentName = equipment.name;
+      }
+
+      return estimatesRepository.create(tenantId, {
+        serviceRequestId: null,
+        customerId: customer.id,
+        equipmentId: data.equipmentId ?? null,
+        reference,
+        requestRef: "SALE",
+        customerName: customer.name,
+        equipmentName,
+        laborCost: data.laborCost,
+        partsCost: data.partsCost,
+        total,
+        status: "draft",
+        validUntil: new Date(data.validUntil),
+      });
+    }
+
+    const sr = await serviceRequestsRepository.findById(data.serviceRequestId, tenantId);
+    if (!sr) throw new AppError("Service ticket not found", 404);
 
     const estimate = await estimatesRepository.create(tenantId, {
       serviceRequestId: sr.id,

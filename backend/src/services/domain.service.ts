@@ -108,7 +108,7 @@ export class DomainService {
     return prisma.$transaction(async (tx) => {
       const estimate = await tx.estimate.findFirst({ where: { id: estimateId, tenantId } });
       if (!estimate) throw new AppError("Estimate not found", 404);
-      if (estimate.status === "approved") throw new AppError("Approved estimates cannot be revised", 409);
+      if (estimate.status === "approved" || estimate.status === "converted") throw new AppError("Approved estimates cannot be revised", 409);
 
       let subtotal = new Prisma.Decimal(0);
       let tax = new Prisma.Decimal(0);
@@ -158,8 +158,10 @@ export class DomainService {
         })),
       });
       const nextStatus =
-        input.sendForApproval === true || input.status === "pendingAdminApproval"
-          ? "pendingAdminApproval"
+        input.sendForApproval === true || input.status === "pendingAdminApproval" || input.status === "sent"
+          ? estimate.serviceRequestId
+            ? "pendingAdminApproval"
+            : "sent"
           : estimate.status === "revision"
             ? "revision"
             : "draft";
@@ -176,7 +178,7 @@ export class DomainService {
           terms: input.terms,
           notes: input.notes,
           status: nextStatus as never,
-          ...(nextStatus === "pendingAdminApproval" ? { sentAt: new Date() } : {}),
+          ...(nextStatus === "pendingAdminApproval" || nextStatus === "sent" ? { sentAt: new Date() } : {}),
         },
       });
       if (estimate.serviceRequestId && nextStatus === "pendingAdminApproval") {
@@ -236,7 +238,7 @@ export class DomainService {
       if (input.decision === "approved" && !isStaffApprover && actor.role !== "estimator") {
         throw new AppError("Only admin, coordinator, inspection staff, or service staff can approve estimates", 403);
       }
-      if (input.decision === "approved" && isStaffApprover && !input.engineerId) {
+      if (input.decision === "approved" && isStaffApprover && !input.engineerId && estimate.serviceRequestId) {
         throw new AppError("engineerId is required when approving an estimate", 422);
       }
 

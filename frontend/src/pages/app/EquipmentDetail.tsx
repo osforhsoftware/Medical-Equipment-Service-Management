@@ -6,6 +6,7 @@ import {
   DetailSection,
   RecordDetailLayout,
 } from "@/components/shared/RecordDetailLayout";
+import { EquipmentQrPanel } from "@/components/shared/EquipmentQrPanel";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api, ApiError, type BackendEquipment, type BackendEquipmentHistory } from "@/lib/api";
@@ -170,15 +171,24 @@ export default function EquipmentDetail() {
         },
       ] : undefined}
       sidebar={equipment ? (
-        <Card>
-          <CardHeader className="pb-3"><CardTitle className="text-base">Summary</CardTitle></CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Condition</span><StatusBadge status={equipment.condition} label={conditionName} /></div>
-            <div className="flex justify-between gap-2"><span className="text-muted-foreground">Tickets</span><span>{history?.requests?.length ?? "—"}</span></div>
-            <div className="flex justify-between gap-2"><span className="text-muted-foreground">Jobs</span><span>{history?.jobs?.length ?? "—"}</span></div>
-            <div className="flex justify-between gap-2"><span className="text-muted-foreground">Invoices</span><span>{history?.invoices?.length ?? "—"}</span></div>
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3"><CardTitle className="text-base">Summary</CardTitle></CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-muted-foreground">Condition</span><StatusBadge status={equipment.condition} label={conditionName} /></div>
+              <div className="flex justify-between gap-2"><span className="text-muted-foreground">Tickets</span><span>{history?.requests?.length ?? "—"}</span></div>
+              <div className="flex justify-between gap-2"><span className="text-muted-foreground">Jobs</span><span>{history?.jobs?.length ?? "—"}</span></div>
+              <div className="flex justify-between gap-2"><span className="text-muted-foreground">Invoices</span><span>{history?.invoices?.length ?? "—"}</span></div>
+            </CardContent>
+          </Card>
+          <EquipmentQrPanel
+            assetTag={equipment.assetTag}
+            name={equipment.name}
+            manufacturer={equipment.manufacturer}
+            model={equipment.model}
+            showInput={false}
+          />
+        </div>
       ) : undefined}
     />
   );

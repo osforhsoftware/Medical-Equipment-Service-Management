@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { HardDrive, Loader2, Plus, QrCode } from "lucide-react";
+import { EquipmentQrPanel } from "@/components/shared/EquipmentQrPanel";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -385,47 +386,40 @@ export default function EquipmentPage() {
             }}
             className="grid gap-4 py-2"
           >
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2" data-field="assetTag">
-                <Label htmlFor="asset-tag" className={shouldShow("assetTag") ? "text-destructive" : undefined}>
-                  Asset tag (QR)
-                  <RequiredMark />
-                </Label>
-                <Input
-                  id="asset-tag"
-                  value={form.assetTag}
-                  onChange={(e) => {
-                    const next = { ...form, assetTag: e.target.value };
-                    setForm(next);
-                    handleChange("assetTag", next);
-                  }}
-                  onBlur={() => handleBlur("assetTag", form)}
-                  placeholder="MED-AX-2207"
-                  className={fieldErrorClass(shouldShow("assetTag"), "font-mono")}
-                  {...fieldAria("assetTag", shouldShow("assetTag") ? errors.assetTag : null)}
-                />
-                {shouldShow("assetTag") && <FormFieldError field="assetTag" message={errors.assetTag} />}
-              </div>
-              <div className="grid gap-2" data-field="serialNumber">
-                <Label htmlFor="serial-number" className={shouldShow("serialNumber") ? "text-destructive" : undefined}>
-                  Serial number
-                  <RequiredMark />
-                </Label>
-                <Input
-                  id="serial-number"
-                  value={form.serialNumber}
-                  onChange={(e) => {
-                    const next = { ...form, serialNumber: e.target.value };
-                    setForm(next);
-                    handleChange("serialNumber", next);
-                  }}
-                  onBlur={() => handleBlur("serialNumber", form)}
-                  placeholder="SN-MRI-99201"
-                  className={fieldErrorClass(shouldShow("serialNumber"), "font-mono")}
-                  {...fieldAria("serialNumber", shouldShow("serialNumber") ? errors.serialNumber : null)}
-                />
-                {shouldShow("serialNumber") && <FormFieldError field="serialNumber" message={errors.serialNumber} />}
-              </div>
+            <EquipmentQrPanel
+              assetTag={form.assetTag}
+              name={form.name}
+              manufacturer={form.manufacturer}
+              model={form.model}
+              existingTags={equipment.map((item) => item.assetTag)}
+              required
+              error={shouldShow("assetTag") ? errors.assetTag : null}
+              onAssetTagChange={(assetTag) => {
+                const next = { ...form, assetTag };
+                setForm(next);
+                handleChange("assetTag", next);
+              }}
+              onBlur={() => handleBlur("assetTag", form)}
+            />
+            <div className="grid gap-2" data-field="serialNumber">
+              <Label htmlFor="serial-number" className={shouldShow("serialNumber") ? "text-destructive" : undefined}>
+                Serial number
+                <RequiredMark />
+              </Label>
+              <Input
+                id="serial-number"
+                value={form.serialNumber}
+                onChange={(e) => {
+                  const next = { ...form, serialNumber: e.target.value };
+                  setForm(next);
+                  handleChange("serialNumber", next);
+                }}
+                onBlur={() => handleBlur("serialNumber", form)}
+                placeholder="SN-MRI-99201"
+                className={fieldErrorClass(shouldShow("serialNumber"), "font-mono")}
+                {...fieldAria("serialNumber", shouldShow("serialNumber") ? errors.serialNumber : null)}
+              />
+              {shouldShow("serialNumber") && <FormFieldError field="serialNumber" message={errors.serialNumber} />}
             </div>
             <div className="grid gap-2" data-field="name">
               <Label htmlFor="equipment-name" className={shouldShow("name") ? "text-destructive" : undefined}>

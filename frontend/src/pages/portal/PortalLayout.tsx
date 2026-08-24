@@ -25,7 +25,7 @@ export function PortalLayout() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 border-b border-border bg-card">
+      <header className="no-print sticky top-0 z-30 border-b border-border bg-card">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4 sm:px-6">
           <MesmsLogo size="md" />
 

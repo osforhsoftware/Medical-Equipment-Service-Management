@@ -56,6 +56,8 @@ export interface ServiceRequestListParams extends BaseListParams {
 export interface EstimateListParams extends BaseListParams {
   status?: string;
   customerId?: string;
+  createdFrom?: string;
+  createdTo?: string;
 }
 
 export interface InventoryListParams extends BaseListParams {

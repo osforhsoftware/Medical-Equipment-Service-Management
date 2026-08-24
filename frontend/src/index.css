@@ -203,6 +203,9 @@
   .meta-text {
     @apply text-xs text-muted-foreground;
   }
+  .print-preview-page {
+    @apply rounded-lg bg-muted/40 p-4 sm:p-6;
+  }
 }
 
 /* ── Mobile field-service design system ── */
@@ -330,6 +333,11 @@
     display: none !important;
   }
 
+  .mobile-bottom-nav,
+  .mobile-shell header {
+    display: none !important;
+  }
+
   main {
     padding: 0 !important;
   }
@@ -353,6 +361,17 @@
     box-shadow: none !important;
     background: white !important;
     color: #020617 !important;
+  }
+
+  .print-preview-page {
+    background: white !important;
+    min-height: auto !important;
+  }
+
+  .print-preview-page .print-area {
+    max-width: none !important;
+    border: none !important;
+    box-shadow: none !important;
   }
 
   .qr-print-label {

@@ -4,7 +4,7 @@
  */
 export const API_WRITE_ACCESS = {
   "users.write": ["admin"],
-  "customers.write": ["admin", "coordinator"],
+  "customers.write": ["admin", "coordinator", "estimator"],
   "equipment.write": ["admin", "coordinator", "inventory"],
   "tickets.create": ["admin", "coordinator"],
   "tickets.update": ["admin", "coordinator"],
@@ -23,9 +23,10 @@ export const API_WRITE_ACCESS = {
   "purchaseOrders.receive": ["admin", "inventory"],
   "stockTransfers.write": ["admin", "inventory"],
   "amc.write": ["admin", "coordinator", "billing"],
-  "billing.write": ["admin", "billing"],
+  "sales.write": ["admin", "coordinator", "estimator"],
+  "sales.fulfill": ["admin", "inventory", "coordinator"],
   "settings.write": ["admin"],
-  "taxonomy.write": ["admin", "coordinator"],
+  "taxonomy.write": ["admin", "coordinator", "inventory"],
   "auditLogs.write": ["admin"],
   "files.upload": ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
   "notifications.write": ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],

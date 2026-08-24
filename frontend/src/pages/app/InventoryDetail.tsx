@@ -124,6 +124,7 @@ export default function InventoryDetail() {
                     items={[
                       { label: "SKU", value: item.sku },
                       { label: "Category", value: item.category },
+                      { label: "Subcategory", value: item.subcategory || "—" },
                       { label: "In stock", value: String(item.inStock) },
                       { label: "Reserved", value: String(item.reserved) },
                       { label: "Reorder at", value: String(item.reorderLevel) },

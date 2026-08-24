@@ -6,6 +6,8 @@ export const TAXONOMY_TABS: { type: TaxonomyType; label: string; singular: strin
   { type: "equipment_category", label: "Equipment Categories", singular: "category" },
   { type: "equipment_condition", label: "Equipment Conditions", singular: "condition" },
   { type: "customer_type", label: "Customer Types", singular: "customer type" },
+  { type: "inventory_category", label: "Inventory Categories", singular: "inventory category" },
+  { type: "inventory_subcategory", label: "Inventory Subcategories", singular: "subcategory" },
 ];
 
 export function slugifyTerm(name: string): string {

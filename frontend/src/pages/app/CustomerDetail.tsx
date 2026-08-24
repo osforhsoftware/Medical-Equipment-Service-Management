@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Building2, Mail, MapPin, Phone, User } from "lucide-react";
+import { Building2, FileText, Mail, MapPin, Phone, User } from "lucide-react";
 import {
   DetailInfoGrid,
   DetailSection,
@@ -8,6 +8,8 @@ import {
 } from "@/components/shared/RecordDetailLayout";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/context/AuthContext";
 import { api, ApiError, type BackendCustomer, type BackendEquipment, type BackendEstimate, type BackendInvoice, type BackendServiceJob, type BackendServiceRequest } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
@@ -15,6 +17,8 @@ import { termLabel } from "@/lib/taxonomy";
 import { useQuery } from "@tanstack/react-query";
 
 export default function CustomerDetail() {
+  const { hasRole } = useAuth();
+  const canQuote = hasRole(["admin", "coordinator", "estimator"]);
   const { id = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [customer, setCustomer] = useState<BackendCustomer | null>(null);
@@ -95,6 +99,15 @@ export default function CustomerDetail() {
       notFound={!loading && !error && !customer}
       notFoundTitle="Customer not found"
       notFoundDescription="The requested customer could not be found."
+      actions={
+        canQuote && customer ? (
+          <Button asChild>
+            <Link to={`/app/estimates/new?customerId=${customer.id}`}>
+              <FileText className="mr-1 h-4 w-4" /> New quotation
+            </Link>
+          </Button>
+        ) : undefined
+      }
       onRetry={() => void load()}
       activeTab={tab}
       onTabChange={(value) => setSearchParams(value === "overview" ? {} : { tab: value })}

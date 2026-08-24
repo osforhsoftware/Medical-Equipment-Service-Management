@@ -28,6 +28,9 @@ import Inspections from "./pages/app/Inspections.tsx";
 import Estimates from "./pages/app/Estimates.tsx";
 import EstimateDetail from "./pages/app/EstimateDetail.tsx";
 import EstimateBuilder from "./pages/app/EstimateBuilder.tsx";
+import EstimatePreview from "./pages/app/EstimatePreview.tsx";
+import Sales from "./pages/app/Sales.tsx";
+import SalesOrderDetail from "./pages/app/SalesOrderDetail.tsx";
 import Jobs from "./pages/app/Jobs.tsx";
 import JobDetail from "./pages/app/JobDetail.tsx";
 import Inventory from "./pages/app/Inventory.tsx";
@@ -57,6 +60,7 @@ import { PortalLayout } from "./pages/portal/PortalLayout.tsx";
 import PortalDashboard from "./pages/portal/PortalDashboard.tsx";
 import PortalEquipment from "./pages/portal/PortalEquipment.tsx";
 import PortalEstimates from "./pages/portal/PortalEstimates.tsx";
+import PortalEstimateDetail from "./pages/portal/PortalEstimateDetail.tsx";
 import PortalHistory from "./pages/portal/PortalHistory.tsx";
 
 const queryClient = new QueryClient({
@@ -83,6 +87,8 @@ const App = () => (
               <Route index element={<ModuleGuard module="Dashboard"><ResponsivePage mobile={<MobileDashboard />} desktop={<Dashboard />} /></ModuleGuard>} />
               <Route path="customers" element={<ModuleGuard module="Customers"><Customers /></ModuleGuard>} />
               <Route path="customers/:id" element={<ModuleGuard module="Customers"><CustomerDetail /></ModuleGuard>} />
+              <Route path="sales" element={<ModuleGuard module="Sales"><Sales /></ModuleGuard>} />
+              <Route path="sales/orders/:id" element={<ModuleGuard module="Sales"><SalesOrderDetail /></ModuleGuard>} />
               <Route path="equipment" element={<ModuleGuard module="Equipment"><Equipment /></ModuleGuard>} />
               <Route path="equipment/:id" element={<ModuleGuard module="Equipment"><EquipmentDetail /></ModuleGuard>} />
               <Route path="service-requests" element={<ModuleGuard module="Service Tickets"><ServiceRequests /></ModuleGuard>} />
@@ -91,7 +97,9 @@ const App = () => (
               <Route path="service-tickets/:id" element={<ModuleGuard module="Service Tickets"><ServiceRequestDetail /></ModuleGuard>} />
               <Route path="inspections" element={<ModuleGuard module="Inspections"><Inspections /></ModuleGuard>} />
               <Route path="estimates" element={<ModuleGuard module="Estimates"><Estimates /></ModuleGuard>} />
+              <Route path="estimates/new" element={<ModuleGuard module="Estimates"><EstimateBuilder /></ModuleGuard>} />
               <Route path="estimates/:ticketId/build" element={<ModuleGuard module="Estimates"><EstimateBuilder /></ModuleGuard>} />
+              <Route path="estimates/:id/preview" element={<ModuleGuard module="Estimates"><EstimatePreview /></ModuleGuard>} />
               <Route path="estimates/:id" element={<ModuleGuard module="Estimates"><EstimateDetail /></ModuleGuard>} />
               <Route path="jobs" element={<ModuleGuard module="Service Jobs"><ResponsivePage mobile={<MobileJobs />} desktop={<Jobs />} /></ModuleGuard>} />
               <Route path="jobs/:id" element={<ModuleGuard module="Service Jobs"><ResponsivePage mobile={<MobileJobDetail />} desktop={<JobDetail />} /></ModuleGuard>} />
@@ -124,6 +132,8 @@ const App = () => (
               <Route index element={<PortalDashboard />} />
               <Route path="equipment" element={<PortalEquipment />} />
               <Route path="estimates" element={<PortalEstimates />} />
+              <Route path="estimates/:id/preview" element={<EstimatePreview />} />
+              <Route path="estimates/:id" element={<PortalEstimateDetail />} />
               <Route path="history" element={<PortalHistory />} />
             </Route>
 

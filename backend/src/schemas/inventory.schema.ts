@@ -4,6 +4,7 @@ export const createInventorySchema = z.object({
   sku: z.string().min(2, "SKU is required").max(64),
   name: z.string().min(2, "Name is required").max(200),
   category: z.string().min(1, "Category is required").max(80),
+  subcategory: z.string().min(1, "Subcategory is required").max(80),
   description: z.string().max(5000).optional().nullable(),
   branchId: z.string().min(1).optional(),
   inStock: z.coerce.number().int().min(0).optional().default(0),
@@ -13,7 +14,7 @@ export const createInventorySchema = z.object({
   deliveryCharge: z.coerce.number().min(0).optional().default(0),
   deliveryChargeType: z.enum(["flat", "perUnit"]).optional().default("flat"),
   unitOfMeasure: z.string().min(1).max(30).optional().default("pcs"),
-  supplier: z.string().min(1, "Supplier is required").max(120),
+  supplier: z.string().max(120).optional().default(""),
   supplierId: z.string().cuid().optional().nullable(),
   imageFileIds: z.array(z.string().cuid()).optional(),
 });

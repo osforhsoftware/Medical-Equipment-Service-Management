@@ -38,6 +38,8 @@ const statusMap: Record<string, Tone> = {
   // estimates / invoices / po
   draft: "muted",
   pendingApproval: "warning",
+  pendingAdminApproval: "warning",
+  pending_admin_approval: "warning",
   approved: "success",
   sent: "info",
   rejected: "destructive",

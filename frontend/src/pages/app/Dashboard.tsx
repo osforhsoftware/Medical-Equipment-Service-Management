@@ -74,8 +74,9 @@ function roleQuickActions(role: Role): QuickAction[] {
       ];
     case "estimator":
       return [
-        { label: "Pending Estimates", to: "/app/estimates", icon: FileText },
-        { label: "Create Quotation", to: "/app/estimates", icon: FileText },
+        { label: "Sales Desk", to: "/app/sales", icon: FileText },
+        { label: "New Quotation", to: "/app/sales", icon: FileText },
+        { label: "Customers", to: "/app/customers", icon: FileText },
         { label: "Notifications", to: "/app/notifications", icon: Bell },
       ];
     case "engineer":

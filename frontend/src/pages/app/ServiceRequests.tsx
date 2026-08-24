@@ -84,7 +84,7 @@ const schema = z.object({
   type: z.string().min(1, "Select a type"),
   typeOther: z.string().optional(),
   priority: z.string().min(1, "Select priority"),
-  description: z.string().trim().min(10, "Describe the issue (min 10 chars)").max(500),
+  description: z.string().trim().min(1, "Description is required").max(500),
 }).superRefine((data, ctx) => {
   if (data.type === "Other" && !data.typeOther?.trim()) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["typeOther"], message: "Please specify the service type" });
@@ -577,8 +577,7 @@ export default function ServiceRequests() {
                 placeholder="Describe the reported issue…"
                 rows={3}
               />
-              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>{shouldShow("description") ? null : "Describe the issue in at least 10 characters."}</span>
+              <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
                 <span className="tabular-nums">{form.description.length} / 500</span>
               </div>
               {shouldShow("description") && <FormFieldError field="description" message={errors.description} />}

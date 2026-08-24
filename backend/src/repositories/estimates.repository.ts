@@ -13,6 +13,9 @@ const listIncludes = {
 export interface EstimateListFilters {
   status?: string;
   search?: string;
+  customerId?: string;
+  createdFrom?: string;
+  createdTo?: string;
   skip: number;
   take: number;
   orderBy: Prisma.EstimateOrderByWithRelationInput;
@@ -22,7 +25,15 @@ function buildWhere(tenantId: string, filters: Omit<EstimateListFilters, "skip" 
   const where: Prisma.EstimateWhereInput = {
     tenantId,
     ...(filters.status ? { status: filters.status as never } : {}),
+    ...(filters.customerId ? { customerId: filters.customerId } : {}),
   };
+
+  if (filters.createdFrom || filters.createdTo) {
+    where.createdAt = {
+      ...(filters.createdFrom ? { gte: new Date(filters.createdFrom) } : {}),
+      ...(filters.createdTo ? { lte: new Date(`${filters.createdTo}T23:59:59.999Z`) } : {}),
+    };
+  }
 
   if (filters.search) {
     where.OR = [

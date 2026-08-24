@@ -47,7 +47,7 @@ const customerSchema = z
     type: fieldRules.selectRequired("a customer type"),
     contactPerson: fieldRules.optionalString(),
     email: fieldRules.email(false),
-    phone: fieldRules.phone(false),
+    phone: fieldRules.phone(true),
     address: fieldRules.requiredString("Site address"),
     city: fieldRules.optionalString(),
     country: fieldRules.optionalString(),
@@ -133,8 +133,6 @@ export default function Customers() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
-  const [newTypeName, setNewTypeName] = useState("");
-  const [addingType, setAddingType] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -158,38 +156,8 @@ export default function Customers() {
 
   const openCreate = () => {
     setForm({ ...emptyForm, type: defaultType });
-    setNewTypeName("");
     resetValidation();
     setDialogOpen(true);
-  };
-
-  const addType = async () => {
-    const name = newTypeName.trim();
-    if (!name) return;
-    const existing = typeTerms.find(
-      (t) => t.slug.toLowerCase() === name.toLowerCase() || t.name.toLowerCase() === name.toLowerCase(),
-    );
-    if (existing) {
-      setForm({ ...form, type: existing.slug });
-      setNewTypeName("");
-      clearError("type");
-      toast.info("Type selected", { description: `"${existing.name}" is already in the list.` });
-      return;
-    }
-
-    setAddingType(true);
-    try {
-      const created = await api.createTaxonomy({ type: "customer_type", name });
-      await queryClient.invalidateQueries({ queryKey: ["taxonomy", "customer_type"] });
-      setForm({ ...form, type: created.slug });
-      setNewTypeName("");
-      clearError("type");
-      toast.success("Type added", { description: `${created.name} is now selectable.` });
-    } catch (err) {
-      toast.apiError(err, { fallback: "Unable to add customer type" });
-    } finally {
-      setAddingType(false);
-    }
   };
 
   const saveCustomer = async () => {
@@ -287,7 +255,7 @@ export default function Customers() {
     <div className="space-y-6">
       <PageHeader
         title="Customers"
-        description="Hospitals, clinics, labs and facilities you service."
+          description="Parties for sales quotations and service work."
         actions={
           <Button onClick={openCreate} variant="brand">
             <Plus className="mr-1 h-4 w-4" /> Add Customer
@@ -412,31 +380,6 @@ export default function Customers() {
                 </Select>
               </div>
             </div>
-            {canManageMasterData ? (
-              <div className="grid gap-2">
-                <Label htmlFor="customer-type-new">Add type</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="customer-type-new"
-                    value={newTypeName}
-                    onChange={(e) => setNewTypeName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void addType();
-                      }
-                    }}
-                    placeholder="e.g. Nursing Home"
-                  />
-                  <Button type="button" variant="outline" disabled={!newTypeName.trim() || addingType} onClick={() => void addType()}>
-                    {addingType ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Saves to Master Data so the type is available for every customer form.
-                </p>
-              </div>
-            ) : null}
             <div className="grid gap-2">
               <Label htmlFor="contact-person">Contact person</Label>
               <Input
@@ -466,7 +409,10 @@ export default function Customers() {
                 {shouldShow("email") && <FormFieldError field="email" message={errors.email} />}
               </div>
               <div className="grid gap-2" data-field="phone">
-                <Label htmlFor="phone">Phone</Label>
+                <Label htmlFor="phone" className={shouldShow("phone") ? "text-destructive" : undefined}>
+                  Phone
+                  <RequiredMark />
+                </Label>
                 <Input
                   id="phone"
                   value={form.phone}

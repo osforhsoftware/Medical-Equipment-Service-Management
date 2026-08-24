@@ -33,6 +33,11 @@ function normalizeRbac(raw: unknown): Record<string, string[]> {
     merged.Estimates = [...DEFAULT_RBAC_MATRIX.Estimates];
   }
 
+  const customers = merged.Customers ?? [];
+  if (!customers.includes("estimator") && DEFAULT_RBAC_MATRIX.Customers.includes("estimator")) {
+    merged.Customers = [...customers, "estimator"];
+  }
+
   return merged;
 }
 

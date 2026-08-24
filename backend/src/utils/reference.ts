@@ -1,6 +1,6 @@
 import { prisma } from "@/db/prisma";
 
-type RefModel = "serviceRequest" | "estimate" | "serviceJob" | "purchaseOrder" | "stockTransfer";
+type RefModel = "serviceRequest" | "estimate" | "serviceJob" | "purchaseOrder" | "stockTransfer" | "salesOrder";
 
 export async function generateReference(tenantId: string, prefix: string, model: RefModel): Promise<string> {
   const year = new Date().getFullYear();
@@ -21,6 +21,9 @@ export async function generateReference(tenantId: string, prefix: string, model:
       break;
     case "stockTransfer":
       count = await prisma.stockTransfer.count({ where: { tenantId } });
+      break;
+    case "salesOrder":
+      count = await prisma.salesOrder.count({ where: { tenantId } });
       break;
   }
 

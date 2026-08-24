@@ -219,7 +219,12 @@ export interface BackendEquipment {
   updatedAt: string;
 }
 
-export type TaxonomyType = "equipment_category" | "equipment_condition" | "customer_type";
+export type TaxonomyType =
+  | "equipment_category"
+  | "equipment_condition"
+  | "customer_type"
+  | "inventory_category"
+  | "inventory_subcategory";
 
 export interface BackendTaxonomyTerm {
   id: string;
@@ -228,6 +233,7 @@ export interface BackendTaxonomyTerm {
   name: string;
   slug: string;
   description: string | null;
+  parentId?: string | null;
   sortOrder: number;
   isActive: boolean;
   isSystem: boolean;
@@ -241,6 +247,7 @@ export interface CreateTaxonomyInput {
   name: string;
   slug?: string | null;
   description?: string | null;
+  parentId?: string | null;
   sortOrder?: number;
   isActive?: boolean;
 }
@@ -249,6 +256,7 @@ export interface UpdateTaxonomyInput {
   name?: string;
   slug?: string;
   description?: string | null;
+  parentId?: string | null;
   sortOrder?: number;
   isActive?: boolean;
 }
@@ -659,7 +667,9 @@ export interface BackendEstimateDecision {
 }
 
 export interface CreateEstimateInput {
-  serviceRequestId: string;
+  serviceRequestId?: string;
+  customerId?: string;
+  equipmentId?: string;
   laborCost: number;
   partsCost: number;
   validUntil: string;
@@ -778,6 +788,7 @@ export interface BackendInventoryItem {
   sku: string;
   name: string;
   category: string;
+  subcategory?: string | null;
   description?: string | null;
   branchId: string;
   inStock: number;
@@ -801,6 +812,7 @@ export interface CreateInventoryInput {
   sku: string;
   name: string;
   category: string;
+  subcategory: string;
   description?: string | null;
   branchId?: string;
   inStock?: number;
@@ -810,7 +822,7 @@ export interface CreateInventoryInput {
   deliveryCharge?: number;
   deliveryChargeType?: "flat" | "perUnit";
   unitOfMeasure?: string;
-  supplier: string;
+  supplier?: string;
   supplierId?: string | null;
   imageFileIds?: string[];
 }
@@ -984,6 +996,107 @@ export interface DashboardScheduleItem {
   scheduledFor: string;
   progress: number;
   href: string;
+}
+
+export interface SalesDeskData {
+  process: { key: string; label: string; hint: string }[];
+  kpis: {
+    activeCustomers: number;
+    openQuotes: number;
+    pendingApproval: number;
+    quoteValue: number;
+    outstanding: number;
+    collected: number;
+    overdueInvoices: number;
+    openInvoices: number;
+    todaySales: number;
+    monthlySales: number;
+    totalOrders: number;
+    pendingOrders: number;
+    pendingPayments: number;
+    pendingPaymentAmount: number;
+  };
+  quotesByStatus: Record<string, { count: number; total: number }>;
+  recentQuotes: {
+    id: string;
+    reference: string;
+    customerName: string;
+    status: string;
+    total: number;
+    validUntil: string;
+    updatedAt: string;
+    serviceRequestId: string | null;
+    kind: "service" | "sales";
+  }[];
+  outstandingInvoices: {
+    id: string;
+    reference: string;
+    customerName: string;
+    status: string;
+    total: number;
+    balanceDue: number;
+    dueAt: string;
+  }[];
+  topSellingProducts: { name: string; quantity: number; amount: number }[];
+  lowStockProducts: {
+    id: string;
+    sku: string;
+    name: string;
+    category: string;
+    inStock: number;
+    reserved: number;
+    reorderLevel: number;
+    available: number;
+  }[];
+}
+
+export interface BackendSalesOrderLine {
+  id: string;
+  type: string;
+  description: string;
+  sku?: string | null;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  taxRate: number;
+  lineTotal: number;
+  inventoryItemId?: string | null;
+}
+
+export interface BackendSalesOrder {
+  id: string;
+  estimateId: string;
+  customerId: string;
+  reference: string;
+  customerName: string;
+  salespersonName: string;
+  status: string;
+  deliveryStatus: string;
+  paymentStatus: string;
+  subtotal: number;
+  discount: number;
+  tax: number;
+  total: number;
+  paidTotal?: number;
+  balanceDue?: number;
+  notes?: string | null;
+  orderedAt: string;
+  deliveredAt?: string | null;
+  lines: BackendSalesOrderLine[];
+  invoices: { id: string; reference: string; status: string; total: number; paidTotal: number; balanceDue: number }[];
+  estimate?: { id: string; reference: string; status: string } | null;
+}
+
+export interface SalesReportsData {
+  dailySales: number;
+  monthlySales: number;
+  productWise: { name: string; quantity: number; amount: number }[];
+  sparePartsSales: { name: string; quantity: number; amount: number }[];
+  equipmentSales: { name: string; quantity: number; amount: number }[];
+  salespersonWise: { name: string; quantity: number; amount: number }[];
+  customerWise: { name: string; quantity: number; amount: number }[];
+  outstanding: { id: string; customerName: string; total: number; paidTotal: number; balanceDue: number; status: string }[];
+  topSelling: { name: string; quantity: number; amount: number }[];
 }
 
 export interface DashboardData {
@@ -1600,6 +1713,23 @@ export const api = {
 
   getDashboard: () =>
     request<DashboardData>("/api/dashboard"),
+
+  getSalesDesk: () => request<SalesDeskData>("/api/sales/desk"),
+  listSalesOrders: () => request<BackendSalesOrder[]>("/api/sales/orders"),
+  getSalesOrder: (id: string) => request<BackendSalesOrder>(`/api/sales/orders/${id}`),
+  convertSalesQuote: (estimateId: string, data?: { commissionRate?: number; notes?: string }) =>
+    request<BackendSalesOrder>(`/api/sales/quotes/${estimateId}/convert`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    }),
+  deliverSalesOrder: (id: string) =>
+    request<BackendSalesOrder>(`/api/sales/orders/${id}/deliver`, { method: "POST", body: JSON.stringify({}) }),
+  invoiceSalesOrder: (id: string, data?: { dueAt?: string; commissionRate?: number }) =>
+    request<BackendInvoice>(`/api/sales/orders/${id}/invoice`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    }),
+  getSalesReports: () => request<SalesReportsData>("/api/sales/reports"),
 
   listNotifications: () => request<BackendNotification[]>("/api/notifications"),
 

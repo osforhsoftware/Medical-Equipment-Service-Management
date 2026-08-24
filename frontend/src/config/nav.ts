@@ -21,6 +21,7 @@ import {
   BriefcaseBusiness,
   BadgeIndianRupee,
   Tags,
+  Store,
   type LucideIcon,
 } from "lucide-react";
 import type { Role } from "@/data/types";
@@ -38,11 +39,13 @@ const ALL: Role[] = ["admin", "coordinator", "inspector", "estimator", "engineer
 export const navItems: NavItem[] = [
   { label: "Dashboard", to: "/app", icon: LayoutDashboard, roles: ALL, group: "Overview" },
 
-  { label: "Customers", to: "/app/customers", icon: Users, roles: ["admin", "coordinator", "billing"], group: "Operations" },
+  { label: "Sales", to: "/app/sales", icon: Store, roles: ["admin", "coordinator", "estimator", "billing", "inventory"], group: "Sales" },
+  { label: "Customers", to: "/app/customers", icon: Users, roles: ["admin", "coordinator", "estimator", "billing"], group: "Sales" },
+  { label: "Estimates", to: "/app/estimates", icon: FileText, roles: ["admin", "coordinator", "estimator", "billing", "inspector", "engineer"], group: "Sales" },
+
   { label: "Equipment", to: "/app/equipment", icon: HardDrive, roles: ["admin", "coordinator", "inspector", "engineer", "inventory"], group: "Operations" },
   { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList, roles: ["admin", "coordinator", "inspector", "engineer", "estimator"], group: "Operations" },
   { label: "Inspections", to: "/app/inspections", icon: Search, roles: ["admin", "coordinator", "inspector"], group: "Operations" },
-  { label: "Estimates", to: "/app/estimates", icon: FileText, roles: ["admin", "coordinator", "estimator", "billing", "inspector", "engineer"], group: "Operations" },
   { label: "Service Jobs", to: "/app/jobs", icon: Wrench, roles: ["admin", "coordinator", "engineer"], group: "Operations" },
   { label: "Projects", to: "/app/projects", icon: FolderKanban, roles: ["admin", "coordinator", "estimator", "engineer"], group: "Operations" },
   { label: "Service Catalog", to: "/app/service-catalog", icon: BookOpen, roles: ["admin", "coordinator", "estimator"], group: "Operations" },
@@ -66,4 +69,4 @@ export const navItems: NavItem[] = [
   { label: "Settings", to: "/app/settings", icon: Settings, roles: ["admin"], group: "Administration" },
 ];
 
-export const navGroups = ["Overview", "Operations", "Supply Chain", "Contracts & Finance", "Insights", "Administration"];
+export const navGroups = ["Overview", "Sales", "Operations", "Supply Chain", "Contracts & Finance", "Insights", "Administration"];
