@@ -21,6 +21,10 @@ import {
   BriefcaseBusiness,
   BadgeIndianRupee,
   Tags,
+  Store,
+  ArrowLeftRight,
+  History,
+  Undo2,
   type LucideIcon,
 } from "lucide-react";
 import type { Role } from "@/data/types";
@@ -38,11 +42,13 @@ const ALL: Role[] = ["admin", "coordinator", "inspector", "estimator", "engineer
 export const navItems: NavItem[] = [
   { label: "Dashboard", to: "/app", icon: LayoutDashboard, roles: ALL, group: "Overview" },
 
-  { label: "Customers", to: "/app/customers", icon: Users, roles: ["admin", "coordinator", "billing"], group: "Operations" },
+  { label: "Sales", to: "/app/sales", icon: Store, roles: ["admin", "coordinator", "estimator", "billing", "inventory"], group: "Sales" },
+  { label: "Customers", to: "/app/customers", icon: Users, roles: ["admin", "coordinator", "estimator", "billing"], group: "Sales" },
+  { label: "Estimates", to: "/app/estimates", icon: FileText, roles: ["admin", "coordinator", "estimator", "billing", "inspector", "engineer"], group: "Sales" },
+
   { label: "Equipment", to: "/app/equipment", icon: HardDrive, roles: ["admin", "coordinator", "inspector", "engineer", "inventory"], group: "Operations" },
   { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList, roles: ["admin", "coordinator", "inspector", "engineer", "estimator"], group: "Operations" },
   { label: "Inspections", to: "/app/inspections", icon: Search, roles: ["admin", "coordinator", "inspector"], group: "Operations" },
-  { label: "Estimates", to: "/app/estimates", icon: FileText, roles: ["admin", "coordinator", "estimator", "billing", "inspector", "engineer"], group: "Operations" },
   { label: "Service Jobs", to: "/app/jobs", icon: Wrench, roles: ["admin", "coordinator", "engineer"], group: "Operations" },
   { label: "Projects", to: "/app/projects", icon: FolderKanban, roles: ["admin", "coordinator", "estimator", "engineer"], group: "Operations" },
   { label: "Service Catalog", to: "/app/service-catalog", icon: BookOpen, roles: ["admin", "coordinator", "estimator"], group: "Operations" },
@@ -51,6 +57,9 @@ export const navItems: NavItem[] = [
   { label: "Stock Purchase Requests", to: "/app/stock-purchase-requests", icon: ShoppingCart, roles: ["admin", "inventory", "inspector", "engineer"], group: "Supply Chain" },
   { label: "Suppliers", to: "/app/suppliers", icon: Truck, roles: ["admin", "inventory"], group: "Supply Chain" },
   { label: "Purchase Orders", to: "/app/purchase-orders", icon: ShoppingCart, roles: ["admin", "inventory"], group: "Supply Chain" },
+  { label: "Purchase Returns", to: "/app/purchase-returns", icon: Undo2, roles: ["admin", "inventory"], group: "Supply Chain" },
+  { label: "Stock Transfers", to: "/app/stock-transfers", icon: ArrowLeftRight, roles: ["admin", "inventory"], group: "Supply Chain" },
+  { label: "Stock Ledger", to: "/app/stock-ledger", icon: History, roles: ["admin", "inventory"], group: "Supply Chain" },
 
   { label: "Billing", to: "/app/billing", icon: Receipt, roles: ["admin", "billing"], group: "Contracts & Finance" },
   { label: "Expenses & Commissions", to: "/app/finance-operations", icon: BadgeIndianRupee, roles: ["admin", "billing"], group: "Contracts & Finance" },
@@ -66,4 +75,4 @@ export const navItems: NavItem[] = [
   { label: "Settings", to: "/app/settings", icon: Settings, roles: ["admin"], group: "Administration" },
 ];
 
-export const navGroups = ["Overview", "Operations", "Supply Chain", "Contracts & Finance", "Insights", "Administration"];
+export const navGroups = ["Overview", "Sales", "Operations", "Supply Chain", "Contracts & Finance", "Insights", "Administration"];

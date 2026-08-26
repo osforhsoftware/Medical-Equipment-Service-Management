@@ -17,7 +17,7 @@ export const createEquipmentSchema = z.object({
   warrantyEnd: z.string().min(1, "Warranty end date is required"),
   amcStatus: amcStatusSchema.optional().default("none"),
   condition: conditionSchema.optional().default("operational"),
-  lastServiceDate: z.string().optional(),
+  lastServiceDate: z.string().optional().nullable(),
 });
 
 export const updateEquipmentSchema = createEquipmentSchema.partial();

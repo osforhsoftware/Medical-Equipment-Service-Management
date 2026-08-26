@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  createPurchaseReturnSchema,
   estimateDecisionSchema,
   estimateRevisionSchema,
   inspectionRecommendationSchema,
@@ -64,6 +65,32 @@ test("purchase receipts cannot post empty or non-positive lines", () => {
         reference: "GRN-001",
         lines: [{ purchaseOrderLineId: "invalid", quantity: 0 }],
       },
+    }).success,
+    false,
+  );
+});
+
+test("purchase returns require a purchase order, reason, and positive lines", () => {
+  const validCuid = "clw7z0x9p0000abcde1234567";
+  assert.equal(
+    createPurchaseReturnSchema.safeParse({
+      body: {
+        purchaseOrderId: validCuid,
+        reason: "damaged",
+        lines: [{ purchaseOrderLineId: validCuid, quantity: 1 }],
+      },
+    }).success,
+    true,
+  );
+  assert.equal(
+    createPurchaseReturnSchema.safeParse({
+      body: { purchaseOrderId: validCuid, reason: "unknown", lines: [{ purchaseOrderLineId: validCuid, quantity: 1 }] },
+    }).success,
+    false,
+  );
+  assert.equal(
+    createPurchaseReturnSchema.safeParse({
+      body: { purchaseOrderId: validCuid, reason: "excess", lines: [] },
     }).success,
     false,
   );

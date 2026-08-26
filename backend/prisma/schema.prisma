@@ -31,6 +31,7 @@ model Tenant {
   inventoryItems         InventoryItem[]
   suppliers              Supplier[]
   purchaseOrders         PurchaseOrder[]
+  purchaseReturns        PurchaseReturn[]
   stockTransfers         StockTransfer[]
   stockTransferLines     StockTransferLine[]
   amcContracts           AmcContract[]
@@ -61,6 +62,7 @@ model Tenant {
   stockPurchaseRequests  StockPurchaseRequest[]
   ticketChangeRequests   ServiceTicketChangeRequest[]
   taxonomyTerms          TaxonomyTerm[]
+  salesOrders            SalesOrder[]
 
   @@map("tenants")
 }
@@ -233,6 +235,7 @@ model Customer {
   estimates       Estimate[]
   serviceJobs     ServiceJob[]
   invoices        Invoice[]
+  salesOrders     SalesOrder[]
   referrals       Referral[]
 
   @@index([tenantId])
@@ -295,10 +298,12 @@ enum TaxonomyType {
   equipment_category
   equipment_condition
   customer_type
+  inventory_category
+  inventory_subcategory
 }
 
 /// Tenant-managed lookup lists (WordPress-style taxonomies) for equipment
-/// categories/conditions and customer types.
+/// categories/conditions, customer types, and inventory categories.
 model TaxonomyTerm {
   id          String       @id @default(cuid())
   tenantId    String       @map("tenant_id")
@@ -306,17 +311,21 @@ model TaxonomyTerm {
   name        String
   slug        String
   description String?      @db.Text
+  parentId    String?      @map("parent_id")
   sortOrder   Int          @default(0) @map("sort_order")
   isActive    Boolean      @default(true) @map("is_active")
   isSystem    Boolean      @default(false) @map("is_system")
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   TaxonomyTerm?   @relation("TaxonomyHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children TaxonomyTerm[]  @relation("TaxonomyHierarchy")
 
   @@unique([tenantId, type, slug])
   @@unique([tenantId, type, name])
   @@index([tenantId, type, isActive])
+  @@index([parentId])
   @@map("taxonomy_terms")
 }
 
@@ -572,6 +581,7 @@ model Estimate {
   revision         Int            @default(1)
   terms            String?        @db.Text
   notes            String?        @db.Text
+  salespersonId    String?        @map("salesperson_id")
   sentAt           DateTime?      @map("sent_at")
   approvedAt       DateTime?      @map("approved_at")
   createdAt        DateTime       @default(now()) @map("created_at")
@@ -587,6 +597,7 @@ model Estimate {
   serviceJobs    ServiceJob[]
   reservations   StockReservation[]
   invoices       Invoice[]
+  salesOrder     SalesOrder?
 
   @@unique([tenantId, reference])
   @@index([tenantId])
@@ -673,6 +684,68 @@ enum EstimateStatus {
   approved
   rejected
   revision
+  converted
+}
+
+model SalesOrder {
+  id               String   @id @default(cuid())
+  tenantId         String   @map("tenant_id")
+  estimateId       String?  @unique @map("estimate_id")
+  customerId       String   @map("customer_id")
+  salespersonId    String?  @map("salesperson_id")
+  branchId         String?  @map("branch_id")
+  reference        String
+  customerName     String   @map("customer_name")
+  salespersonName  String   @map("salesperson_name")
+  status           String   @default("confirmed")
+  deliveryStatus   String   @default("pending") @map("delivery_status")
+  paymentStatus    String   @default("unpaid") @map("payment_status")
+  subtotal         Decimal  @db.Decimal(12, 2)
+  discount         Decimal  @default(0) @db.Decimal(12, 2)
+  tax              Decimal  @default(0) @db.Decimal(12, 2)
+  total            Decimal  @db.Decimal(12, 2)
+  notes            String?  @db.Text
+  orderedAt        DateTime @default(now()) @map("ordered_at")
+  deliveredAt      DateTime? @map("delivered_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  estimate      Estimate?          @relation(fields: [estimateId], references: [id], onDelete: Restrict)
+  customer      Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  lines         SalesOrderLine[]
+  invoices      Invoice[]
+  reservations  StockReservation[]
+  commissions   Commission[]
+
+  @@unique([tenantId, reference])
+  @@index([tenantId, status])
+  @@index([customerId])
+  @@index([salespersonId])
+  @@map("sales_orders")
+}
+
+model SalesOrderLine {
+  id              String   @id @default(cuid())
+  salesOrderId    String   @map("sales_order_id")
+  inventoryItemId String?  @map("inventory_item_id")
+  catalogItemId   String?  @map("catalog_item_id")
+  type            String
+  description     String
+  sku             String?
+  quantity        Decimal  @default(1) @db.Decimal(12, 3)
+  unitPrice       Decimal  @map("unit_price") @db.Decimal(12, 2)
+  discount        Decimal  @default(0) @db.Decimal(12, 2)
+  taxRate         Decimal  @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  lineTotal       Decimal  @map("line_total") @db.Decimal(12, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  salesOrder    SalesOrder      @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem?  @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+
+  @@index([salesOrderId])
+  @@index([inventoryItemId])
+  @@map("sales_order_lines")
 }
 
 // ── ServiceJob ────────────────────────────────────────────────────────────────
@@ -778,6 +851,7 @@ model JobExtra {
   jobId           String    @map("job_id")
   inventoryItemId String?   @map("inventory_item_id")
   description     String
+  type            String    @default("product")
   reason          String    @db.Text
   quantity        Decimal   @default(1) @db.Decimal(12, 3)
   unitPrice       Decimal   @map("unit_price") @db.Decimal(12, 2)
@@ -891,6 +965,7 @@ model InventoryItem {
   sku                String
   name               String
   category           String
+  subcategory        String?
   description        String?  @db.Text
   branchId           String   @map("branch_id")
   inStock            Int      @default(0) @map("in_stock")
@@ -914,11 +989,13 @@ model InventoryItem {
   movements                 StockMovement[]
   purchaseOrderLines        PurchaseOrderLine[]
   receiptLines              PurchaseReceiptLine[]
+  purchaseReturnLines       PurchaseReturnLine[]
   inspectionRecommendations InspectionRecommendation[]
   transferSourceLines       StockTransferLine[]        @relation("TransferSourceItem")
   transferDestinationLines  StockTransferLine[]        @relation("TransferDestinationItem")
   images                    InventoryItemImage[]
   stockPurchaseRequests     StockPurchaseRequest[]
+  salesOrderLines           SalesOrderLine[]
 
   @@unique([tenantId, branchId, sku])
   @@index([tenantId])
@@ -975,6 +1052,7 @@ model StockReservation {
   tenantId          String    @map("tenant_id")
   inventoryItemId   String    @map("inventory_item_id")
   estimateId        String?   @map("estimate_id")
+  salesOrderId      String?   @map("sales_order_id")
   jobId             String?   @map("job_id")
   requestedQuantity Int       @default(0) @map("requested_quantity")
   shortageQuantity  Int       @default(0) @map("shortage_quantity")
@@ -990,11 +1068,13 @@ model StockReservation {
   tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   inventoryItem InventoryItem   @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
   estimate      Estimate?       @relation(fields: [estimateId], references: [id], onDelete: SetNull)
+  salesOrder    SalesOrder?     @relation(fields: [salesOrderId], references: [id], onDelete: SetNull)
   job           ServiceJob?     @relation(fields: [jobId], references: [id], onDelete: SetNull)
   movements     StockMovement[]
 
   @@index([tenantId, inventoryItemId, status])
   @@index([estimateId])
+  @@index([salesOrderId])
   @@index([jobId])
   @@map("stock_reservations")
 }
@@ -1039,8 +1119,9 @@ model Supplier {
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  purchaseOrders PurchaseOrder[]
-  inventoryItems InventoryItem[]
+  purchaseOrders  PurchaseOrder[]
+  purchaseReturns PurchaseReturn[]
+  inventoryItems  InventoryItem[]
 
   @@index([tenantId])
   @@map("suppliers")
@@ -1065,6 +1146,7 @@ model PurchaseOrder {
   supplierRecord        Supplier?              @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   lineItems             PurchaseOrderLine[]
   receipts              PurchaseReceipt[]
+  purchaseReturns       PurchaseReturn[]
   stockPurchaseRequests StockPurchaseRequest[]
 
   @@unique([tenantId, reference])
@@ -1082,6 +1164,7 @@ model PurchaseOrderLine {
   description      String
   quantityOrdered  Int      @map("quantity_ordered")
   quantityReceived Int      @default(0) @map("quantity_received")
+  quantityReturned Int      @default(0) @map("quantity_returned")
   unitCost         Decimal  @map("unit_cost") @db.Decimal(12, 2)
   taxRate          Decimal  @default(0) @map("tax_rate") @db.Decimal(5, 2)
   lineTotal        Decimal  @map("line_total") @db.Decimal(12, 2)
@@ -1090,6 +1173,7 @@ model PurchaseOrderLine {
   purchaseOrder PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   inventoryItem InventoryItem?        @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
   receiptLines  PurchaseReceiptLine[]
+  returnLines   PurchaseReturnLine[]
 
   @@index([purchaseOrderId])
   @@map("purchase_order_lines")
@@ -1136,6 +1220,55 @@ enum PurchaseOrderStatus {
   received
   partial
   cancelled
+}
+
+model PurchaseReturn {
+  id              String   @id @default(cuid())
+  tenantId        String   @map("tenant_id")
+  purchaseOrderId String   @map("purchase_order_id")
+  supplierId      String?  @map("supplier_id")
+  reference       String
+  reason          String?
+  notes           String?  @db.Text
+  status          String   @default("posted")
+  returnedBy      String   @map("returned_by")
+  returnedAt      DateTime @default(now()) @map("returned_at")
+  items           Int      @default(0)
+  total           Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  purchaseOrder PurchaseOrder       @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  supplier      Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  lines         PurchaseReturnLine[]
+
+  @@unique([tenantId, reference])
+  @@index([tenantId])
+  @@index([purchaseOrderId])
+  @@index([supplierId])
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnLine {
+  id                  String   @id @default(cuid())
+  purchaseReturnId    String   @map("purchase_return_id")
+  purchaseOrderLineId String   @map("purchase_order_line_id")
+  inventoryItemId     String   @map("inventory_item_id")
+  sku                 String
+  description         String
+  quantity            Int
+  unitCost            Decimal  @map("unit_cost") @db.Decimal(12, 2)
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  purchaseReturn    PurchaseReturn    @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  purchaseOrderLine PurchaseOrderLine @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)
+  inventoryItem     InventoryItem     @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseReturnId])
+  @@index([purchaseOrderLineId])
+  @@index([inventoryItemId])
+  @@map("purchase_return_lines")
 }
 
 // ── StockTransfer ─────────────────────────────────────────────────────────────
@@ -1224,6 +1357,7 @@ model Invoice {
   customerId       String?       @map("customer_id")
   serviceRequestId String?       @map("service_request_id")
   estimateId       String?       @map("estimate_id")
+  salesOrderId     String?       @map("sales_order_id")
   jobId            String?       @map("job_id")
   reference        String
   customerName     String        @map("customer_name")
@@ -1247,6 +1381,7 @@ model Invoice {
   customer       Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
   serviceRequest ServiceRequest?   @relation(fields: [serviceRequestId], references: [id], onDelete: SetNull)
   estimate       Estimate?         @relation(fields: [estimateId], references: [id], onDelete: SetNull)
+  salesOrder     SalesOrder?       @relation(fields: [salesOrderId], references: [id], onDelete: SetNull)
   job            ServiceJob?       @relation(fields: [jobId], references: [id], onDelete: SetNull)
   lineItems      InvoiceLineItem[]
   payments       InvoicePayment[]
@@ -1257,6 +1392,7 @@ model Invoice {
   @@index([tenantId])
   @@index([customerId])
   @@index([jobId])
+  @@index([salesOrderId])
   @@map("invoices")
 }
 
@@ -1473,8 +1609,9 @@ model Commission {
   id          String    @id @default(cuid())
   tenantId    String    @map("tenant_id")
   referralId  String?   @map("referral_id")
-  invoiceId   String?   @map("invoice_id")
-  payeeName   String    @map("payee_name")
+  invoiceId    String?   @map("invoice_id")
+  salesOrderId String?   @map("sales_order_id")
+  payeeName    String    @map("payee_name")
   basisAmount Decimal   @map("basis_amount") @db.Decimal(12, 2)
   rate        Decimal   @default(0) @db.Decimal(5, 2)
   amount      Decimal   @db.Decimal(12, 2)
@@ -1484,7 +1621,8 @@ model Commission {
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   referral Referral? @relation(fields: [referralId], references: [id], onDelete: SetNull)
-  invoice  Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  invoice    Invoice?    @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  salesOrder SalesOrder? @relation(fields: [salesOrderId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, status])
   @@map("commissions")

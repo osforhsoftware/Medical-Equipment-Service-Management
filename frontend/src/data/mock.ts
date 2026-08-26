@@ -23,7 +23,7 @@ export const roleLabels: Record<Role, string> = {
   admin: "Administrator",
   coordinator: "Service Coordinator",
   inspector: "Inspection Technician",
-  estimator: "Estimate Staff",
+  estimator: "Sales / Estimator",
   engineer: "Service Engineer",
   inventory: "Inventory Manager",
   billing: "Billing Staff",

@@ -1,7 +1,8 @@
 /** Default module access — mirrors frontend nav.ts */
 export const DEFAULT_RBAC_MATRIX: Record<string, string[]> = {
   Dashboard: ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
-  Customers: ["admin", "coordinator", "billing"],
+  Sales: ["admin", "coordinator", "estimator", "billing", "inventory"],
+  Customers: ["admin", "coordinator", "estimator", "billing"],
   Equipment: ["admin", "coordinator", "inspector", "engineer", "inventory"],
   "Service Tickets": ["admin", "coordinator", "inspector", "estimator", "engineer"],
   "Service Requests": ["admin", "coordinator", "inspector", "estimator", "engineer"],
@@ -12,7 +13,9 @@ export const DEFAULT_RBAC_MATRIX: Record<string, string[]> = {
   "Stock Purchase Requests": ["admin", "inventory", "inspector", "engineer"],
   Suppliers: ["admin", "inventory"],
   "Purchase Orders": ["admin", "inventory"],
+  "Purchase Returns": ["admin", "inventory"],
   "Stock Transfers": ["admin", "inventory"],
+  "Stock Ledger": ["admin", "inventory"],
   Billing: ["admin", "billing"],
   Reports: ["admin", "billing", "coordinator"],
   Notifications: ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],

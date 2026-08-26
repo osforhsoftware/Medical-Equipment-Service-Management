@@ -9,7 +9,11 @@ export class EstimatesController {
       const query = parseEstimateListQuery(req);
       const { data, total } = await estimatesService.getPaginated(req.tenantId!, {
         status: query.status,
+        estimatorId: req.user!.role === "estimator" ? req.user!.userId : undefined,
         search: query.search,
+        customerId: query.customerId,
+        createdFrom: query.createdFrom,
+        createdTo: query.createdTo,
         skip: query.skip,
         take: query.take,
         orderBy: query.orderBy,
@@ -27,7 +31,7 @@ export class EstimatesController {
 
   async create(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await estimatesService.create(req.tenantId!, req.body);
+      const data = await estimatesService.create(req.tenantId!, req.user!.userId, req.body);
       res.status(201).json(success("Estimate created successfully", data));
     } catch (err) { next(err); }
   }

@@ -1,4 +1,5 @@
 import { inventoryRepository } from "@/repositories/inventory.repository";
+import { taxonomyService } from "@/services/taxonomy.service";
 import { AppError } from "@/middleware/errorHandler";
 import { prisma } from "@/db/prisma";
 import { getDefaultBranchId } from "@/utils/defaultBranch";
@@ -7,6 +8,7 @@ type CreateInventoryData = {
   sku: string;
   name: string;
   category: string;
+  subcategory: string;
   description?: string | null;
   branchId?: string;
   inStock?: number;
@@ -16,7 +18,7 @@ type CreateInventoryData = {
   deliveryCharge?: number;
   deliveryChargeType?: "flat" | "perUnit";
   unitOfMeasure?: string;
-  supplier: string;
+  supplier?: string;
   supplierId?: string | null;
   imageFileIds?: string[];
 };
@@ -63,6 +65,8 @@ export class InventoryService {
   async create(tenantId: string, data: CreateInventoryData) {
     const { imageFileIds, ...rest } = data;
     const branchId = rest.branchId || await getDefaultBranchId(tenantId);
+    const category = await taxonomyService.resolveSlug(tenantId, "inventory_category", rest.category);
+    const subcategory = await taxonomyService.resolveSlug(tenantId, "inventory_subcategory", rest.subcategory);
     if (rest.supplierId) {
       const supplier = await prisma.supplier.findFirst({ where: { id: rest.supplierId, tenantId } });
       if (!supplier) throw new AppError("Supplier not found", 404);
@@ -74,7 +78,8 @@ export class InventoryService {
           tenantId,
           sku: rest.sku,
           name: rest.name,
-          category: rest.category,
+          category,
+          subcategory,
           description: rest.description ?? null,
           branchId,
           inStock: rest.inStock ?? 0,
@@ -85,7 +90,7 @@ export class InventoryService {
           deliveryCharge: rest.deliveryCharge ?? 0,
           deliveryChargeType: rest.deliveryChargeType ?? "flat",
           unitOfMeasure: rest.unitOfMeasure ?? "pcs",
-          supplier: rest.supplier,
+          supplier: rest.supplier?.trim() || "",
           supplierId: rest.supplierId ?? null,
         },
       });
@@ -122,6 +127,12 @@ export class InventoryService {
       if (!supplier) throw new AppError("Supplier not found", 404);
       safe.supplier = supplier.name;
     }
+    if (safe.category) {
+      safe.category = await taxonomyService.resolveSlug(tenantId, "inventory_category", safe.category);
+    }
+    if (safe.subcategory) {
+      safe.subcategory = await taxonomyService.resolveSlug(tenantId, "inventory_subcategory", safe.subcategory);
+    }
     return prisma.$transaction(async (tx) => {
       await tx.inventoryItem.update({
         where: { id },
@@ -129,6 +140,7 @@ export class InventoryService {
           ...(safe.sku != null ? { sku: safe.sku } : {}),
           ...(safe.name != null ? { name: safe.name } : {}),
           ...(safe.category != null ? { category: safe.category } : {}),
+          ...(safe.subcategory != null ? { subcategory: safe.subcategory } : {}),
           ...(safe.description !== undefined ? { description: safe.description } : {}),
           ...(safe.branchId != null ? { branchId: safe.branchId } : {}),
           ...(safe.inStock != null ? { inStock: safe.inStock } : {}),

@@ -7,6 +7,7 @@ import {
   resolveTicketEventStatus,
 } from "@/services/workflow/serviceTicketStateMachine";
 import { generateReference } from "@/utils/reference";
+import { extraChargeType } from "@/utils/invoiceCharges";
 import { ESTIMATE_STAFF_APPROVER_ROLES } from "@/config/apiAccess";
 import { userHasAnyRoleKey } from "@/utils/userRoles";
 
@@ -108,7 +109,7 @@ export class DomainService {
     return prisma.$transaction(async (tx) => {
       const estimate = await tx.estimate.findFirst({ where: { id: estimateId, tenantId } });
       if (!estimate) throw new AppError("Estimate not found", 404);
-      if (estimate.status === "approved") throw new AppError("Approved estimates cannot be revised", 409);
+      if (estimate.status === "approved" || estimate.status === "converted") throw new AppError("Approved estimates cannot be revised", 409);
 
       let subtotal = new Prisma.Decimal(0);
       let tax = new Prisma.Decimal(0);
@@ -158,8 +159,10 @@ export class DomainService {
         })),
       });
       const nextStatus =
-        input.sendForApproval === true || input.status === "pendingAdminApproval"
-          ? "pendingAdminApproval"
+        input.sendForApproval === true || input.status === "pendingAdminApproval" || input.status === "sent"
+          ? estimate.serviceRequestId
+            ? "pendingAdminApproval"
+            : "sent"
           : estimate.status === "revision"
             ? "revision"
             : "draft";
@@ -176,7 +179,8 @@ export class DomainService {
           terms: input.terms,
           notes: input.notes,
           status: nextStatus as never,
-          ...(nextStatus === "pendingAdminApproval" ? { sentAt: new Date() } : {}),
+          salespersonId: actor.userId,
+          ...(nextStatus === "pendingAdminApproval" || nextStatus === "sent" ? { sentAt: new Date() } : {}),
         },
       });
       if (estimate.serviceRequestId && nextStatus === "pendingAdminApproval") {
@@ -233,10 +237,10 @@ export class DomainService {
           });
         }
       }
-      if (input.decision === "approved" && !isStaffApprover && actor.role !== "estimator") {
-        throw new AppError("Only admin, coordinator, inspection staff, or service staff can approve estimates", 403);
+      if (actor.role !== "customer" && !isStaffApprover) {
+        throw new AppError("Only administrators and service coordinators can decide estimates", 403);
       }
-      if (input.decision === "approved" && isStaffApprover && !input.engineerId) {
+      if (input.decision === "approved" && isStaffApprover && !input.engineerId && estimate.serviceRequestId) {
         throw new AppError("engineerId is required when approving an estimate", 422);
       }
 
@@ -490,7 +494,39 @@ export class DomainService {
       const item = await prisma.inventoryItem.findFirst({ where: { id: input.inventoryItemId, tenantId } });
       if (!item) throw new AppError("Inventory item not found", 404);
     }
-    return prisma.jobExtra.create({ data: { ...input, tenantId, jobId, createdBy: actor.userId } });
+    const extra = await prisma.jobExtra.create({
+      data: {
+        tenantId,
+        jobId,
+        createdBy: actor.userId,
+        inventoryItemId: input.inventoryItemId ?? null,
+        description: input.description,
+        type: input.type ?? "product",
+        reason: input.reason,
+        quantity: input.quantity,
+        unitPrice: input.unitPrice,
+        taxRate: input.taxRate ?? 0,
+      } as Prisma.JobExtraUncheckedCreateInput,
+    });
+    await prisma.notification.createMany({
+      data: [
+        {
+          tenantId,
+          type: "approval",
+          title: "Engineer parts / scope request",
+          body: input.description,
+          recipientRole: "coordinator",
+        },
+        {
+          tenantId,
+          type: "approval",
+          title: "Engineer parts / scope request",
+          body: input.description,
+          recipientRole: "admin",
+        },
+      ],
+    });
+    return extra;
   }
 
   async approveJobExtra(tenantId: string, id: string, actor: Actor) {
@@ -565,12 +601,29 @@ export class DomainService {
     });
   }
 
+  listBranches(tenantId: string) {
+    return prisma.branch.findMany({
+      where: { tenantId },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, city: true, phone: true },
+    });
+  }
+
   listStockTransfers(tenantId: string) {
     return prisma.stockTransfer.findMany({
       where: { tenantId },
       include: { lineItems: true },
       orderBy: { createdAt: "desc" },
     });
+  }
+
+  async getStockTransfer(tenantId: string, id: string) {
+    const transfer = await prisma.stockTransfer.findFirst({
+      where: { id, tenantId },
+      include: { lineItems: true },
+    });
+    if (!transfer) throw new AppError("Stock transfer not found", 404);
+    return transfer;
   }
 
   async createStockTransfer(tenantId: string, input: any) {
@@ -843,6 +896,117 @@ export class DomainService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
+  listPurchaseReturns(tenantId: string) {
+    return prisma.purchaseReturn.findMany({
+      where: { tenantId },
+      include: {
+        lines: true,
+        purchaseOrder: { select: { id: true, reference: true, supplier: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async getPurchaseReturn(tenantId: string, id: string) {
+    const row = await prisma.purchaseReturn.findFirst({
+      where: { id, tenantId },
+      include: {
+        lines: true,
+        purchaseOrder: { select: { id: true, reference: true, supplier: true, status: true } },
+      },
+    });
+    if (!row) throw new AppError("Purchase return not found", 404);
+    return row;
+  }
+
+  async createPurchaseReturn(tenantId: string, actor: Actor, input: any) {
+    return prisma.$transaction(async (tx) => {
+      const po = await tx.purchaseOrder.findFirst({
+        where: { id: input.purchaseOrderId, tenantId, status: { in: ["partial", "received"] } },
+        include: { lineItems: true },
+      });
+      if (!po) throw new AppError("Returnable purchase order not found", 404);
+
+      const purchaseReturn = await tx.purchaseReturn.create({
+        data: {
+          tenantId,
+          purchaseOrderId: po.id,
+          supplierId: po.supplierId,
+          reference: ref("PRN"),
+          reason: input.reason,
+          notes: input.notes,
+          returnedBy: actor.userId,
+          items: input.lines.length,
+        },
+      });
+
+      let total = new Prisma.Decimal(0);
+      const seenLines = new Set<string>();
+      for (const returned of input.lines) {
+        if (seenLines.has(returned.purchaseOrderLineId)) {
+          throw new AppError("Each purchase order line can appear only once on a return", 409);
+        }
+        seenLines.add(returned.purchaseOrderLineId);
+        const line = po.lineItems.find((candidate) => candidate.id === returned.purchaseOrderLineId);
+        if (!line?.inventoryItemId) throw new AppError("Purchase order line is not linked to inventory", 409);
+        const outstanding = line.quantityReceived - line.quantityReturned;
+        if (returned.quantity > outstanding) {
+          throw new AppError(`Return exceeds returnable quantity for ${line.description}`, 409);
+        }
+        const item = await tx.inventoryItem.findFirst({ where: { id: line.inventoryItemId, tenantId } });
+        if (!item) throw new AppError("Inventory item not found", 404);
+        const available = item.inStock - item.reserved;
+        if (available < returned.quantity) {
+          throw new AppError(`Insufficient available stock to return ${line.description}. Available: ${available}`, 409);
+        }
+        const updated = await tx.inventoryItem.update({
+          where: { id: item.id },
+          data: { inStock: { decrement: returned.quantity } },
+        });
+        await tx.purchaseOrderLine.update({
+          where: { id: line.id },
+          data: { quantityReturned: { increment: returned.quantity } },
+        });
+        line.quantityReturned += returned.quantity;
+        const lineTotal = money(line.unitCost).mul(returned.quantity);
+        total = total.plus(lineTotal);
+        await tx.purchaseReturnLine.create({
+          data: {
+            purchaseReturnId: purchaseReturn.id,
+            purchaseOrderLineId: line.id,
+            inventoryItemId: item.id,
+            sku: line.sku,
+            description: line.description,
+            quantity: returned.quantity,
+            unitCost: line.unitCost,
+          },
+        });
+        await tx.stockMovement.create({
+          data: {
+            tenantId,
+            inventoryItemId: item.id,
+            type: "purchase_return",
+            quantity: -returned.quantity,
+            balanceAfter: updated.inStock,
+            referenceType: "purchase_return",
+            referenceId: purchaseReturn.id,
+            reason: input.reason,
+            actorId: actor.userId,
+          },
+        });
+      }
+
+      return tx.purchaseReturn.update({
+        where: { id: purchaseReturn.id },
+        data: { total, items: input.lines.length },
+        include: {
+          lines: true,
+          purchaseOrder: { select: { id: true, reference: true, supplier: true } },
+        },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
   async createInvoiceFromJob(tenantId: string, actor: Actor, input: any) {
     return prisma.$transaction(async (tx) => {
       const job = await tx.serviceJob.findFirst({
@@ -855,9 +1019,7 @@ export class DomainService {
       if (!job?.estimate || job.estimate.status !== "approved") {
         throw new AppError("Completed job with an approved estimate is required", 409);
       }
-      if (!input.skipBillingVerification && !job.billingVerifiedAt) {
-        throw new AppError("Billing verification must be completed before generating an invoice", 409);
-      }
+      // Billing verification step removed – coordinator/engineer updates are trusted upstream.
       const existing = await tx.invoice.findFirst({ where: { tenantId, jobId: job.id, status: { not: "closed" } } });
       if (existing) throw new AppError("An invoice already exists for this job", 409);
 
@@ -876,13 +1038,38 @@ export class DomainService {
           const net = money(extra.quantity).mul(extra.unitPrice);
           return {
             jobExtraId: extra.id,
-            type: "extra",
+            type: extraChargeType(extra),
             description: extra.description,
             quantity: extra.quantity,
             unitPrice: extra.unitPrice,
             taxRate: extra.taxRate,
             discount: new Prisma.Decimal(0),
             lineTotal: money(net.plus(net.mul(extra.taxRate.div(100)))),
+          };
+        }),
+        ...(Array.isArray(input.additionalLines) ? input.additionalLines : []).map((line: {
+          type?: string;
+          description: string;
+          quantity: number;
+          unitPrice: number;
+          taxRate?: number;
+          discount?: number;
+          catalogItemId?: string | null;
+        }) => {
+          const qty = money(line.quantity);
+          const unitPrice = money(line.unitPrice);
+          const discount = money(line.discount ?? 0);
+          const taxRate = money(line.taxRate ?? 0);
+          const net = money(qty.mul(unitPrice).minus(discount));
+          return {
+            catalogItemId: line.catalogItemId ?? null,
+            type: line.type || "other",
+            description: String(line.description).trim(),
+            quantity: qty,
+            unitPrice,
+            taxRate,
+            discount,
+            lineTotal: money(net.plus(net.mul(taxRate.div(100)))),
           };
         }),
       ];
@@ -1006,11 +1193,14 @@ export class DomainService {
   }
 
   async equipmentHistory(tenantId: string, assetTag: string) {
-    const equipment = await prisma.equipment.findFirst({ where: { tenantId, assetTag } });
+    const tag = assetTag.trim();
+    const equipment = await prisma.equipment.findFirst({
+      where: { tenantId, OR: [{ assetTag: tag }, { serialNumber: tag }] },
+    });
     if (!equipment) throw new AppError("Equipment not found", 404);
     const [requests, jobs, invoices, scans] = await Promise.all([
       prisma.serviceRequest.findMany({
-        where: { tenantId, OR: [{ equipmentId: equipment.id }, { equipmentItems: { some: { assetTag } } }] },
+        where: { tenantId, OR: [{ equipmentId: equipment.id }, { equipmentItems: { some: { assetTag: equipment.assetTag } } }] },
         include: { inspectionReport: { include: { recommendations: true, attachments: true } }, timelineEvents: true },
         orderBy: { createdAt: "desc" },
       }),
@@ -1186,12 +1376,15 @@ export class DomainService {
   }
 
   async recordQrScan(tenantId: string, actor: Actor, input: any, metadata: { ip?: string; userAgent?: string }) {
-    const equipment = await prisma.equipment.findFirst({ where: { tenantId, assetTag: input.assetTag } });
+    const tag = String(input.assetTag ?? "").trim();
+    const equipment = await prisma.equipment.findFirst({
+      where: { tenantId, OR: [{ assetTag: tag }, { serialNumber: tag }] },
+    });
     const scan = await prisma.qrScan.create({
       data: {
         tenantId,
         equipmentId: equipment?.id,
-        assetTag: input.assetTag,
+        assetTag: equipment?.assetTag ?? tag,
         scannedById: actor.userId,
         source: input.source,
         ip: metadata.ip,
@@ -1409,6 +1602,13 @@ export class DomainService {
           title: "Stock purchase request",
           body: `${input.quantity} × ${item.name} (${item.sku}) requested`,
           recipientRole: "admin",
+        },
+        {
+          tenantId,
+          type: "stock",
+          title: "Stock purchase request",
+          body: `${input.quantity} × ${item.name} (${item.sku}) requested`,
+          recipientRole: "coordinator",
         },
       ],
     });

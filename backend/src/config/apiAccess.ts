@@ -4,7 +4,7 @@
  */
 export const API_WRITE_ACCESS = {
   "users.write": ["admin"],
-  "customers.write": ["admin", "coordinator"],
+  "customers.write": ["admin", "coordinator", "estimator"],
   "equipment.write": ["admin", "coordinator", "inventory"],
   "tickets.create": ["admin", "coordinator"],
   "tickets.update": ["admin", "coordinator"],
@@ -14,18 +14,20 @@ export const API_WRITE_ACCESS = {
   "tickets.delete": ["admin"],
   "inspections.write": ["admin", "coordinator", "inspector"],
   "estimates.write": ["admin", "coordinator", "estimator"],
-  "estimates.decide": ["admin", "coordinator", "inspector", "engineer", "customer"],
+  "estimates.decide": ["admin", "coordinator", "customer"],
   "jobs.write": ["admin", "coordinator", "engineer"],
   "inventory.write": ["admin", "inventory"],
   "inventory.adjust": ["admin", "inventory"],
   "suppliers.write": ["admin", "inventory"],
   "purchaseOrders.write": ["admin", "inventory"],
   "purchaseOrders.receive": ["admin", "inventory"],
+  "purchaseReturns.write": ["admin", "inventory"],
   "stockTransfers.write": ["admin", "inventory"],
   "amc.write": ["admin", "coordinator", "billing"],
-  "billing.write": ["admin", "billing"],
+  "sales.write": ["admin", "coordinator", "estimator"],
+  "sales.fulfill": ["admin", "inventory", "coordinator"],
   "settings.write": ["admin"],
-  "taxonomy.write": ["admin", "coordinator"],
+  "taxonomy.write": ["admin", "coordinator", "inventory"],
   "auditLogs.write": ["admin"],
   "files.upload": ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
   "notifications.write": ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
@@ -47,7 +49,7 @@ export const ALL_ROLES = [
 export type AppRole = (typeof ALL_ROLES)[number];
 
 /** Staff who can approve/reject estimates and assign an engineer. */
-export const ESTIMATE_STAFF_APPROVER_ROLES = ["admin", "coordinator", "inspector", "engineer"] as const;
+export const ESTIMATE_STAFF_APPROVER_ROLES = ["admin", "coordinator"] as const;
 
 export function rolesFor(permission: ApiWritePermission): readonly string[] {
   return API_WRITE_ACCESS[permission];

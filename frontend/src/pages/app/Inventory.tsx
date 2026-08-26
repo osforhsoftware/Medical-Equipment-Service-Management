@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { Plus, PackageCheck, Loader2, AlertTriangle, Boxes, Lock } from "lucide-react";
@@ -29,19 +29,23 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { api, type BackendInventoryItem } from "@/lib/api";
+import { api, type BackendInventoryItem, type BackendTaxonomyTerm } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useListingUrlState } from "@/hooks/useListingUrlState";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import { formatCurrency, formatCurrencyShort } from "@/lib/format";
-import { INVENTORY_CATEGORY_OPTIONS } from "@/lib/fixedOptions";
 import { EMPTY_PAGINATION_META } from "@/lib/listing";
+import { navItems } from "@/config/nav";
+import { activeTerms, termLabel } from "@/lib/taxonomy";
+import { userCanAccessModule } from "@/lib/userRoles";
 import { toast } from "@/lib/toast";
 
 const UOM = ["pcs", "box", "meter", "set", "kit"];
+const ADD_OPTION = "__add__";
 
 const nonNegativeString = (label: string) =>
   z.string().refine((v) => {
@@ -55,7 +59,9 @@ const inventorySchema = z
     sku: fieldRules.requiredString("SKU"),
     name: fieldRules.requiredString("Name"),
     category: z.string(),
+    subcategory: z.string(),
     categoryOther: z.string().optional(),
+    subcategoryOther: z.string().optional(),
     description: fieldRules.optionalString(),
     inStock: nonNegativeString("Quantity on hand"),
     reorderLevel: nonNegativeString("Reorder threshold"),
@@ -64,42 +70,54 @@ const inventorySchema = z
     deliveryCharge: nonNegativeString("Delivery charge"),
     deliveryChargeType: z.enum(["flat", "perUnit"]),
     unitOfMeasure: z.string(),
-    supplier: fieldRules.optionalString(),
+    supplierId: z.string(),
+    supplierOther: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    const resolvedCategory = data.category === "Other" ? data.categoryOther?.trim() : data.category;
-    if (!resolvedCategory) {
+    if (!data.category || data.category === ADD_OPTION) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["category"],
-        message: "Select or add a category.",
+        path: data.category === ADD_OPTION && data.categoryOther?.trim() ? ["categoryOther"] : ["category"],
+        message: data.category === ADD_OPTION ? "Click Add to save the new category." : "Select or add a category.",
       });
     }
-    if (data.category === "Other" && !data.categoryOther?.trim()) {
+    if (data.category === ADD_OPTION && !data.categoryOther?.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["categoryOther"],
         message: "Enter a category.",
       });
     }
+    if (!data.subcategory || data.subcategory === ADD_OPTION) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: data.subcategory === ADD_OPTION && data.subcategoryOther?.trim() ? ["subcategoryOther"] : ["subcategory"],
+        message: data.subcategory === ADD_OPTION ? "Click Add to save the new subcategory." : "Select or add a subcategory.",
+      });
+    }
+    if (data.subcategory === ADD_OPTION && !data.subcategoryOther?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["subcategoryOther"],
+        message: "Enter a subcategory.",
+      });
+    }
+    if (data.supplierId === ADD_OPTION) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["supplierOther"],
+        message: data.supplierOther?.trim() ? "Click Add to save the new supplier." : "Enter a supplier name.",
+      });
+    }
   });
-
-function buildCategoryOptions(items: BackendInventoryItem[], addedCategories: string[]) {
-  const base = INVENTORY_CATEGORY_OPTIONS.filter((o) => o.value !== "Other");
-  const other = INVENTORY_CATEGORY_OPTIONS.find((o) => o.value === "Other")!;
-  const known = new Set(base.map((o) => o.value));
-  const extras = [...new Set([...items.map((i) => i.category), ...addedCategories])]
-    .filter((c) => c && !known.has(c) && c !== "Other")
-    .sort()
-    .map((c) => ({ value: c, label: c }));
-  return [...base, ...extras, other];
-}
 
 const emptyForm = {
   sku: "",
   name: "",
-  category: "Modules",
+  category: "",
+  subcategory: "",
   categoryOther: "",
+  subcategoryOther: "",
   description: "",
   inStock: "0",
   reorderLevel: "5",
@@ -108,14 +126,81 @@ const emptyForm = {
   deliveryCharge: "0",
   deliveryChargeType: "flat" as "flat" | "perUnit",
   unitOfMeasure: "pcs",
-  supplier: "",
+  supplierId: "",
+  supplierOther: "",
 };
+
+function InlineAddTerm({
+  id,
+  label,
+  value,
+  placeholder,
+  error,
+  showError,
+  disabled,
+  adding,
+  onChange,
+  onAdd,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  placeholder: string;
+  error?: string;
+  showError?: boolean;
+  disabled?: boolean;
+  adding?: boolean;
+  onChange: (value: string) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <div className="grid gap-2 rounded-lg border border-dashed border-border p-3" data-field={id}>
+      <Label htmlFor={id} className={showError ? "text-destructive" : undefined}>
+        {label}
+        <RequiredMark />
+      </Label>
+      <div className="flex gap-2">
+        <Input
+          id={id}
+          value={value}
+          disabled={disabled}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          className={fieldErrorClass(Boolean(showError))}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onAdd();
+            }
+          }}
+        />
+        <Button type="button" variant="outline" disabled={disabled || adding || !value.trim()} onClick={onAdd}>
+          {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Added terms appear in the dropdown and in Master Data.
+      </p>
+      {showError && error ? <FormFieldError field={id} message={error} /> : null}
+    </div>
+  );
+}
 
 export default function Inventory() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { rbacMatrix } = useSettings();
   const canManage = user?.role === "admin" || user?.role === "inventory";
+  const canManageMasterData = Boolean(
+    user &&
+      userCanAccessModule(
+        user,
+        "Master Data",
+        rbacMatrix,
+        navItems.find((item) => item.label === "Master Data")?.roles,
+      ),
+  );
   const {
     search,
     setSearch,
@@ -144,15 +229,32 @@ export default function Inventory() {
     staleTime: 60_000,
   });
 
+  const categoriesQuery = useQuery({
+    queryKey: ["taxonomy", "inventory_category"],
+    queryFn: () => api.listTaxonomy({ type: "inventory_category" }),
+  });
+  const subcategoriesQuery = useQuery({
+    queryKey: ["taxonomy", "inventory_subcategory"],
+    queryFn: () => api.listTaxonomy({ type: "inventory_subcategory" }),
+  });
+  const suppliersQuery = useQuery({
+    queryKey: ["suppliers", "options"],
+    queryFn: () => api.listSuppliers({ limit: 100, page: 1 }).then((r) => r.data),
+    enabled: canManage,
+  });
+
   const items = itemsQuery.data?.data ?? [];
   const pagination = itemsQuery.data?.meta ?? EMPTY_PAGINATION_META;
   const statsItems = statsQuery.data?.data ?? items;
+  const categories = activeTerms(categoriesQuery.data);
+  const subcategories = activeTerms(subcategoriesQuery.data);
+  const suppliers = suppliersQuery.data ?? [];
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [addingTerm, setAddingTerm] = useState<"category" | "subcategory" | "supplier" | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
-  const [addedCategories, setAddedCategories] = useState<string[]>([]);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -165,7 +267,20 @@ export default function Inventory() {
     applyApiErrors,
     clearError,
   } = useFormValidation({
-    fieldOrder: ["sku", "category", "categoryOther", "name", "inStock", "reorderLevel", "unitCost", "sellingPrice", "deliveryCharge"],
+    fieldOrder: [
+      "sku",
+      "category",
+      "categoryOther",
+      "subcategory",
+      "subcategoryOther",
+      "name",
+      "inStock",
+      "reorderLevel",
+      "unitCost",
+      "sellingPrice",
+      "deliveryCharge",
+      "supplierOther",
+    ],
     schema: inventorySchema,
   });
 
@@ -177,14 +292,14 @@ export default function Inventory() {
   const reserved = statsItems.reduce((s, i) => s + i.reserved, 0);
   const totalValue = statsItems.reduce((s, i) => s + i.inStock * Number(i.unitCost), 0);
 
-  const categorySelectOptions = useMemo(
-    () => buildCategoryOptions(items, addedCategories),
-    [items, addedCategories],
+  const selectedCategory = categories.find((term) => term.slug === form.category);
+  const subcategoryOptions = subcategories.filter(
+    (term) => !term.parentId || term.parentId === selectedCategory?.id,
   );
 
   const categoryFilterOptions = useMemo(
-    () => categorySelectOptions.filter((o) => o.value !== "Other").map((o) => ({ label: o.label, value: o.value })),
-    [categorySelectOptions],
+    () => categories.map((term) => ({ label: term.name, value: term.slug })),
+    [categories],
   );
 
   const openCreate = () => {
@@ -194,26 +309,103 @@ export default function Inventory() {
     setDialogOpen(true);
   };
 
-  const resolvedCategory = form.category === "Other" ? "" : form.category;
+  const findExistingTerm = (terms: BackendTaxonomyTerm[], name: string) =>
+    terms.find((term) => term.name.toLowerCase() === name.toLowerCase() || term.slug.toLowerCase() === name.toLowerCase());
 
-  const addCategory = () => {
+  const addCategory = async () => {
     const name = form.categoryOther.trim();
     if (!name) return;
-
-    const existing = categorySelectOptions.find((o) => o.value.toLowerCase() === name.toLowerCase());
-    if (existing && existing.value !== "Other") {
-      setForm({ ...form, category: existing.value, categoryOther: "" });
-      toast({ title: "Category selected", description: `"${existing.label}" is already in the list.` });
+    const existing = findExistingTerm(categoriesQuery.data ?? [], name);
+    if (existing) {
+      const next = { ...form, category: existing.slug, categoryOther: "", subcategory: "" };
+      setForm(next);
+      clearError("category");
+      clearError("categoryOther");
+      toast({ title: "Category selected", description: `"${existing.name}" is already in the list.` });
       return;
     }
+    setAddingTerm("category");
+    try {
+      const created = await api.createTaxonomy({ type: "inventory_category", name });
+      await queryClient.invalidateQueries({ queryKey: ["taxonomy", "inventory_category"] });
+      const next = { ...form, category: created.slug, categoryOther: "", subcategory: "" };
+      setForm(next);
+      clearError("category");
+      clearError("categoryOther");
+      toast({ title: "Category added", description: `"${created.name}" is now available in the dropdown.` });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to add category" });
+    } finally {
+      setAddingTerm(null);
+    }
+  };
 
-    setAddedCategories((current) => [...new Set([...current, name])]);
-    setForm({ ...form, category: name, categoryOther: "" });
-    toast({ title: "Category added", description: `"${name}" is now available in the dropdown.` });
+  const addSubcategory = async () => {
+    const name = form.subcategoryOther.trim();
+    if (!name || !selectedCategory) return;
+    const existing = findExistingTerm(subcategoryOptions, name);
+    if (existing) {
+      const next = { ...form, subcategory: existing.slug, subcategoryOther: "" };
+      setForm(next);
+      clearError("subcategory");
+      clearError("subcategoryOther");
+      toast({ title: "Subcategory selected", description: `"${existing.name}" is already in the list.` });
+      return;
+    }
+    setAddingTerm("subcategory");
+    try {
+      const created = await api.createTaxonomy({
+        type: "inventory_subcategory",
+        name,
+        parentId: selectedCategory.id,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["taxonomy", "inventory_subcategory"] });
+      const next = { ...form, subcategory: created.slug, subcategoryOther: "" };
+      setForm(next);
+      clearError("subcategory");
+      clearError("subcategoryOther");
+      toast({ title: "Subcategory added", description: `"${created.name}" is now available in the dropdown.` });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to add subcategory" });
+    } finally {
+      setAddingTerm(null);
+    }
+  };
+
+  const addSupplier = async () => {
+    const name = form.supplierOther.trim();
+    if (!name) return;
+    const existing = suppliers.find((row) => row.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      const next = { ...form, supplierId: existing.id, supplierOther: "" };
+      setForm(next);
+      toast({ title: "Supplier selected", description: `"${existing.name}" is already in the list.` });
+      return;
+    }
+    setAddingTerm("supplier");
+    try {
+      const created = await api.createSupplier({
+        name,
+        contact: "",
+        email: "",
+        phone: "",
+        category: selectedCategory?.name ?? "",
+      });
+      await queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+      const next = { ...form, supplierId: created.id, supplierOther: "" };
+      setForm(next);
+      clearError("supplierOther");
+      toast({ title: "Supplier added", description: `"${created.name}" is now available in the dropdown.` });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to add supplier" });
+    } finally {
+      setAddingTerm(null);
+    }
   };
 
   const saveItem = async () => {
     if (!validateAll(form, undefined, dialogRef.current)) return;
+    const supplier = suppliers.find((row) => row.id === form.supplierId);
 
     setSaving(true);
     try {
@@ -225,7 +417,8 @@ export default function Inventory() {
       await api.createInventoryItem({
         sku: form.sku.trim(),
         name: form.name.trim(),
-        category: resolvedCategory,
+        category: form.category,
+        subcategory: form.subcategory,
         description: form.description.trim() || null,
         inStock: Number(form.inStock) || 0,
         reorderLevel: Number(form.reorderLevel) || 0,
@@ -234,7 +427,8 @@ export default function Inventory() {
         deliveryCharge: Number(form.deliveryCharge) || 0,
         deliveryChargeType: form.deliveryChargeType,
         unitOfMeasure: form.unitOfMeasure,
-        supplier: form.supplier.trim(),
+        supplier: supplier?.name ?? "",
+        supplierId: form.supplierId || null,
         imageFileIds,
       });
       toast({ title: "Inventory item added", description: form.name.trim() });
@@ -258,7 +452,8 @@ export default function Inventory() {
         <div>
           <p className="font-medium">{i.name}</p>
           <p className="font-mono text-xs text-muted-foreground">
-            {i.sku} · {i.category} · {i.unitOfMeasure ?? "pcs"}
+            {i.sku} · {termLabel(categoriesQuery.data, i.category)}
+            {i.subcategory ? ` · ${termLabel(subcategoriesQuery.data, i.subcategory)}` : ""} · {i.unitOfMeasure ?? "pcs"}
           </p>
         </div>
       ),
@@ -367,38 +562,65 @@ export default function Inventory() {
               }}
               className="grid gap-4 py-2"
             >
+              <div className="grid gap-2">
+                <Label htmlFor="inventory-images">Product images</Label>
+                <Input
+                  id="inventory-images"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => setImageFiles(Array.from(e.target.files ?? []))}
+                />
+                {imageFiles.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {imageFiles.length} file{imageFiles.length === 1 ? "" : "s"} selected
+                  </p>
+                ) : null}
+              </div>
+              <div className="grid gap-2" data-field="sku">
+                <Label htmlFor="inventory-sku" className={shouldShow("sku") ? "text-destructive" : undefined}>
+                  SKU / Part Number
+                  <RequiredMark />
+                </Label>
+                <Input
+                  id="inventory-sku"
+                  value={form.sku}
+                  onChange={(e) => {
+                    const next = { ...form, sku: e.target.value };
+                    setForm(next);
+                    handleChange("sku", next);
+                  }}
+                  onBlur={() => handleBlur("sku", form)}
+                  className={fieldErrorClass(shouldShow("sku"), "font-mono")}
+                  {...fieldAria("sku", shouldShow("sku") ? errors.sku : null)}
+                />
+                {shouldShow("sku") && <FormFieldError field="sku" message={errors.sku} />}
+              </div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2" data-field="sku">
-                  <Label htmlFor="inventory-sku" className={shouldShow("sku") ? "text-destructive" : undefined}>
-                    SKU / Part Number
-                    <RequiredMark />
-                  </Label>
-                  <Input
-                    id="inventory-sku"
-                    value={form.sku}
-                    onChange={(e) => {
-                      const next = { ...form, sku: e.target.value };
-                      setForm(next);
-                      handleChange("sku", next);
-                    }}
-                    onBlur={() => handleBlur("sku", form)}
-                    className={fieldErrorClass(shouldShow("sku"), "font-mono")}
-                    {...fieldAria("sku", shouldShow("sku") ? errors.sku : null)}
-                  />
-                  {shouldShow("sku") && <FormFieldError field="sku" message={errors.sku} />}
-                </div>
                 <div className="grid gap-2" data-field="category">
-                  <Label className={shouldShow("category") ? "text-destructive" : undefined}>
-                    Category
-                    <RequiredMark />
-                  </Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className={shouldShow("category") ? "text-destructive" : undefined}>
+                      Category
+                      <RequiredMark />
+                    </Label>
+                    {canManageMasterData ? (
+                      <Link to="/app/master-data?type=inventory_category" className="text-xs text-primary hover:underline">
+                        Manage
+                      </Link>
+                    ) : null}
+                  </div>
                   <Select
-                    value={form.category}
+                    value={form.category || undefined}
                     onValueChange={(v) => {
-                      const next = { ...form, category: v, categoryOther: v === "Other" ? form.categoryOther : "" };
+                      const next = {
+                        ...form,
+                        category: v,
+                        subcategory: v === ADD_OPTION ? "" : "",
+                        categoryOther: v === ADD_OPTION ? form.categoryOther : "",
+                      };
                       setForm(next);
                       clearError("category");
-                      if (v !== "Other") clearError("categoryOther");
+                      if (v !== ADD_OPTION) clearError("categoryOther");
                       handleChange("category", next);
                     }}
                   >
@@ -407,54 +629,99 @@ export default function Inventory() {
                       className={fieldErrorClass(shouldShow("category"))}
                       {...fieldAria("category", shouldShow("category") ? errors.category : null)}
                     >
-                      <SelectValue />
+                      <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
-                      {categorySelectOptions.map((c) => (
-                        <SelectItem key={c.value} value={c.value}>
-                          {c.label}
+                      {categories.map((c) => (
+                        <SelectItem key={c.id} value={c.slug}>
+                          {c.name}
                         </SelectItem>
                       ))}
+                      <SelectItem value={ADD_OPTION}>+ Add new category</SelectItem>
                     </SelectContent>
                   </Select>
                   {shouldShow("category") && <FormFieldError field="category" message={errors.category} />}
                 </div>
-              </div>
-              {form.category === "Other" && (
-                <div className="grid gap-2 rounded-lg border border-dashed border-border p-3" data-field="categoryOther">
-                  <Label htmlFor="inventory-category-other" className={shouldShow("categoryOther") ? "text-destructive" : undefined}>
-                    Add new category
-                    <RequiredMark />
-                  </Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="inventory-category-other"
-                      value={form.categoryOther}
-                      onChange={(e) => {
-                        const next = { ...form, categoryOther: e.target.value };
-                        setForm(next);
-                        handleChange("categoryOther", next);
-                      }}
-                      onBlur={() => handleBlur("categoryOther", form)}
-                      className={fieldErrorClass(shouldShow("categoryOther"))}
-                      {...fieldAria("categoryOther", shouldShow("categoryOther") ? errors.categoryOther : null)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addCategory();
-                        }
-                      }}
-                      placeholder="e.g. Cables, Adapters"
-                    />
-                    <Button type="button" variant="outline" disabled={!form.categoryOther.trim()} onClick={addCategory}>
-                      Add
-                    </Button>
+                <div className="grid gap-2" data-field="subcategory">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className={shouldShow("subcategory") ? "text-destructive" : undefined}>
+                      Subcategory
+                      <RequiredMark />
+                    </Label>
+                    {canManageMasterData ? (
+                      <Link to="/app/master-data?type=inventory_subcategory" className="text-xs text-primary hover:underline">
+                        Manage
+                      </Link>
+                    ) : null}
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Added categories appear in the dropdown above for this and future items.
-                  </p>
-                  {shouldShow("categoryOther") && <FormFieldError field="categoryOther" message={errors.categoryOther} />}
+                  <Select
+                    value={form.subcategory || undefined}
+                    disabled={!selectedCategory}
+                    onValueChange={(v) => {
+                      const next = {
+                        ...form,
+                        subcategory: v,
+                        subcategoryOther: v === ADD_OPTION ? form.subcategoryOther : "",
+                      };
+                      setForm(next);
+                      clearError("subcategory");
+                      if (v !== ADD_OPTION) clearError("subcategoryOther");
+                      handleChange("subcategory", next);
+                    }}
+                  >
+                    <SelectTrigger
+                      id="subcategory"
+                      className={fieldErrorClass(shouldShow("subcategory"))}
+                      {...fieldAria("subcategory", shouldShow("subcategory") ? errors.subcategory : null)}
+                    >
+                      <SelectValue placeholder={selectedCategory ? "Select subcategory" : "Select a category first"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {subcategoryOptions.map((c) => (
+                        <SelectItem key={c.id} value={c.slug}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value={ADD_OPTION}>+ Add new subcategory</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {shouldShow("subcategory") && <FormFieldError field="subcategory" message={errors.subcategory} />}
                 </div>
+              </div>
+              {form.category === ADD_OPTION && (
+                <InlineAddTerm
+                  id="categoryOther"
+                  label="Add new category"
+                  value={form.categoryOther}
+                  placeholder="e.g. Cables, Adapters"
+                  error={errors.categoryOther}
+                  showError={shouldShow("categoryOther")}
+                  adding={addingTerm === "category"}
+                  onChange={(value) => {
+                    const next = { ...form, categoryOther: value };
+                    setForm(next);
+                    handleChange("categoryOther", next);
+                  }}
+                  onAdd={() => void addCategory()}
+                />
+              )}
+              {form.subcategory === ADD_OPTION && (
+                <InlineAddTerm
+                  id="subcategoryOther"
+                  label="Add new subcategory"
+                  value={form.subcategoryOther}
+                  placeholder="e.g. Probes, Filters"
+                  error={errors.subcategoryOther}
+                  showError={shouldShow("subcategoryOther")}
+                  disabled={!selectedCategory}
+                  adding={addingTerm === "subcategory"}
+                  onChange={(value) => {
+                    const next = { ...form, subcategoryOther: value };
+                    setForm(next);
+                    handleChange("subcategoryOther", next);
+                  }}
+                  onAdd={() => void addSubcategory()}
+                />
               )}
               <div className="grid gap-2" data-field="name">
                 <Label htmlFor="inventory-name" className={shouldShow("name") ? "text-destructive" : undefined}>
@@ -604,13 +871,52 @@ export default function Inventory() {
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="inventory-supplier">Supplier</Label>
-                <Input id="inventory-supplier" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
+                <div className="flex items-center justify-between gap-2">
+                  <Label>Supplier</Label>
+                  {canManage ? (
+                    <Link to="/app/suppliers" className="text-xs text-primary hover:underline">
+                      Manage
+                    </Link>
+                  ) : null}
+                </div>
+                <Select
+                  value={form.supplierId || undefined}
+                  onValueChange={(v) => {
+                    const next = { ...form, supplierId: v, supplierOther: v === ADD_OPTION ? form.supplierOther : "" };
+                    setForm(next);
+                    if (v !== ADD_OPTION) clearError("supplierOther");
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select supplier" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {suppliers.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={ADD_OPTION}>+ Add new supplier</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="inventory-images">Product images</Label>
-                <Input id="inventory-images" type="file" accept="image/*" multiple onChange={(e) => setImageFiles(Array.from(e.target.files ?? []))} />
-              </div>
+              {form.supplierId === ADD_OPTION && (
+                <InlineAddTerm
+                  id="supplierOther"
+                  label="Add new supplier"
+                  value={form.supplierOther}
+                  placeholder="e.g. MedParts Global"
+                  error={errors.supplierOther}
+                  showError={shouldShow("supplierOther")}
+                  adding={addingTerm === "supplier"}
+                  onChange={(value) => {
+                    const next = { ...form, supplierOther: value };
+                    setForm(next);
+                    handleChange("supplierOther", next);
+                  }}
+                  onAdd={() => void addSupplier()}
+                />
+              )}
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                   Cancel

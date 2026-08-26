@@ -25,9 +25,14 @@ import EquipmentDetail from "./pages/app/EquipmentDetail.tsx";
 import ServiceRequests from "./pages/app/ServiceRequests.tsx";
 import ServiceRequestDetail from "./pages/app/ServiceRequestDetail.tsx";
 import Inspections from "./pages/app/Inspections.tsx";
+import InspectionDetail from "./pages/app/InspectionDetail.tsx";
 import Estimates from "./pages/app/Estimates.tsx";
 import EstimateDetail from "./pages/app/EstimateDetail.tsx";
 import EstimateBuilder from "./pages/app/EstimateBuilder.tsx";
+import EstimatePreview from "./pages/app/EstimatePreview.tsx";
+import Sales from "./pages/app/Sales.tsx";
+import SalesNew from "./pages/app/SalesNew.tsx";
+import SalesOrderDetail from "./pages/app/SalesOrderDetail.tsx";
 import Jobs from "./pages/app/Jobs.tsx";
 import JobDetail from "./pages/app/JobDetail.tsx";
 import Inventory from "./pages/app/Inventory.tsx";
@@ -37,6 +42,11 @@ import StockPurchaseRequestDetail from "./pages/app/StockPurchaseRequestDetail.t
 import Suppliers from "./pages/app/Suppliers.tsx";
 import PurchaseOrders from "./pages/app/PurchaseOrdersProfessional.tsx";
 import PurchaseOrderDetail from "./pages/app/PurchaseOrderDetail.tsx";
+import PurchaseReturns from "./pages/app/PurchaseReturns.tsx";
+import PurchaseReturnDetail from "./pages/app/PurchaseReturnDetail.tsx";
+import StockTransfers from "./pages/app/StockTransfers.tsx";
+import StockTransferDetail from "./pages/app/StockTransferDetail.tsx";
+import StockLedger from "./pages/app/StockLedger.tsx";
 import Billing from "./pages/app/BillingProfessional.tsx";
 import BillingJobDetail from "./pages/app/BillingJobDetail.tsx";
 import BillingInvoiceDetail from "./pages/app/BillingInvoiceDetail.tsx";
@@ -57,6 +67,7 @@ import { PortalLayout } from "./pages/portal/PortalLayout.tsx";
 import PortalDashboard from "./pages/portal/PortalDashboard.tsx";
 import PortalEquipment from "./pages/portal/PortalEquipment.tsx";
 import PortalEstimates from "./pages/portal/PortalEstimates.tsx";
+import PortalEstimateDetail from "./pages/portal/PortalEstimateDetail.tsx";
 import PortalHistory from "./pages/portal/PortalHistory.tsx";
 
 const queryClient = new QueryClient({
@@ -83,6 +94,9 @@ const App = () => (
               <Route index element={<ModuleGuard module="Dashboard"><ResponsivePage mobile={<MobileDashboard />} desktop={<Dashboard />} /></ModuleGuard>} />
               <Route path="customers" element={<ModuleGuard module="Customers"><Customers /></ModuleGuard>} />
               <Route path="customers/:id" element={<ModuleGuard module="Customers"><CustomerDetail /></ModuleGuard>} />
+              <Route path="sales" element={<ModuleGuard module="Sales"><Sales /></ModuleGuard>} />
+              <Route path="sales/new" element={<ModuleGuard module="Sales"><SalesNew /></ModuleGuard>} />
+              <Route path="sales/orders/:id" element={<ModuleGuard module="Sales"><SalesOrderDetail /></ModuleGuard>} />
               <Route path="equipment" element={<ModuleGuard module="Equipment"><Equipment /></ModuleGuard>} />
               <Route path="equipment/:id" element={<ModuleGuard module="Equipment"><EquipmentDetail /></ModuleGuard>} />
               <Route path="service-requests" element={<ModuleGuard module="Service Tickets"><ServiceRequests /></ModuleGuard>} />
@@ -90,8 +104,11 @@ const App = () => (
               <Route path="service-tickets" element={<ModuleGuard module="Service Tickets"><ServiceRequests /></ModuleGuard>} />
               <Route path="service-tickets/:id" element={<ModuleGuard module="Service Tickets"><ServiceRequestDetail /></ModuleGuard>} />
               <Route path="inspections" element={<ModuleGuard module="Inspections"><Inspections /></ModuleGuard>} />
+              <Route path="inspections/:id" element={<ModuleGuard module="Inspections"><InspectionDetail /></ModuleGuard>} />
               <Route path="estimates" element={<ModuleGuard module="Estimates"><Estimates /></ModuleGuard>} />
+              <Route path="estimates/new" element={<ModuleGuard module="Estimates"><EstimateBuilder /></ModuleGuard>} />
               <Route path="estimates/:ticketId/build" element={<ModuleGuard module="Estimates"><EstimateBuilder /></ModuleGuard>} />
+              <Route path="estimates/:id/preview" element={<ModuleGuard module="Estimates"><EstimatePreview /></ModuleGuard>} />
               <Route path="estimates/:id" element={<ModuleGuard module="Estimates"><EstimateDetail /></ModuleGuard>} />
               <Route path="jobs" element={<ModuleGuard module="Service Jobs"><ResponsivePage mobile={<MobileJobs />} desktop={<Jobs />} /></ModuleGuard>} />
               <Route path="jobs/:id" element={<ModuleGuard module="Service Jobs"><ResponsivePage mobile={<MobileJobDetail />} desktop={<JobDetail />} /></ModuleGuard>} />
@@ -106,6 +123,11 @@ const App = () => (
               <Route path="suppliers" element={<ModuleGuard module="Suppliers"><Suppliers /></ModuleGuard>} />
               <Route path="purchase-orders" element={<ModuleGuard module="Purchase Orders"><PurchaseOrders /></ModuleGuard>} />
               <Route path="purchase-orders/:id" element={<ModuleGuard module="Purchase Orders"><PurchaseOrderDetail /></ModuleGuard>} />
+              <Route path="purchase-returns" element={<ModuleGuard module="Purchase Returns"><PurchaseReturns /></ModuleGuard>} />
+              <Route path="purchase-returns/:id" element={<ModuleGuard module="Purchase Returns"><PurchaseReturnDetail /></ModuleGuard>} />
+              <Route path="stock-transfers" element={<ModuleGuard module="Stock Transfers"><StockTransfers /></ModuleGuard>} />
+              <Route path="stock-transfers/:id" element={<ModuleGuard module="Stock Transfers"><StockTransferDetail /></ModuleGuard>} />
+              <Route path="stock-ledger" element={<ModuleGuard module="Stock Ledger"><StockLedger /></ModuleGuard>} />
               <Route path="billing" element={<ModuleGuard module="Billing"><ResponsivePage mobile={<MobileBilling />} desktop={<Billing />} /></ModuleGuard>} />
               <Route path="billing/jobs/:jobId" element={<ModuleGuard module="Billing"><BillingJobDetail /></ModuleGuard>} />
               <Route path="billing/invoices/:invoiceId" element={<ModuleGuard module="Billing"><BillingInvoiceDetail /></ModuleGuard>} />
@@ -124,6 +146,8 @@ const App = () => (
               <Route index element={<PortalDashboard />} />
               <Route path="equipment" element={<PortalEquipment />} />
               <Route path="estimates" element={<PortalEstimates />} />
+              <Route path="estimates/:id/preview" element={<EstimatePreview />} />
+              <Route path="estimates/:id" element={<PortalEstimateDetail />} />
               <Route path="history" element={<PortalHistory />} />
             </Route>
 

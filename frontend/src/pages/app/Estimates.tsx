@@ -1,16 +1,20 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Eye, FileText } from "lucide-react";
+import { Eye, FilePenLine, MoreHorizontal, Plus } from "lucide-react";
+import { EstimateNewSheet } from "@/components/estimates/EstimateNewSheet";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { ProfessionalDocument } from "@/components/shared/ProfessionalDocument";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-} from "@/components/ui/dialog";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -24,22 +28,26 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useListingUrlState } from "@/hooks/useListingUrlState";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { api, type BackendEstimate } from "@/lib/api";
+import { ESTIMATE_STATUS_OPTIONS, canEditEstimate, estimateStatusLabel } from "@/lib/estimates";
 import { formatDate, formatCurrency } from "@/lib/format";
 import { EMPTY_PAGINATION_META } from "@/lib/listing";
+import { cn } from "@/lib/utils";
 
-const ESTIMATE_STATUS_FILTERS = [
-  { label: "Draft", value: "draft" },
-  { label: "Pending Admin", value: "pendingAdminApproval" },
-  { label: "Sent", value: "sent" },
-  { label: "Approved", value: "approved" },
-  { label: "Rejected", value: "rejected" },
-  { label: "Revision", value: "revision" },
-];
+function useEstimateCount(status?: string) {
+  return useQuery({
+    queryKey: ["estimates", "kpi", status ?? "all"],
+    queryFn: () => api.listEstimates({ page: 1, limit: 10, status }),
+    select: (result) => result.meta.total,
+    staleTime: 30_000,
+  });
+}
 
 export default function Estimates() {
   const navigate = useNavigate();
   const { hasRole } = useAuth();
   const canBuild = hasRole(["admin", "coordinator", "estimator"]);
+  const [newOpen, setNewOpen] = useState(false);
+  const [moreFilters, setMoreFilters] = useState(false);
   const {
     search,
     setSearch,
@@ -48,7 +56,8 @@ export default function Estimates() {
     listParams,
     setPage,
     setLimit,
-  } = useListingUrlState({ filterKeys: ["status"] });
+    updateParams,
+  } = useListingUrlState({ filterKeys: ["status", "customerId", "createdFrom", "createdTo"] });
 
   const debouncedSearch = useDebouncedValue(search);
   const queryParams = useMemo(
@@ -62,90 +71,123 @@ export default function Estimates() {
     queryFn: (params) => api.listEstimates(params),
   });
 
-  const eligibleQuery = useQuery({
-    queryKey: ["service-requests", "estimate-eligible"],
-    queryFn: () => api.listServiceRequests({
-      statuses: "inspection,estimate,approval,new",
-      limit: 100,
-      page: 1,
-    }),
-    staleTime: 30_000,
-    enabled: canBuild,
+  const customersQuery = useQuery({
+    queryKey: ["customers", "estimate-filter"],
+    queryFn: () => api.listCustomersOptions(),
+    staleTime: 60_000,
   });
+
+  const totalCount = useEstimateCount();
+  const draftCount = useEstimateCount("draft");
+  const pendingCount = useEstimateCount("pendingAdminApproval");
+  const approvedCount = useEstimateCount("approved");
+  const revisionCount = useEstimateCount("revision");
 
   const estimates = estimatesQuery.data?.data ?? [];
   const pagination = estimatesQuery.data?.meta ?? EMPTY_PAGINATION_META;
-  const eligibleRequests = eligibleQuery.data?.data ?? [];
-  const [preview, setPreview] = useState<BackendEstimate | null>(null);
+  const customers = customersQuery.data ?? [];
+  const activeStatus = filters.status ?? "all";
 
-  const openPreview = async (estimate: BackendEstimate) => {
-    try {
-      setPreview(await api.getEstimate(estimate.id));
-    } catch {
-      setPreview(estimate);
-    }
+  const kpis = [
+    { label: "Total Estimates", value: totalCount.data ?? 0, status: "all" },
+    { label: "Draft", value: draftCount.data ?? 0, status: "draft" },
+    { label: "Pending Approval", value: pendingCount.data ?? 0, status: "pendingAdminApproval" },
+    { label: "Approved", value: approvedCount.data ?? 0, status: "approved" },
+    { label: "Revision Required", value: revisionCount.data ?? 0, status: "revision" },
+  ];
+
+  const resetFilters = () => {
+    updateParams({
+      status: null,
+      customerId: null,
+      createdFrom: null,
+      createdTo: null,
+      search: null,
+      page: 1,
+    });
   };
-
-  const previewLines = (estimate: BackendEstimate) =>
-    estimate.lineItems?.length
-      ? estimate.lineItems.map((line) => ({
-          id: line.id,
-          description: `${line.type}: ${line.description}`,
-          quantity: Number(line.quantity),
-          unitPrice: Number(line.unitPrice),
-          discount: Number(line.discount),
-          taxRate: Number(line.taxRate),
-        }))
-      : [
-          ...(Number(estimate.laborCost)
-            ? [{ id: "labor", description: "Services and labor", quantity: 1, unitPrice: Number(estimate.laborCost), taxRate: 0 }]
-            : []),
-          ...(Number(estimate.partsCost)
-            ? [{ id: "parts", description: "Products and parts", quantity: 1, unitPrice: Number(estimate.partsCost), taxRate: 0 }]
-            : []),
-        ];
 
   const columns: Column<BackendEstimate>[] = [
     {
       key: "reference",
       header: "Estimate",
       render: (e) => (
-        <div className="flex items-center gap-2">
-          <FileText className="h-4 w-4 text-accent" />
-          <div>
-            <p className="font-mono text-sm font-medium">{e.reference}</p>
-            <p className="text-xs text-muted-foreground">
-              {e.requestRef} · rev {e.revision}
-            </p>
-          </div>
+        <div>
+          <p className="font-mono text-sm font-medium">{e.reference}</p>
+          <p className="text-xs text-muted-foreground">Rev {e.revision}</p>
         </div>
       ),
     },
-    { key: "customerName", header: "Customer", render: (e) => <span className="text-sm">{e.customerName}</span> },
-    { key: "equipmentName", header: "Equipment", render: (e) => <span className="text-sm text-muted-foreground">{e.equipmentName}</span> },
-    { key: "total", header: "Total", render: (e) => <span className="font-semibold">{formatCurrency(e.total)}</span> },
-    { key: "validUntil", header: "Valid Until", render: (e) => <span className="text-sm text-muted-foreground">{formatDate(e.validUntil)}</span> },
-    { key: "status", header: "Status", render: (e) => <StatusBadge status={e.status} /> },
     {
-      key: "actions" as keyof BackendEstimate,
+      key: "customerName",
+      header: "Customer",
+      render: (e) => <span className="text-sm">{e.customerName}</span>,
+    },
+    {
+      key: "equipmentName",
+      header: "Equipment",
+      render: (e) => <span className="text-sm text-muted-foreground">{e.equipmentName}</span>,
+    },
+    {
+      key: "requestRef",
+      header: "Ticket",
+      render: (e) => <span className="font-mono text-xs">{e.requestRef}</span>,
+    },
+    {
+      key: "total",
+      header: "Amount",
+      render: (e) => <span className="font-semibold">{formatCurrency(e.total)}</span>,
+    },
+    {
+      key: "validUntil",
+      header: "Valid Until",
+      render: (e) => <span className="text-sm text-muted-foreground">{formatDate(e.validUntil)}</span>,
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (e) => <StatusBadge status={e.status} label={estimateStatusLabel(e.status)} />,
+    },
+    {
+      key: "updatedAt",
+      header: "Updated",
+      render: (e) => <span className="text-sm text-muted-foreground">{formatDate(e.updatedAt)}</span>,
+    },
+    {
+      key: "actions",
       header: "",
+      className: "w-[1%] whitespace-nowrap text-right",
       render: (estimate) => (
-        <div className="flex gap-1">
-          {canBuild && estimate.serviceRequestId ? (
-            <Button size="sm" variant="outline" asChild onClick={(e) => e.stopPropagation()}>
-              <Link to={`/app/estimates/${estimate.serviceRequestId}/build`}>Build</Link>
+        <div className="flex justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+          <Button size="sm" variant="ghost" asChild>
+            <Link to={`/app/estimates/${estimate.id}`}>View</Link>
+          </Button>
+          {canBuild && estimate.serviceRequestId && canEditEstimate(estimate.status) ? (
+            <Button size="sm" variant="outline" asChild>
+              <Link to={`/app/estimates/${estimate.serviceRequestId}/build`}>Edit</Link>
             </Button>
           ) : null}
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={(event) => {
-              event.stopPropagation();
-              void openPreview(estimate);
-            }}
-          >
-            <Eye className="h-4 w-4" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="ghost" aria-label="More estimate actions">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem asChild>
+                <Link to={`/app/estimates/${estimate.id}/preview`}>
+                  <Eye className="mr-2 h-4 w-4" /> Preview
+                </Link>
+              </DropdownMenuItem>
+              {canBuild && estimate.serviceRequestId ? (
+                <DropdownMenuItem asChild>
+                  <Link to={`/app/estimates/${estimate.serviceRequestId}/build`}>
+                    <FilePenLine className="mr-2 h-4 w-4" /> Open builder
+                  </Link>
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       ),
     },
@@ -153,43 +195,52 @@ export default function Estimates() {
 
   return (
     <RoleGuard roles={["admin", "coordinator", "estimator", "billing", "inspector", "engineer"]}>
-      <div className="space-y-6">
+      <div className="space-y-5">
         <PageHeader
-          title="Estimates & Approvals"
-          description="Itemized estimates with staff approval and automatic engineer assignment."
+          title="Estimates"
+          description="Manage quotations, approvals and customer estimates"
           actions={
             canBuild ? (
-            <Select
-              onValueChange={(ticketId) => navigate(`/app/estimates/${ticketId}/build`)}
-              disabled={eligibleRequests.length === 0}
-            >
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Build for ticket…" />
-              </SelectTrigger>
-              <SelectContent>
-                {eligibleRequests.map((r) => (
-                  <SelectItem key={r.id} value={r.id}>
-                    {r.reference}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              <Button onClick={() => setNewOpen(true)}>
+                <Plus className="h-4 w-4" /> New Estimate
+              </Button>
             ) : undefined
           }
         />
 
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          {kpis.map((card) => {
+            const active = activeStatus === card.status || (card.status === "all" && !filters.status);
+            return (
+              <button
+                key={card.label}
+                type="button"
+                onClick={() => setFilter("status", card.status)}
+                className={cn(
+                  "rounded-lg border bg-card px-4 py-3 text-left transition-colors",
+                  active ? "border-primary/40 bg-primary/[0.04]" : "border-border hover:bg-muted/40",
+                )}
+              >
+                <p className="text-[12px] text-muted-foreground">{card.label}</p>
+                <p className="mt-1 text-xl font-semibold tracking-tight">{card.value}</p>
+              </button>
+            );
+          })}
+        </div>
+
         <DataTable
           mode="server"
+          compact
           data={estimates}
           columns={columns}
           search={search}
           onSearchChange={setSearch}
-          searchPlaceholder="Search estimates…"
-          emptyMessage="No estimates yet. Open the Estimate Builder from a service ticket."
-          emptyHint="Try changing your search or filters."
+          searchPlaceholder="Search estimates, customers, tickets, equipment…"
+          emptyMessage="No estimates yet"
+          emptyHint="Create an estimate from a service ticket to get started."
           filterValues={filters}
           onFilterChange={setFilter}
-          filters={[{ key: "status", label: "Status", options: ESTIMATE_STATUS_FILTERS }]}
+          filters={[{ key: "status", label: "Status", options: [...ESTIMATE_STATUS_OPTIONS] }]}
           pagination={pagination}
           onPageChange={setPage}
           onLimitChange={setLimit}
@@ -198,24 +249,58 @@ export default function Estimates() {
           error={estimatesQuery.error as Error | null}
           onRetry={() => void estimatesQuery.refetch()}
           onRowClick={(e) => navigate(`/app/estimates/${e.id}`)}
+          toolbarExtra={
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => setMoreFilters((open) => !open)}>
+                More Filters
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={resetFilters}>
+                Reset
+              </Button>
+            </div>
+          }
         />
 
-        <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
-          <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto p-0">
-            {preview ? (
-              <ProfessionalDocument
-                kind="Estimate"
-                reference={preview.reference}
-                customerName={preview.customerName}
-                issueDate={preview.createdAt}
-                validOrDueLabel="Valid until"
-                validOrDueDate={preview.validUntil}
-                lines={previewLines(preview)}
-                notes={[preview.terms, preview.notes].filter(Boolean).join("\n\n")}
+        {moreFilters ? (
+          <div className="grid gap-3 rounded-lg border border-border bg-card p-4 sm:grid-cols-3">
+            <div className="grid gap-1.5">
+              <Label>Customer</Label>
+              <Select value={filters.customerId ?? "all"} onValueChange={(value) => setFilter("customerId", value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All customers" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All customers</SelectItem>
+                  {customers.map((customer) => (
+                    <SelectItem key={customer.id} value={customer.id}>
+                      {customer.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="created-from">From</Label>
+              <Input
+                id="created-from"
+                type="date"
+                value={filters.createdFrom ?? ""}
+                onChange={(e) => setFilter("createdFrom", e.target.value)}
               />
-            ) : null}
-          </DialogContent>
-        </Dialog>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="created-to">To</Label>
+              <Input
+                id="created-to"
+                type="date"
+                value={filters.createdTo ?? ""}
+                onChange={(e) => setFilter("createdTo", e.target.value)}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {canBuild ? <EstimateNewSheet open={newOpen} onOpenChange={setNewOpen} /> : null}
       </div>
     </RoleGuard>
   );

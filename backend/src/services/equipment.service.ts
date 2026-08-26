@@ -84,7 +84,22 @@ export class EquipmentService {
 
   async update(id: string, tenantId: string, data: Record<string, unknown>) {
     const existing = await this.getById(id, tenantId);
-    const next = { ...data };
+    const next: Record<string, unknown> = { ...data };
+
+    if (typeof next.customerId === "string") {
+      const customer = await customersRepository.findById(next.customerId, tenantId);
+      if (!customer) throw new AppError("Customer not found", 404);
+      next.customerName = customer.name;
+      if (typeof next.branchId !== "string") next.branchId = customer.branchId;
+    }
+    if (typeof next.installDate === "string") next.installDate = new Date(next.installDate);
+    if (typeof next.warrantyEnd === "string") next.warrantyEnd = new Date(next.warrantyEnd);
+    if (next.lastServiceDate === "" || next.lastServiceDate == null) {
+      next.lastServiceDate = null;
+    } else if (typeof next.lastServiceDate === "string") {
+      next.lastServiceDate = new Date(next.lastServiceDate);
+    }
+
     if (typeof next.category === "string") {
       next.category = await taxonomyService.resolveSlug(
         tenantId,

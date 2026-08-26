@@ -33,8 +33,9 @@ import {
   type BackendServiceJob,
   type JobPhotoInput,
 } from "@/lib/api";
+import { ENGINEER_EXTRA_TYPES, billingLineTypeLabel, extraLineTotal } from "@/lib/billingCharges";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
-import { defaultDatePlusDays, formatDate, formatDateTime, formatFileTimestamp, formatJobStatus } from "@/lib/format";
+import { defaultDatePlusDays, formatCurrency, formatDate, formatDateTime, formatJobStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 const JOB_STATUS_OPTIONS = [
@@ -83,7 +84,7 @@ function validateStock(
 export default function JobDetail() {
   const { id = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { hasRole } = useAuth();
   const [job, setJob] = useState<BackendServiceJob | null>(null);
   const [activities, setActivities] = useState<BackendJobActivity[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +96,9 @@ export default function JobDetail() {
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoCaptions, setPhotoCaptions] = useState<string[]>([]);
   const [partsNote, setPartsNote] = useState("");
+  const [partsItemId, setPartsItemId] = useState("");
+  const [partsQty, setPartsQty] = useState(1);
+  const [extraType, setExtraType] = useState<(typeof ENGINEER_EXTRA_TYPES)[number]["value"]>("product");
   const [customerName, setCustomerName] = useState("");
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
@@ -130,7 +134,7 @@ export default function JobDetail() {
   };
 
   const scopeValidation = useFormValidation({
-    fieldOrder: ["partsNote"],
+    fieldOrder: ["partsItemId", "partsQty", "partsNote"],
     schema: scopeSchema,
   });
 
@@ -143,7 +147,8 @@ export default function JobDetail() {
     fieldOrder: ["stockItemId", "stockQty"],
   });
 
-  const canUpdateJob = user?.role === "engineer" || user?.role === "admin" || user?.role === "coordinator";
+  const canUpdateJob = hasRole(["engineer", "admin"]);
+  const canReviewExtras = hasRole(["coordinator", "admin"]);
   const tab = searchParams.get("tab") ?? "overview";
 
   const load = useCallback(async () => {
@@ -242,19 +247,44 @@ export default function JobDetail() {
   const handleScopeChange = async () => {
     if (!job) return;
     const values = { partsNote };
-    if (!scopeValidation.validateAll(values, undefined, scopeDialogRef.current)) return;
+    const extraErrors: FieldErrors = {};
+    if (partsQty < 1) extraErrors.partsQty = "Quantity must be at least 1.";
+    if (!scopeValidation.validateAll(values, extraErrors, scopeDialogRef.current)) return;
 
     setActionSaving(true);
     try {
+      const selectedItem = inventory.find((item) => item.id === partsItemId);
       await api.addJobExtra(job.id, {
-        description: partsNote.trim().slice(0, 120),
+        inventoryItemId: selectedItem?.id,
+        description: selectedItem?.name ?? partsNote.trim().slice(0, 120),
+        type: extraType,
         reason: partsNote.trim(),
-        quantity: 1,
-        unitPrice: 0,
+        quantity: partsQty,
+        unitPrice: Number(selectedItem?.unitCost ?? 0),
         taxRate: 0,
       });
-      toast({ title: "Scope change submitted", description: "Routed for Admin/Estimator approval." });
+      const available = selectedItem ? Math.max(0, selectedItem.inStock - selectedItem.reserved) : 0;
+      if (selectedItem && partsQty > available) {
+        await api.createStockPurchaseRequest({
+          inventoryItemId: selectedItem.id,
+          quantity: partsQty - available,
+          serviceRequestId: job.serviceRequestId,
+          jobId: job.id,
+          note: `Shortage for ${job.reference}: ${partsNote.trim()}`,
+          force: true,
+        });
+      }
+      await api.requestJobParts(job.id, partsNote.trim());
+      toast({
+        title: "Parts / scope request submitted",
+        description: selectedItem && partsQty > available
+          ? "The shortage was sent to the service coordinator and purchasing."
+          : "Sent to the service coordinator for approval.",
+      });
       setPartsNote("");
+      setPartsItemId("");
+      setPartsQty(1);
+      setExtraType("product");
       setPartsOpen(false);
       scopeValidation.reset();
       await refreshActivities(job.id);
@@ -264,6 +294,33 @@ export default function JobDetail() {
       if (!scopeValidation.applyApiErrors(err, scopeDialogRef.current)) {
         toast.apiError(err, { fallback: "Request failed" });
       }
+    } finally {
+      setActionSaving(false);
+    }
+  };
+
+  const openPartsDialog = async () => {
+    setPartsNote("");
+    setPartsItemId("");
+    setPartsQty(1);
+    setExtraType("product");
+    scopeValidation.reset();
+    setPartsOpen(true);
+    try {
+      setInventory((await api.listInventory({ limit: 100, page: 1 })).data);
+    } catch {
+      setInventory([]);
+    }
+  };
+
+  const approveExtra = async (extraId: string) => {
+    setActionSaving(true);
+    try {
+      await api.approveJobExtra(extraId);
+      toast({ title: "Parts / scope request approved" });
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to approve request" });
     } finally {
       setActionSaving(false);
     }
@@ -379,7 +436,6 @@ export default function JobDetail() {
         subtitle={job ? `${job.equipmentName} · ${job.customerName}` : undefined}
         status={job ? formatJobStatus(job.status) : undefined}
         meta={job ? [
-          { label: "Engineer", value: job.engineer || "Unassigned" },
           { label: "Scheduled", value: formatDate(job.scheduledFor) },
           { label: "Ticket", value: job.requestRef },
         ] : undefined}
@@ -415,7 +471,6 @@ export default function JobDetail() {
                   <DetailInfoGrid
                     items={[
                       { label: "Type", value: formatFixedOption(SERVICE_TYPE_OPTIONS, job.type, job.typeOther) },
-                      { label: "Engineer", value: job.engineer },
                       { label: "Customer", value: job.customerName },
                       { label: "Equipment", value: job.equipmentName },
                       { label: "Scheduled", value: formatDate(job.scheduledFor) },
@@ -488,9 +543,24 @@ export default function JobDetail() {
                       <div key={item.id} className="flex justify-between gap-3 rounded-lg border p-3 text-sm">
                         <div>
                           <p className="font-medium">{item.description}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {billingLineTypeLabel(item.type || "product")} · {Number(item.quantity)} × {formatCurrency(item.unitPrice)}
+                          </p>
                           <p className="text-xs text-muted-foreground">{item.reason}</p>
                         </div>
-                        <StatusBadge status={item.status} />
+                        <div className="flex flex-col items-end gap-2">
+                          <StatusBadge status={item.status} />
+                          <span className="text-xs font-medium">{formatCurrency(extraLineTotal(item))}</span>
+                          {canReviewExtras && item.status === "pending" ? (
+                            <Button
+                              size="sm"
+                              disabled={actionSaving}
+                              onClick={() => void approveExtra(item.id)}
+                            >
+                              Approve
+                            </Button>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -539,7 +609,7 @@ export default function JobDetail() {
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <ActionBtn icon={Camera} label="Photos" onClick={() => { photosValidation.reset(); resetPhotoDraft(); setPhotosOpen(true); }} />
-                      <ActionBtn icon={PlusCircle} label="Extra scope" onClick={() => { scopeValidation.reset(); setPartsNote(""); setPartsOpen(true); }} />
+                      <ActionBtn icon={PlusCircle} label="Parts / scope" onClick={() => void openPartsDialog()} />
                       <ActionBtn icon={FileSignature} label="Signature" onClick={() => { signatureValidation.reset(); setCustomerName(""); setSignatureData(null); setSignatureOpen(true); }} />
                       <ActionBtn icon={PackageMinus} label="Stock" onClick={() => void openStockDialog()} />
                     </div>
@@ -570,7 +640,7 @@ export default function JobDetail() {
               <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => {
                 const files = Array.from(e.target.files ?? []);
                 setPhotoFiles(files);
-                setPhotoCaptions(files.map((file) => formatFileTimestamp(file)));
+                setPhotoCaptions(files.map(() => ""));
                 photosValidation.clearError("photos");
                 photosValidation.handleChange("photos", { photoCount: files.length });
                 e.target.value = "";
@@ -624,9 +694,18 @@ export default function JobDetail() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={partsOpen} onOpenChange={(open) => { if (!open) { scopeValidation.reset(); setPartsNote(""); } setPartsOpen(open); }}>
+      <Dialog open={partsOpen} onOpenChange={(open) => {
+        if (!open) {
+          scopeValidation.reset();
+          setPartsNote("");
+          setPartsItemId("");
+          setPartsQty(1);
+          setExtraType("product");
+        }
+        setPartsOpen(open);
+      }}>
         <DialogContent ref={scopeDialogRef} className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Request Additional Parts / Scope</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Request additional products / equipment</DialogTitle></DialogHeader>
           <form
             noValidate
             onSubmit={(e) => {
@@ -634,9 +713,55 @@ export default function JobDetail() {
               void handleScopeChange();
             }}
           >
-            <div className="grid gap-2 py-2" data-field="partsNote">
+            <div className="grid gap-4 py-2">
+              <div className="grid gap-2">
+                <Label>Item type</Label>
+                <Select value={extraType} onValueChange={(value) => setExtraType(value as typeof extraType)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ENGINEER_EXTRA_TYPES.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2" data-field="partsItemId">
+                <Label>Inventory product (optional)</Label>
+                <Select value={partsItemId} onValueChange={setPartsItemId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a product, if required" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {inventory.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {item.name} ({item.sku}) — {Math.max(0, item.inStock - item.reserved)} available
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2" data-field="partsQty">
+                <Label htmlFor="parts-qty">Quantity</Label>
+                <Input
+                  id="parts-qty"
+                  type="number"
+                  min={1}
+                  value={partsQty}
+                  className={fieldErrorClass(scopeValidation.shouldShow("partsQty"))}
+                  onChange={(event) => {
+                    setPartsQty(Number(event.target.value));
+                    scopeValidation.clearError("partsQty");
+                  }}
+                />
+                {scopeValidation.shouldShow("partsQty") ? (
+                  <FormFieldError field="partsQty" message={scopeValidation.errors.partsQty} />
+                ) : null}
+              </div>
+              <div className="grid gap-2" data-field="partsNote">
               <Label htmlFor="parts-note" className={scopeValidation.shouldShow("partsNote") ? "text-destructive" : undefined}>
-                Scope change details
+                Parts / scope details
                 <RequiredMark />
               </Label>
               <Textarea
@@ -656,9 +781,10 @@ export default function JobDetail() {
               {scopeValidation.shouldShow("partsNote") && (
                 <FormFieldError field="partsNote" message={scopeValidation.errors.partsNote} />
               )}
+              </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => { setPartsOpen(false); setPartsNote(""); }}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={() => setPartsOpen(false)}>Cancel</Button>
               <Button type="submit" disabled={actionSaving}>
                 {actionSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit"}
               </Button>

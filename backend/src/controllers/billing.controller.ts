@@ -101,7 +101,8 @@ export class BillingController {
         {
           jobId: req.body.jobId,
           dueAt: new Date(req.body.dueAt),
-          currency: String(req.body.currency ?? "USD"),
+          currency: String(req.body.currency ?? "INR"),
+          additionalLines: req.body.additionalLines,
         },
       );
       res.status(201).json(success("Invoice created successfully", data));

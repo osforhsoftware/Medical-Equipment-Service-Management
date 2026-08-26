@@ -137,6 +137,7 @@ const ESTIMATE_SORT_FIELDS = {
   validUntil: "validUntil",
   status: "status",
   createdAt: "createdAt",
+  updatedAt: "updatedAt",
 } as const;
 
 export function parseEstimateListQuery(req: Request) {
@@ -149,6 +150,9 @@ export function parseEstimateListQuery(req: Request) {
     take: limit,
     search: parseSearchQuery(req.query),
     status: parseOptionalFilter(req.query.status),
+    customerId: parseOptionalFilter(req.query.customerId),
+    createdFrom: parseOptionalFilter(req.query.createdFrom),
+    createdTo: parseOptionalFilter(req.query.createdTo),
     orderBy: toOrderBy(sort),
   };
 }

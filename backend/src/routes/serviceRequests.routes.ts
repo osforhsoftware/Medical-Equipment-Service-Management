@@ -65,7 +65,7 @@ const canRead = requireRole(
 
 
 const adminOps = requireRole("admin", "coordinator");
-const canApproveEstimate = requireRole("admin", "coordinator", "inspector", "engineer");
+const canApproveEstimate = requireRole("admin", "coordinator");
 
 
 

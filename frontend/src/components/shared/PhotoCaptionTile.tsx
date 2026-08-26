@@ -49,18 +49,16 @@ export function PhotoCaptionTile({
         image
       )}
       {readOnly ? (
-        caption ? (
-          <p className="truncate px-0.5 text-[11px] leading-tight text-muted-foreground" title={caption}>
-            {caption}
-          </p>
+        caption.trim() ? (
+          <p className="line-clamp-2 px-0.5 text-xs leading-snug text-muted-foreground">{caption}</p>
         ) : null
       ) : (
         <Input
           value={caption}
-          onChange={(e) => onCaptionChange?.(e.target.value.slice(0, 500))}
-          placeholder="Time or note"
-          className="h-8 px-2 text-xs"
-          aria-label={`Time or note for ${alt}`}
+          onChange={(e) => onCaptionChange?.(e.target.value)}
+          placeholder="Add caption"
+          className="h-9 min-h-9 px-2 py-1.5 text-xs leading-normal text-foreground"
+          aria-label={`Caption for ${alt}`}
         />
       )}
     </div>

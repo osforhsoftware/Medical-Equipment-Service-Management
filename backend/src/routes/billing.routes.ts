@@ -3,7 +3,7 @@ import { billingController } from "@/controllers/billing.controller";
 import { authenticate, requireRole } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
 import { validate } from "@/middleware/validate";
-import { updateInvoiceSchema } from "@/schemas/billing.schema";
+import { createInvoiceSchema, updateInvoiceSchema } from "@/schemas/billing.schema";
 
 const router = Router();
 router.use(authenticate, resolveTenant);
@@ -18,7 +18,7 @@ router.post("/:id/mark-sent", billingController.markSent);
 router.get("/", billingController.getAll);
 router.get("/summary", billingController.getSummary);
 router.get("/:id", billingController.getById);
-router.post("/", billingController.create);
+router.post("/", validate(createInvoiceSchema), billingController.create);
 router.put("/:id", validate(updateInvoiceSchema), billingController.update);
 router.delete("/:id", billingController.delete);
 

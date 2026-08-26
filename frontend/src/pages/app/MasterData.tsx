@@ -13,6 +13,13 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -39,6 +46,7 @@ type FormState = {
   name: string;
   slug: string;
   description: string;
+  parentId: string;
   sortOrder: string;
   isActive: boolean;
 };
@@ -47,6 +55,7 @@ const emptyForm = (): FormState => ({
   name: "",
   slug: "",
   description: "",
+  parentId: "",
   sortOrder: "0",
   isActive: true,
 });
@@ -99,8 +108,17 @@ export default function MasterData() {
   const title = useMemo(() => {
     if (type === "equipment_category") return "Add new category";
     if (type === "equipment_condition") return "Add new condition";
+    if (type === "inventory_category") return "Add new inventory category";
+    if (type === "inventory_subcategory") return "Add new subcategory";
     return "Add new customer type";
   }, [type]);
+
+  const inventoryCategoriesQuery = useQuery({
+    queryKey: ["taxonomy", "inventory_category"],
+    queryFn: () => api.listTaxonomy({ type: "inventory_category" }),
+    enabled: type === "inventory_subcategory",
+  });
+  const inventoryCategories = (inventoryCategoriesQuery.data ?? []).filter((term) => term.isActive);
 
   const setTab = (next: TaxonomyType) => {
     setSearchParams(next === "equipment_category" ? {} : { type: next });
@@ -123,6 +141,7 @@ export default function MasterData() {
       name: term.name,
       slug: term.slug,
       description: term.description ?? "",
+      parentId: term.parentId ?? "",
       sortOrder: String(term.sortOrder),
       isActive: term.isActive,
     });
@@ -147,11 +166,17 @@ export default function MasterData() {
 
     setSaving(true);
     try {
+      if (type === "inventory_subcategory" && !form.parentId) {
+        toast.error("Select a parent category.");
+        return;
+      }
+
       if (editing) {
         await api.updateTaxonomy(editing.id, {
           name: form.name.trim(),
           slug: form.slug.trim() || undefined,
           description: form.description.trim() || null,
+          parentId: type === "inventory_subcategory" ? form.parentId : null,
           sortOrder,
           isActive: form.isActive,
         });
@@ -162,6 +187,7 @@ export default function MasterData() {
           name: form.name.trim(),
           slug: form.slug.trim() || undefined,
           description: form.description.trim() || null,
+          parentId: type === "inventory_subcategory" ? form.parentId : undefined,
           sortOrder,
           isActive: form.isActive,
         });
@@ -199,7 +225,7 @@ export default function MasterData() {
     <div className="space-y-6">
       <PageHeader
         title="Master Data"
-        description="Manage lookup lists used on Register Equipment and Add Customer — add, rename, or deactivate without changing code."
+        description="Manage lookup lists used on Register Equipment, Add Customer, and Add Inventory Item — add, rename, or deactivate without changing code."
       />
 
       <div className="flex flex-col gap-6 lg:flex-row">
@@ -260,6 +286,27 @@ export default function MasterData() {
                 />
                 {shouldShow("name") && <FormFieldError field="name" message={errors.name} />}
               </div>
+
+              {type === "inventory_subcategory" ? (
+                <div className="grid gap-2">
+                  <Label>
+                    Parent category
+                    <RequiredMark />
+                  </Label>
+                  <Select value={form.parentId} onValueChange={(value) => setForm({ ...form, parentId: value })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select inventory category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {inventoryCategories.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
 
               <div className="grid gap-2" data-field="slug">
                 <Label htmlFor="term-slug">Slug</Label>
@@ -341,6 +388,7 @@ export default function MasterData() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name</TableHead>
+                    {type === "inventory_subcategory" ? <TableHead>Category</TableHead> : null}
                     <TableHead>Slug</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Used by</TableHead>
@@ -350,13 +398,13 @@ export default function MasterData() {
                 <TableBody>
                   {termsQuery.isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="py-10 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={type === "inventory_subcategory" ? 6 : 5} className="py-10 text-center text-sm text-muted-foreground">
                         Loading {tab.label.toLowerCase()}…
                       </TableCell>
                     </TableRow>
                   ) : terms.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="py-10 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={type === "inventory_subcategory" ? 6 : 5} className="py-10 text-center text-sm text-muted-foreground">
                         No {tab.label.toLowerCase()} yet. Add the first one using the form.
                       </TableCell>
                     </TableRow>
@@ -369,6 +417,11 @@ export default function MasterData() {
                             <p className="text-[11px] text-muted-foreground">System</p>
                           ) : null}
                         </TableCell>
+                        {type === "inventory_subcategory" ? (
+                          <TableCell className="text-sm text-muted-foreground">
+                            {inventoryCategoriesQuery.data?.find((category) => category.id === term.parentId)?.name ?? "—"}
+                          </TableCell>
+                        ) : null}
                         <TableCell className="font-mono text-xs text-muted-foreground">{term.slug}</TableCell>
                         <TableCell>
                           <StatusBadge status={term.isActive ? "active" : "inactive"} />

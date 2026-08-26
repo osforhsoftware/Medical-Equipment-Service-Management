@@ -74,8 +74,9 @@ function roleQuickActions(role: Role): QuickAction[] {
       ];
     case "estimator":
       return [
-        { label: "Pending Estimates", to: "/app/estimates", icon: FileText },
-        { label: "Create Quotation", to: "/app/estimates", icon: FileText },
+        { label: "Sales Desk", to: "/app/sales", icon: ShoppingCart },
+        { label: "New Sale", to: "/app/sales/new", icon: ShoppingCart },
+        { label: "Customers", to: "/app/customers", icon: FileText },
         { label: "Notifications", to: "/app/notifications", icon: Bell },
       ];
     case "engineer":
@@ -91,6 +92,7 @@ function roleQuickActions(role: Role): QuickAction[] {
       return [
         { label: "Low Stock", to: "/app/inventory", icon: AlertTriangle },
         { label: "Purchase Orders", to: "/app/purchase-orders", icon: ShoppingCart },
+        { label: "Purchase Returns", to: "/app/purchase-returns", icon: Package },
         { label: "Stock Transfers", to: "/app/stock-transfers", icon: Package },
         { label: "Notifications", to: "/app/notifications", icon: Bell },
       ];

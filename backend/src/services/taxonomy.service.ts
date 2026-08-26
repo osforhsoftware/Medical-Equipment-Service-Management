@@ -20,17 +20,27 @@ export class TaxonomyService {
   async ensureDefaults(tenantId: string, type?: TaxonomyTypeName): Promise<void> {
     const types = type ? [type] : [...TAXONOMY_TYPES];
     for (const taxonomyType of types) {
+      if (taxonomyType === "inventory_subcategory") {
+        await this.ensureDefaults(tenantId, "inventory_category");
+      }
       for (const term of DEFAULT_TAXONOMY_TERMS[taxonomyType]) {
         const existing = await taxonomyRepository.findBySlug(tenantId, asType(taxonomyType), term.slug);
         if (existing) continue;
         const nameTaken = await taxonomyRepository.findByName(tenantId, asType(taxonomyType), term.name);
         if (nameTaken) continue;
+        let parentId: string | null = null;
+        if (term.parentSlug) {
+          const parentType = taxonomyType === "inventory_subcategory" ? "inventory_category" : taxonomyType;
+          const parent = await taxonomyRepository.findBySlug(tenantId, asType(parentType), term.parentSlug);
+          parentId = parent?.id ?? null;
+        }
         await taxonomyRepository.create({
           tenantId,
           type: asType(taxonomyType),
           name: term.name,
           slug: term.slug,
           sortOrder: term.sortOrder,
+          parentId,
           isActive: true,
           isSystem: true,
         });
@@ -64,6 +74,7 @@ export class TaxonomyService {
       name: string;
       slug?: string | null;
       description?: string | null;
+      parentId?: string | null;
       sortOrder?: number;
       isActive?: boolean;
     },
@@ -76,6 +87,7 @@ export class TaxonomyService {
 
     const requestedSlug = data.slug?.trim() ? slugifyTerm(data.slug) : slugifyTerm(name);
     const slug = await this.uniqueSlug(tenantId, data.type, requestedSlug);
+    const parentId = await this.resolveParentId(tenantId, data.type, data.parentId);
 
     return taxonomyRepository.create({
       tenantId,
@@ -83,6 +95,7 @@ export class TaxonomyService {
       name,
       slug,
       description: data.description?.trim() || null,
+      parentId,
       sortOrder: data.sortOrder ?? 0,
       isActive: data.isActive ?? true,
       isSystem: false,
@@ -96,6 +109,7 @@ export class TaxonomyService {
       name?: string;
       slug?: string;
       description?: string | null;
+      parentId?: string | null;
       sortOrder?: number;
       isActive?: boolean;
     },
@@ -124,10 +138,16 @@ export class TaxonomyService {
       nextSlug = await this.uniqueSlug(tenantId, existing.type as TaxonomyTypeName, requested, existing.id);
     }
 
+    const parentId =
+      data.parentId !== undefined
+        ? await this.resolveParentId(tenantId, existing.type as TaxonomyTypeName, data.parentId)
+        : undefined;
+
     return taxonomyRepository.update(id, {
       ...(data.name !== undefined ? { name: data.name.trim() } : {}),
       ...(nextSlug ? { slug: nextSlug } : {}),
       ...(data.description !== undefined ? { description: data.description?.trim() || null } : {}),
+      ...(parentId !== undefined ? { parent: parentId ? { connect: { id: parentId } } : { disconnect: true } } : {}),
       ...(data.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
       ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
     });
@@ -188,7 +208,34 @@ export class TaxonomyService {
   private missingMessage(type: TaxonomyTypeName): string {
     if (type === "equipment_category") return "Select a valid equipment category.";
     if (type === "equipment_condition") return "Select a valid equipment condition.";
+    if (type === "inventory_category") return "Select a valid inventory category.";
+    if (type === "inventory_subcategory") return "Select a valid inventory subcategory.";
     return "Select a valid customer type.";
+  }
+
+  private async resolveParentId(
+    tenantId: string,
+    type: TaxonomyTypeName,
+    parentId?: string | null,
+  ): Promise<string | null> {
+    if (type === "inventory_subcategory") {
+      if (!parentId) throw new AppError("Select a parent category for this subcategory.", 422);
+    } else if (!parentId) {
+      return null;
+    }
+
+    const parent = await taxonomyRepository.findById(parentId!, tenantId);
+    if (!parent) throw new AppError("Parent category not found", 404);
+    if (type === "inventory_subcategory" && parent.type !== "inventory_category") {
+      throw new AppError("Subcategories must belong to an inventory category.", 422);
+    }
+    return parent.id;
+  }
+
+  private inventoryStoredField(type: TaxonomyTypeName): "category" | "subcategory" | null {
+    if (type === "inventory_category") return "category";
+    if (type === "inventory_subcategory") return "subcategory";
+    return null;
   }
 
   private async uniqueSlug(
@@ -219,6 +266,16 @@ export class TaxonomyService {
         await prisma.equipment.updateMany({
           where: { tenantId, condition: from },
           data: { condition: to },
+        });
+      } else if (type === "inventory_category") {
+        await prisma.inventoryItem.updateMany({
+          where: { tenantId, category: from },
+          data: { category: to },
+        });
+      } else if (type === "inventory_subcategory") {
+        await prisma.inventoryItem.updateMany({
+          where: { tenantId, subcategory: from },
+          data: { subcategory: to },
         });
       } else {
         await prisma.customer.updateMany({
@@ -293,6 +350,22 @@ export class TaxonomyService {
       });
       return rows.map((r) => r.condition);
     }
+    if (type === "inventory_category") {
+      const rows = await prisma.inventoryItem.findMany({
+        where: { tenantId },
+        select: { category: true },
+        distinct: ["category"],
+      });
+      return rows.map((r) => r.category);
+    }
+    if (type === "inventory_subcategory") {
+      const rows = await prisma.inventoryItem.findMany({
+        where: { tenantId, subcategory: { not: null } },
+        select: { subcategory: true },
+        distinct: ["subcategory"],
+      });
+      return rows.map((r) => r.subcategory).filter((value): value is string => Boolean(value));
+    }
     const rows = await prisma.customer.findMany({
       where: { tenantId },
       select: { type: true, typeOther: true },
@@ -318,6 +391,14 @@ export class TaxonomyService {
     }
     if (type === "equipment_condition") {
       await prisma.equipment.updateMany({ where: { tenantId, condition: from }, data: { condition: to } });
+      return;
+    }
+    if (type === "inventory_category") {
+      await prisma.inventoryItem.updateMany({ where: { tenantId, category: from }, data: { category: to } });
+      return;
+    }
+    if (type === "inventory_subcategory") {
+      await prisma.inventoryItem.updateMany({ where: { tenantId, subcategory: from }, data: { subcategory: to } });
       return;
     }
     await prisma.customer.updateMany({ where: { tenantId, type: from }, data: { type: to } });
@@ -357,6 +438,22 @@ export class TaxonomyService {
       return counts;
     }
 
+    if (type === "inventory_category" || type === "inventory_subcategory") {
+      const field = this.inventoryStoredField(type)!;
+      const rows = await prisma.inventoryItem.groupBy({
+        by: [field],
+        where: { tenantId },
+        _count: { _all: true },
+      });
+      for (const row of rows) {
+        const value = row[field];
+        if (!value) continue;
+        const term = terms.find((t) => t.slug === value || t.name === value);
+        if (term) counts.set(term.id, (counts.get(term.id) ?? 0) + row._count._all);
+      }
+      return counts;
+    }
+
     const rows = await prisma.equipment.groupBy({
       by: ["condition"],
       where: { tenantId },
@@ -382,6 +479,16 @@ export class TaxonomyService {
     if (type === "equipment_condition") {
       return prisma.equipment.count({
         where: { tenantId, OR: [{ condition: term.slug }, { condition: term.name }] },
+      });
+    }
+    if (type === "inventory_category") {
+      return prisma.inventoryItem.count({
+        where: { tenantId, OR: [{ category: term.slug }, { category: term.name }] },
+      });
+    }
+    if (type === "inventory_subcategory") {
+      return prisma.inventoryItem.count({
+        where: { tenantId, OR: [{ subcategory: term.slug }, { subcategory: term.name }] },
       });
     }
     return prisma.customer.count({

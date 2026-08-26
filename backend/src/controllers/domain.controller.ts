@@ -59,6 +59,21 @@ export class DomainController {
   receivePurchaseOrder = async (req: Request, res: Response, next: NextFunction) => {
     try { send(res, "Purchase order receipt posted", await domainService.receivePurchaseOrder(req.tenantId!, req.params.id, actor(req), req.body), 201); } catch (e) { next(e); }
   };
+  branches = async (req: Request, res: Response, next: NextFunction) => {
+    try { send(res, "Branches fetched", await domainService.listBranches(req.tenantId!)); } catch (e) { next(e); }
+  };
+  stockTransferById = async (req: Request, res: Response, next: NextFunction) => {
+    try { send(res, "Stock transfer fetched", await domainService.getStockTransfer(req.tenantId!, req.params.id)); } catch (e) { next(e); }
+  };
+  purchaseReturns = async (req: Request, res: Response, next: NextFunction) => {
+    try { send(res, "Purchase returns fetched", await domainService.listPurchaseReturns(req.tenantId!)); } catch (e) { next(e); }
+  };
+  purchaseReturnById = async (req: Request, res: Response, next: NextFunction) => {
+    try { send(res, "Purchase return fetched", await domainService.getPurchaseReturn(req.tenantId!, req.params.id)); } catch (e) { next(e); }
+  };
+  purchaseReturnCreate = async (req: Request, res: Response, next: NextFunction) => {
+    try { send(res, "Purchase return posted", await domainService.createPurchaseReturn(req.tenantId!, actor(req), req.body), 201); } catch (e) { next(e); }
+  };
   stockTransfers = async (req: Request, res: Response, next: NextFunction) => {
     try { send(res, "Stock transfers fetched", await domainService.listStockTransfers(req.tenantId!)); } catch (e) { next(e); }
   };

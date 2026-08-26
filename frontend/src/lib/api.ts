@@ -219,7 +219,12 @@ export interface BackendEquipment {
   updatedAt: string;
 }
 
-export type TaxonomyType = "equipment_category" | "equipment_condition" | "customer_type";
+export type TaxonomyType =
+  | "equipment_category"
+  | "equipment_condition"
+  | "customer_type"
+  | "inventory_category"
+  | "inventory_subcategory";
 
 export interface BackendTaxonomyTerm {
   id: string;
@@ -228,6 +233,7 @@ export interface BackendTaxonomyTerm {
   name: string;
   slug: string;
   description: string | null;
+  parentId?: string | null;
   sortOrder: number;
   isActive: boolean;
   isSystem: boolean;
@@ -241,6 +247,7 @@ export interface CreateTaxonomyInput {
   name: string;
   slug?: string | null;
   description?: string | null;
+  parentId?: string | null;
   sortOrder?: number;
   isActive?: boolean;
 }
@@ -249,6 +256,7 @@ export interface UpdateTaxonomyInput {
   name?: string;
   slug?: string;
   description?: string | null;
+  parentId?: string | null;
   sortOrder?: number;
   isActive?: boolean;
 }
@@ -267,7 +275,7 @@ export interface CreateEquipmentInput {
   warrantyEnd: string;
   amcStatus?: string;
   condition?: string;
-  lastServiceDate?: string;
+  lastServiceDate?: string | null;
 }
 
 export interface BackendServiceRequestEquipment {
@@ -561,7 +569,19 @@ export interface BillingJobContext {
   verification: { allPassed: boolean; items: BillingVerificationItem[] };
   invoice: BackendInvoice | null;
   project: unknown;
-  costs: { estimateAmount: number; partsCost: number; labourCharges: number; discount: number };
+  costs: {
+    estimateAmount: number;
+    partsCost: number;
+    labourCharges: number;
+    discount: number;
+    products?: number;
+    equipment?: number;
+    machines?: number;
+    serviceCharges?: number;
+    otherCharges?: number;
+    engineerExtras?: number;
+    proposedTotal?: number;
+  };
 }
 
 export interface BackendAuditLog {
@@ -659,7 +679,9 @@ export interface BackendEstimateDecision {
 }
 
 export interface CreateEstimateInput {
-  serviceRequestId: string;
+  serviceRequestId?: string;
+  customerId?: string;
+  equipmentId?: string;
   laborCost: number;
   partsCost: number;
   validUntil: string;
@@ -723,11 +745,13 @@ export interface BackendJobWorkLog {
 export interface BackendJobExtra {
   id: string;
   description: string;
+  type?: string;
   reason: string;
   quantity: string | number;
   unitPrice: string | number;
   taxRate: string | number;
   status: string;
+  inventoryItem?: { id: string; name: string; sku: string } | null;
   createdAt: string;
 }
 
@@ -778,6 +802,7 @@ export interface BackendInventoryItem {
   sku: string;
   name: string;
   category: string;
+  subcategory?: string | null;
   description?: string | null;
   branchId: string;
   inStock: number;
@@ -801,6 +826,7 @@ export interface CreateInventoryInput {
   sku: string;
   name: string;
   category: string;
+  subcategory: string;
   description?: string | null;
   branchId?: string;
   inStock?: number;
@@ -810,7 +836,7 @@ export interface CreateInventoryInput {
   deliveryCharge?: number;
   deliveryChargeType?: "flat" | "perUnit";
   unitOfMeasure?: string;
-  supplier: string;
+  supplier?: string;
   supplierId?: string | null;
   imageFileIds?: string[];
 }
@@ -844,6 +870,7 @@ export interface BackendPurchaseOrder {
   expectedDate: string;
   lineItems?: BackendPurchaseOrderLine[];
   receipts?: BackendPurchaseReceipt[];
+  purchaseReturns?: BackendPurchaseReturn[];
   createdAt: string;
   updatedAt: string;
 }
@@ -855,6 +882,7 @@ export interface BackendPurchaseOrderLine {
   description: string;
   quantityOrdered: number;
   quantityReceived: number;
+  quantityReturned?: number;
   unitCost: string | number;
   taxRate: string | number;
   lineTotal: string | number;
@@ -866,6 +894,55 @@ export interface BackendPurchaseReceipt {
   receivedBy: string;
   receivedAt: string;
   notes?: string | null;
+}
+
+export interface BackendPurchaseReturnLine {
+  id: string;
+  purchaseOrderLineId: string;
+  inventoryItemId: string;
+  sku: string;
+  description: string;
+  quantity: number;
+  unitCost: string | number;
+}
+
+export interface BackendPurchaseReturn {
+  id: string;
+  tenantId: string;
+  purchaseOrderId: string;
+  supplierId?: string | null;
+  reference: string;
+  reason?: string | null;
+  notes?: string | null;
+  status: string;
+  returnedBy: string;
+  returnedAt: string;
+  items: number;
+  total: string | number;
+  lines?: BackendPurchaseReturnLine[];
+  purchaseOrder?: { id: string; reference: string; supplier: string; status?: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BackendBranchOption {
+  id: string;
+  name: string;
+  city?: string | null;
+  phone?: string | null;
+}
+
+export interface BackendStockMovement {
+  id: string;
+  inventoryItemId: string;
+  type: string;
+  quantity: number;
+  balanceAfter: number;
+  referenceType?: string | null;
+  referenceId?: string | null;
+  reason?: string | null;
+  createdAt: string;
+  inventoryItem?: { sku: string; name: string };
 }
 
 export interface CreatePurchaseOrderInput {
@@ -984,6 +1061,107 @@ export interface DashboardScheduleItem {
   scheduledFor: string;
   progress: number;
   href: string;
+}
+
+export interface SalesDeskData {
+  process: { key: string; label: string; hint: string }[];
+  kpis: {
+    activeCustomers: number;
+    openQuotes: number;
+    pendingApproval: number;
+    quoteValue: number;
+    outstanding: number;
+    collected: number;
+    overdueInvoices: number;
+    openInvoices: number;
+    todaySales: number;
+    monthlySales: number;
+    totalOrders: number;
+    pendingOrders: number;
+    pendingPayments: number;
+    pendingPaymentAmount: number;
+  };
+  quotesByStatus: Record<string, { count: number; total: number }>;
+  recentQuotes: {
+    id: string;
+    reference: string;
+    customerName: string;
+    status: string;
+    total: number;
+    validUntil: string;
+    updatedAt: string;
+    serviceRequestId: string | null;
+    kind: "service" | "sales";
+  }[];
+  outstandingInvoices: {
+    id: string;
+    reference: string;
+    customerName: string;
+    status: string;
+    total: number;
+    balanceDue: number;
+    dueAt: string;
+  }[];
+  topSellingProducts: { name: string; quantity: number; amount: number }[];
+  lowStockProducts: {
+    id: string;
+    sku: string;
+    name: string;
+    category: string;
+    inStock: number;
+    reserved: number;
+    reorderLevel: number;
+    available: number;
+  }[];
+}
+
+export interface BackendSalesOrderLine {
+  id: string;
+  type: string;
+  description: string;
+  sku?: string | null;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  taxRate: number;
+  lineTotal: number;
+  inventoryItemId?: string | null;
+}
+
+export interface BackendSalesOrder {
+  id: string;
+  estimateId?: string | null;
+  customerId: string;
+  reference: string;
+  customerName: string;
+  salespersonName: string;
+  status: string;
+  deliveryStatus: string;
+  paymentStatus: string;
+  subtotal: number;
+  discount: number;
+  tax: number;
+  total: number;
+  paidTotal?: number;
+  balanceDue?: number;
+  notes?: string | null;
+  orderedAt: string;
+  deliveredAt?: string | null;
+  lines: BackendSalesOrderLine[];
+  invoices: { id: string; reference: string; status: string; total: number; paidTotal: number; balanceDue: number }[];
+  estimate?: { id: string; reference: string; status: string } | null;
+}
+
+export interface SalesReportsData {
+  dailySales: number;
+  monthlySales: number;
+  productWise: { name: string; quantity: number; amount: number }[];
+  sparePartsSales: { name: string; quantity: number; amount: number }[];
+  equipmentSales: { name: string; quantity: number; amount: number }[];
+  salespersonWise: { name: string; quantity: number; amount: number }[];
+  customerWise: { name: string; quantity: number; amount: number }[];
+  outstanding: { id: string; customerName: string; total: number; paidTotal: number; balanceDue: number; status: string }[];
+  topSelling: { name: string; quantity: number; amount: number }[];
 }
 
 export interface DashboardData {
@@ -1267,6 +1445,12 @@ export const api = {
   createEquipment: (data: CreateEquipmentInput) =>
     request<BackendEquipment>("/api/equipment", {
       method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateEquipment: (id: string, data: CreateEquipmentInput) =>
+    request<BackendEquipment>(`/api/equipment/${id}`, {
+      method: "PUT",
       body: JSON.stringify(data),
     }),
 
@@ -1596,10 +1780,94 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
+  getStockTransfer: (id: string) =>
+    request<BackendStockTransfer>(`/api/domain/stock-transfers/${id}`),
+
+  listBranches: () => request<BackendBranchOption[]>("/api/domain/branches"),
+
+  listPurchaseReturns: () => request<BackendPurchaseReturn[]>("/api/domain/purchase-returns"),
+
+  getPurchaseReturn: (id: string) =>
+    request<BackendPurchaseReturn>(`/api/domain/purchase-returns/${id}`),
+
+  createPurchaseReturn: (data: {
+    purchaseOrderId: string;
+    reason: "damaged" | "excess" | "wrong_item" | "quality" | "other";
+    notes?: string;
+    lines: { purchaseOrderLineId: string; quantity: number }[];
+  }) =>
+    request<BackendPurchaseReturn>("/api/domain/purchase-returns", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listStockMovements: (inventoryItemId?: string) =>
+    request<BackendStockMovement[]>(
+      `/api/domain/stock/movements${queryString({ inventoryItemId })}`,
+    ),
+
   getSettings: () => request<BackendSettings>("/api/settings"),
 
   getDashboard: () =>
     request<DashboardData>("/api/dashboard"),
+
+  getSalesDesk: () => request<SalesDeskData>("/api/sales/desk"),
+  listSalesOrders: () => request<BackendSalesOrder[]>("/api/sales/orders"),
+  getSalesOrder: (id: string) => request<BackendSalesOrder>(`/api/sales/orders/${id}`),
+  createSalesOrder: (data: {
+    customerId: string;
+    notes?: string | null;
+    lines: Array<{
+      inventoryItemId?: string | null;
+      catalogItemId?: string | null;
+      type?: string;
+      description: string;
+      sku?: string | null;
+      quantity: number;
+      unitPrice: number;
+      discount?: number;
+      taxRate?: number;
+    }>;
+  }) =>
+    request<BackendSalesOrder>("/api/sales/orders", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateSalesOrder: (
+    id: string,
+    data: {
+      customerId: string;
+      notes?: string | null;
+      lines: Array<{
+        inventoryItemId?: string | null;
+        catalogItemId?: string | null;
+        type?: string;
+        description: string;
+        sku?: string | null;
+        quantity: number;
+        unitPrice: number;
+        discount?: number;
+        taxRate?: number;
+      }>;
+    },
+  ) =>
+    request<BackendSalesOrder>(`/api/sales/orders/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  convertSalesQuote: (estimateId: string, data?: { commissionRate?: number; notes?: string }) =>
+    request<BackendSalesOrder>(`/api/sales/quotes/${estimateId}/convert`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    }),
+  deliverSalesOrder: (id: string) =>
+    request<BackendSalesOrder>(`/api/sales/orders/${id}/deliver`, { method: "POST", body: JSON.stringify({}) }),
+  invoiceSalesOrder: (id: string, data?: { dueAt?: string; commissionRate?: number }) =>
+    request<BackendInvoice>(`/api/sales/orders/${id}/invoice`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    }),
+  getSalesReports: () => request<SalesReportsData>("/api/sales/reports"),
 
   listNotifications: () => request<BackendNotification[]>("/api/notifications"),
 
@@ -1769,7 +2037,15 @@ export const api = {
 
   addJobExtra: (
     id: string,
-    data: { inventoryItemId?: string | null; description: string; reason: string; quantity: number; unitPrice: number; taxRate: number },
+    data: {
+      inventoryItemId?: string | null;
+      description: string;
+      type?: "product" | "equipment" | "machine" | "other";
+      reason: string;
+      quantity: number;
+      unitPrice: number;
+      taxRate: number;
+    },
   ) =>
     request<BackendJobExtra>(`/api/domain/jobs/${id}/extras`, {
       method: "POST",
@@ -1800,10 +2076,15 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  createInvoiceFromJob: (jobId: string, dueAt: string, currency = "INR") =>
+  createInvoiceFromJob: (
+    jobId: string,
+    dueAt: string,
+    currency = "INR",
+    additionalLines?: InvoiceLineInput[],
+  ) =>
     request<BackendInvoice>("/api/domain/invoices/from-job", {
       method: "POST",
-      body: JSON.stringify({ jobId, dueAt, currency }),
+      body: JSON.stringify({ jobId, dueAt, currency, additionalLines }),
     }),
 
   recordInvoicePayment: (

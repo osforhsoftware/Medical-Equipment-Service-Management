@@ -15,7 +15,7 @@ const router = Router();
 router.use(authenticate, resolveTenant);
 
 const canRead = requireRole("admin", "coordinator", "engineer");
-const canExecute = requireRole("admin", "coordinator", "engineer");
+const canExecute = requireRole("admin", "engineer");
 
 router.get("/", canRead, jobsController.getAll);
 router.get("/:id/activities", canRead, jobsController.getActivities);

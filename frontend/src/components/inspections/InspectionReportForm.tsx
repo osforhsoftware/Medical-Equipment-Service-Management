@@ -8,7 +8,6 @@ import {
   type BackendInspectionReport,
   type BackendServiceRequest,
 } from "@/lib/api";
-import { formatFileTimestamp } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { InspectionSection } from "./InspectionSection";
 
@@ -100,7 +99,7 @@ export function InspectionReportForm({
       setMachineImage(next[0] ?? null);
       return next;
     });
-    setImageCaptions((prev) => [...prev, ...files.map((file) => formatFileTimestamp(file))]);
+    setImageCaptions((prev) => [...prev, ...files.map(() => "")]);
   };
 
   const removeNewImage = (index: number) => {

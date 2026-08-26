@@ -11,6 +11,7 @@ const withEquipmentItems = {
 export interface ServiceRequestListFilters {
   status?: string;
   assignedTo?: string;
+  estimatorId?: string;
   priority?: string;
   assignee?: string;
   overdue?: boolean;
@@ -32,6 +33,18 @@ function buildWhere(
     ...(filters.status ? { status: filters.status as ServiceRequest["status"] } : {}),
     ...(filters.statuses?.length ? { status: { in: filters.statuses as ServiceRequest["status"][] } } : {}),
     ...(filters.assignedTo ? { assignedTo: filters.assignedTo } : {}),
+    ...(filters.estimatorId
+      ? {
+          estimates: {
+            some: {
+              OR: [
+                { salespersonId: filters.estimatorId },
+                { revisions: { some: { createdBy: filters.estimatorId } } },
+              ],
+            },
+          },
+        }
+      : {}),
     ...(filters.priority ? { priority: filters.priority as ServiceRequest["priority"] } : {}),
     ...(filters.assignee ? { assignedName: filters.assignee } : {}),
   };
@@ -98,7 +111,7 @@ export class ServiceRequestsRepository {
 
   async findAll(
     tenantId: string,
-    filters?: { status?: string; assignedTo?: string },
+    filters?: { status?: string; assignedTo?: string; estimatorId?: string },
   ) {
     const { data } = await this.findPaginated(tenantId, {
       ...filters,

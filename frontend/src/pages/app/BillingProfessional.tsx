@@ -140,6 +140,27 @@ export default function BillingProfessional() {
           }
         />
 
+        <Card className="border-info/30 bg-info/5">
+          <CardContent className="space-y-2 p-4 text-sm">
+            <p className="font-medium text-foreground">Where to add products / services on the bill</p>
+            <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
+              <li>
+                In <span className="font-medium text-foreground">Waiting Verification</span>, click{" "}
+                <span className="font-medium text-foreground">Verify &amp; review</span>.
+              </li>
+              <li>
+                Confirm verification, then on that page use{" "}
+                <span className="font-medium text-foreground">Add Item</span> and{" "}
+                <span className="font-medium text-foreground">Generate final bill</span>.
+              </li>
+              <li>
+                Later open the <span className="font-medium text-foreground">Invoice Draft</span> tab →{" "}
+                <span className="font-medium text-foreground">Edit invoice</span> to add more products or services.
+              </li>
+            </ol>
+          </CardContent>
+        </Card>
+
         <div className="grid gap-4 sm:grid-cols-3">
           <StatCard label="Collected" value={formatCurrencyShort(totals.paid)} icon={IndianRupee} accent="success" />
           <StatCard label="Outstanding" value={formatCurrencyShort(totals.due)} icon={Clock} accent="warning" />
@@ -234,20 +255,30 @@ export default function BillingProfessional() {
                       <td className="p-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex flex-wrap gap-1">
                           <Button size="sm" variant="outline" asChild>
-                            <Link to={rowDetailPath(row, { edit: Boolean(row.invoiceId) })}>
-                              {row.invoiceId ? (
-                                <><Eye className="mr-1 h-3.5 w-3.5" /> Invoice details</>
+                            <Link
+                              to={rowDetailPath(row, {
+                                edit: Boolean(
+                                  row.invoiceId
+                                  && row.invoiceStatus
+                                  && ["draft", "pendingApproval"].includes(row.invoiceStatus),
+                                ),
+                              })}
+                            >
+                              {row.invoiceId && row.invoiceStatus && ["draft", "pendingApproval"].includes(row.invoiceStatus) ? (
+                                <><FileText className="mr-1 h-3.5 w-3.5" /> Edit invoice</>
+                              ) : row.invoiceId ? (
+                                <><Eye className="mr-1 h-3.5 w-3.5" /> Open invoice</>
                               ) : row.verificationStatus === "verified" || row.verificationStatus === "passed" ? (
-                                <><FileText className="mr-1 h-3.5 w-3.5" /> Create invoice</>
+                                <><FileText className="mr-1 h-3.5 w-3.5" /> Create bill</>
                               ) : (
-                                <><ShieldCheck className="mr-1 h-3.5 w-3.5" /> Verify</>
+                                <><ShieldCheck className="mr-1 h-3.5 w-3.5" /> Verify & review</>
                               )}
                             </Link>
                           </Button>
                           {row.invoiceId ? (
                             <Button size="sm" variant="ghost" asChild>
                               <Link to={rowDetailPath(row, { print: true })}>
-                                <Printer className="mr-1 h-3.5 w-3.5" /> Open & print
+                                <Printer className="mr-1 h-3.5 w-3.5" /> Print
                               </Link>
                             </Button>
                           ) : null}

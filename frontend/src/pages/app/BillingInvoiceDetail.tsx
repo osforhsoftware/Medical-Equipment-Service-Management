@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
-import { ArrowLeft, Loader2, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
+import { ArrowLeft, Loader2, Pencil, Printer, X } from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
@@ -16,20 +16,15 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { InfoRow, downloadInvoicePdf, normalizeInvoiceLineDescription } from "@/components/billing/billing-ui";
-import { ApiError, api, type BackendInvoice, type BillingJobContext, type InvoiceLineInput } from "@/lib/api";
+import { InfoRow, ChargeBreakdown, downloadInvoicePdf, normalizeInvoiceLineDescription } from "@/components/billing/billing-ui";
+import { InvoiceLineEditor, newBillingLine } from "@/components/billing/InvoiceLineEditor";
+import { ApiError, api, type BackendCatalogItem, type BackendInventoryItem, type BackendInvoice, type BillingJobContext, type InvoiceLineInput } from "@/lib/api";
+import { summarizeChargeGroups } from "@/lib/billingCharges";
 import { PAYMENT_METHOD_OPTIONS } from "@/lib/fixedOptions";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
-const newLine = (): InvoiceLineInput => ({
-  type: "adjustment",
-  description: "",
-  quantity: 1,
-  unitPrice: 0,
-  taxRate: 0,
-  discount: 0,
-});
+const newLine = (): InvoiceLineInput => newBillingLine("product");
 
 function toEditableLines(invoice: BackendInvoice): InvoiceLineInput[] {
   return (invoice.lineItems ?? []).map((line) => ({
@@ -47,6 +42,7 @@ function toPreviewLines(lines: InvoiceLineInput[], jobRef?: string | null) {
   return lines.map((line, index) => ({
     id: line.id ?? `draft-${index}`,
     description: normalizeInvoiceLineDescription(line.description, jobRef),
+    type: line.type,
     quantity: line.quantity,
     unitPrice: line.unitPrice,
     discount: line.discount ?? 0,
@@ -107,6 +103,8 @@ export default function BillingInvoiceDetail() {
   const [editDueAt, setEditDueAt] = useState("");
   const [editLines, setEditLines] = useState<InvoiceLineInput[]>([]);
   const [payment, setPayment] = useState({ amount: 0, method: "bank_transfer", methodOther: "", reference: "", note: "" });
+  const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
+  const [catalog, setCatalog] = useState<BackendCatalogItem[]>([]);
   const editFormRef = useRef<HTMLDivElement>(null);
   const paymentFormRef = useRef<HTMLDivElement>(null);
 
@@ -143,6 +141,13 @@ export default function BillingInvoiceDetail() {
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
+    void Promise.all([
+      api.listInventory({ limit: 100, page: 1 }).then((res) => setInventory(res.data)).catch(() => setInventory([])),
+      api.listServiceCatalog().then(setCatalog).catch(() => setCatalog([])),
+    ]);
+  }, []);
+
+  useEffect(() => {
     if (invoice) {
       setPayment((prev) => ({
         ...prev,
@@ -164,6 +169,10 @@ export default function BillingInvoiceDetail() {
     setEditLines(editable.length ? editable : [newLine()]);
     editValidation.reset();
     setEditing(true);
+    void Promise.all([
+      api.listInventory({ limit: 100, page: 1 }).then((res) => setInventory(res.data)).catch(() => undefined),
+      api.listServiceCatalog().then(setCatalog).catch(() => undefined),
+    ]);
   };
 
   useEffect(() => {
@@ -197,20 +206,6 @@ export default function BillingInvoiceDetail() {
     setEditLines([]);
     setEditDueAt("");
     editValidation.reset();
-  };
-
-  const updateLine = (index: number, patch: Partial<InvoiceLineInput>) => {
-    setEditLines((prev) => {
-      const next = prev.map((line, i) => (i === index ? { ...line, ...patch } : line));
-      const values = { dueAt: editDueAt, lines: next };
-      if (patch.description !== undefined) {
-        editValidation.handleChange(`line_${index}_description`, values);
-      }
-      if (patch.quantity !== undefined) {
-        editValidation.handleChange(`line_${index}_quantity`, values);
-      }
-      return next;
-    });
   };
 
   const saveEdits = async () => {
@@ -260,6 +255,7 @@ export default function BillingInvoiceDetail() {
       : invoice?.lineItems?.map((line) => ({
           id: line.id,
           description: normalizeInvoiceLineDescription(line.description, invoice.jobRef),
+          type: line.type,
           quantity: Number(line.quantity),
           unitPrice: Number(line.unitPrice),
           discount: Number(line.discount),
@@ -274,6 +270,17 @@ export default function BillingInvoiceDetail() {
       return sum + net + net * ((line.taxRate ?? 0) / 100);
     }, 0);
   }, [lines]);
+
+  const chargeSummary = useMemo(
+    () => summarizeChargeGroups(lines.map((line) => ({
+      type: line.type ?? "other",
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      discount: line.discount,
+      taxRate: line.taxRate,
+    }))),
+    [lines],
+  );
 
   const printInvoice = () => {
     window.print();
@@ -399,166 +406,121 @@ export default function BillingInvoiceDetail() {
         ) : !invoice ? (
           <p className="text-center text-muted-foreground">Invoice not found.</p>
         ) : (
-          <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
-            <div className="no-print space-y-4">
-              {editing ? (
-                <Card ref={editFormRef}>
+          editing ? (
+            <div className="no-print space-y-6" ref={editFormRef}>
+              <form
+                noValidate
+                className="space-y-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void saveEdits();
+                }}
+              >
+                <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Edit invoice</CardTitle>
+                    <CardTitle className="text-base">Edit invoice items</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <form
-                      noValidate
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        void saveEdits();
+                    <div className="grid max-w-xs gap-2" data-field="dueAt">
+                      <Label htmlFor="edit-due-at" className={editValidation.shouldShow("dueAt") ? "text-destructive" : undefined}>
+                        Payment due date
+                        <RequiredMark />
+                      </Label>
+                      <Input
+                        id="edit-due-at"
+                        name="dueAt"
+                        type="date"
+                        value={editDueAt}
+                        className={fieldErrorClass(editValidation.shouldShow("dueAt"))}
+                        {...fieldAria("dueAt", editValidation.shouldShow("dueAt") ? editValidation.errors.dueAt : null)}
+                        onChange={(e) => {
+                          setEditDueAt(e.target.value);
+                          editValidation.handleChange("dueAt", { dueAt: e.target.value, lines: editLines });
+                        }}
+                        onBlur={() => editValidation.handleBlur("dueAt", { dueAt: editDueAt, lines: editLines })}
+                      />
+                      {editValidation.shouldShow("dueAt") && (
+                        <FormFieldError field="dueAt" message={editValidation.errors.dueAt} />
+                      )}
+                    </div>
+
+                    <InvoiceLineEditor
+                      title="Products & services"
+                      lines={editLines}
+                      inventory={inventory}
+                      catalog={catalog}
+                      minLines={1}
+                      errors={editValidation.errors}
+                      shouldShow={editValidation.shouldShow}
+                      onChange={(next) => {
+                        setEditLines(next);
+                        editValidation.handleChange("dueAt", { dueAt: editDueAt, lines: next });
                       }}
-                    >
-                      <div className="grid gap-2" data-field="dueAt">
-                        <Label htmlFor="edit-due-at" className={editValidation.shouldShow("dueAt") ? "text-destructive" : undefined}>
-                          Payment due date
-                          <RequiredMark />
-                        </Label>
-                        <Input
-                          id="edit-due-at"
-                          name="dueAt"
-                          type="date"
-                          value={editDueAt}
-                          className={fieldErrorClass(editValidation.shouldShow("dueAt"))}
-                          {...fieldAria("dueAt", editValidation.shouldShow("dueAt") ? editValidation.errors.dueAt : null)}
-                          onChange={(e) => {
-                            setEditDueAt(e.target.value);
-                            editValidation.handleChange("dueAt", { dueAt: e.target.value, lines: editLines });
-                          }}
-                          onBlur={() => editValidation.handleBlur("dueAt", { dueAt: editDueAt, lines: editLines })}
-                        />
-                        {editValidation.shouldShow("dueAt") && (
-                          <FormFieldError field="dueAt" message={editValidation.errors.dueAt} />
-                        )}
-                      </div>
+                      onBlurField={(field) => editValidation.handleBlur(field, { dueAt: editDueAt, lines: editLines })}
+                    />
 
-                      <div className="mt-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label>Line items</Label>
-                          <Button type="button" variant="outline" size="sm" onClick={() => setEditLines((prev) => [...prev, newLine()])}>
-                            <Plus className="mr-1 h-3.5 w-3.5" /> Add line
-                          </Button>
-                        </div>
-                        {editLines.map((line, index) => {
-                          const descKey = `line_${index}_description`;
-                          const qtyKey = `line_${index}_quantity`;
-                          return (
-                            <div key={line.id ?? `new-${index}`} className="space-y-2 rounded-lg border p-3">
-                              <div className="flex items-start justify-between gap-2" data-field={descKey}>
-                                <div className="grid flex-1 gap-1">
-                                  <Input
-                                    id={descKey}
-                                    name={descKey}
-                                    value={line.description}
-                                    placeholder="Description"
-                                    className={fieldErrorClass(editValidation.shouldShow(descKey))}
-                                    {...fieldAria(descKey, editValidation.shouldShow(descKey) ? editValidation.errors[descKey] : null)}
-                                    onChange={(e) => updateLine(index, { description: e.target.value })}
-                                    onBlur={() => editValidation.handleBlur(descKey, { dueAt: editDueAt, lines: editLines })}
-                                  />
-                                  {editValidation.shouldShow(descKey) && (
-                                    <FormFieldError field={descKey} message={editValidation.errors[descKey]} />
-                                  )}
-                                </div>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="shrink-0"
-                                  disabled={editLines.length <= 1}
-                                  onClick={() => setEditLines((prev) => prev.filter((_, i) => i !== index))}
-                                >
-                                  <Trash2 className="h-4 w-4 text-destructive" />
-                                </Button>
-                              </div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <div className="grid gap-1" data-field={qtyKey}>
-                                  <Label className={`text-xs ${editValidation.shouldShow(qtyKey) ? "text-destructive" : ""}`}>
-                                    Qty
-                                    <RequiredMark />
-                                  </Label>
-                                  <Input
-                                    id={qtyKey}
-                                    name={qtyKey}
-                                    type="number"
-                                    min={0.001}
-                                    step="any"
-                                    value={line.quantity}
-                                    className={fieldErrorClass(editValidation.shouldShow(qtyKey))}
-                                    {...fieldAria(qtyKey, editValidation.shouldShow(qtyKey) ? editValidation.errors[qtyKey] : null)}
-                                    onChange={(e) => updateLine(index, { quantity: Number(e.target.value) })}
-                                    onBlur={() => editValidation.handleBlur(qtyKey, { dueAt: editDueAt, lines: editLines })}
-                                  />
-                                  {editValidation.shouldShow(qtyKey) && (
-                                    <FormFieldError field={qtyKey} message={editValidation.errors[qtyKey]} />
-                                  )}
-                                </div>
-                                <div className="grid gap-1">
-                                  <Label className="text-xs">Unit price</Label>
-                                  <Input
-                                    type="number"
-                                    min={0}
-                                    step="any"
-                                    value={line.unitPrice}
-                                    onChange={(e) => updateLine(index, { unitPrice: Number(e.target.value) })}
-                                  />
-                                </div>
-                                <div className="grid gap-1">
-                                  <Label className="text-xs">Discount</Label>
-                                  <Input
-                                    type="number"
-                                    min={0}
-                                    step="any"
-                                    value={line.discount ?? 0}
-                                    onChange={(e) => updateLine(index, { discount: Number(e.target.value) })}
-                                  />
-                                </div>
-                                <div className="grid gap-1">
-                                  <Label className="text-xs">Tax %</Label>
-                                  <Input
-                                    type="number"
-                                    min={0}
-                                    max={100}
-                                    step="any"
-                                    value={line.taxRate ?? 0}
-                                    onChange={(e) => updateLine(index, { taxRate: Number(e.target.value) })}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      <InfoRow label="Preview total" value={formatCurrency(editPreviewTotal)} />
-                      <p className="text-xs text-muted-foreground">
-                        Totals are recalculated on the server when you save. Only draft and pending-approval invoices can be edited.
-                      </p>
-                    </form>
+                    <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm">Final amount</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <ChargeBreakdown groups={chargeSummary.groups} total={editPreviewTotal} label="Preview final amount" />
+                          <p className="mt-3 text-xs text-muted-foreground">
+                            Add products from inventory or services from the catalog, same as estimate creation. Totals update when you save.
+                          </p>
+                        </CardContent>
+                      </Card>
+                      <Card className="overflow-visible border-border">
+                        <CardContent className="p-0">
+                          {lines.length ? (
+                            <ProfessionalDocument
+                              kind="Invoice"
+                              reference={invoice.reference}
+                              customerName={invoice.customerName}
+                              equipmentName={context?.job.equipmentName}
+                              issueDate={invoice.issuedAt}
+                              validOrDueLabel="Due date"
+                              validOrDueDate={editDueAt}
+                              ticketRef={invoice.jobRef}
+                              lines={lines}
+                              notes={context?.job.serviceRequest?.description ? `Service: ${context.job.serviceRequest.description}` : undefined}
+                              hideToolbar
+                              showSignature
+                            />
+                          ) : (
+                            <p className="p-10 text-center text-muted-foreground">Add at least one line item.</p>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
                   </CardContent>
                 </Card>
-              ) : null}
-
+              </form>
+            </div>
+          ) : (
+          <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
+            <div className="no-print space-y-4">
               <Card>
                 <CardHeader><CardTitle className="text-base">Invoice actions</CardTitle></CardHeader>
                 <CardContent className="space-y-3">
                   <InfoRow label="Status" value={<StatusBadge status={invoice.status} />} />
-                  <InfoRow label="Total" value={formatCurrency(editing ? editPreviewTotal : invoice.total)} />
+                  <ChargeBreakdown groups={chargeSummary.groups} total={Number(invoice.total)} />
                   <InfoRow label="Paid" value={formatCurrency(invoice.paidTotal ?? 0)} />
-                  <InfoRow label="Balance" value={formatCurrency(editing ? editPreviewTotal : (invoice.balanceDue ?? invoice.total))} />
+                  <InfoRow label="Balance" value={formatCurrency(invoice.balanceDue ?? invoice.total)} />
+                  {canEdit ? (
+                    <Button className="w-full" variant="outline" onClick={startEditing}>
+                      <Pencil className="mr-2 h-4 w-4" /> Edit / add products & services
+                    </Button>
+                  ) : null}
                   <div className="flex flex-col gap-2 pt-2">
-                    {!editing && invoice.status === "draft" ? (
+                    {invoice.status === "draft" ? (
                       <Button variant="outline" onClick={submitApproval} disabled={saving}>Submit for approval</Button>
                     ) : null}
-                    {!editing && invoice.status === "pendingApproval" ? (
+                    {invoice.status === "pendingApproval" ? (
                       <Button onClick={approveInvoice} disabled={saving}>Approve invoice</Button>
                     ) : null}
-                    {!editing && invoice.status === "approved" ? (
+                    {invoice.status === "approved" ? (
                       <Button onClick={markSent} disabled={saving}>Mark sent</Button>
                     ) : null}
                   </div>
@@ -715,18 +677,22 @@ export default function BillingInvoiceDetail() {
               ) : null}
             </div>
 
-            <Card className="print-area overflow-hidden print:overflow-visible print:shadow-none">
+            <Card className="print-area overflow-visible border-border">
               <CardContent className="p-0">
                 {lines.length ? (
                   <ProfessionalDocument
                     kind="Invoice"
                     reference={invoice.reference}
                     customerName={invoice.customerName}
+                    equipmentName={context?.job.equipmentName}
                     issueDate={invoice.issuedAt}
                     validOrDueLabel="Due date"
-                    validOrDueDate={editing ? editDueAt : invoice.dueAt}
+                    validOrDueDate={invoice.dueAt}
+                    ticketRef={invoice.jobRef}
                     lines={lines}
                     notes={context?.job.serviceRequest?.description ? `Service: ${context.job.serviceRequest.description}` : undefined}
+                    hideToolbar
+                    showSignature
                   />
                 ) : (
                   <p className="p-10 text-center text-muted-foreground">No line items on this invoice.</p>
@@ -734,6 +700,7 @@ export default function BillingInvoiceDetail() {
               </CardContent>
             </Card>
           </div>
+          )
         )}
       </div>
     </RoleGuard>

@@ -8,8 +8,8 @@ import { createCustomerSchema, updateCustomerSchema } from "@/schemas/customers.
 const router = Router();
 router.use(authenticate, resolveTenant);
 
-const canRead = requireRole("admin", "coordinator", "billing");
-const canManage = requireRole("admin", "coordinator");
+const canRead = requireRole("admin", "coordinator", "estimator", "billing");
+const canManage = requireRole("admin", "coordinator", "estimator");
 
 router.get("/", canRead, customersController.getAll);
 router.get("/:id", canRead, customersController.getById);

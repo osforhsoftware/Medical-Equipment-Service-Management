@@ -8,7 +8,7 @@ import { createEquipmentSchema, updateEquipmentSchema } from "@/schemas/equipmen
 const router = Router();
 router.use(authenticate, resolveTenant);
 
-const canRead = requireRole("admin", "coordinator", "inspector", "engineer", "inventory");
+const canRead = requireRole("admin", "coordinator", "inspector", "estimator", "engineer", "inventory");
 const canManage = requireRole("admin", "coordinator", "inventory");
 
 router.get("/", canRead, equipmentController.getAll);

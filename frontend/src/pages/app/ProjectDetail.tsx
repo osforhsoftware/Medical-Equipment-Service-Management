@@ -14,13 +14,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/context/AuthContext";
 import { api, type BackendJobActivity, type BackendJobExtra, type BackendJobWorkLog, type BackendServiceJob, type BackendUser } from "@/lib/api";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 const assignSchema = z.object({
   userId: fieldRules.selectRequired("a staff member"),
-  role: fieldRules.requiredString("Project role"),
 });
 
 const workSchema = z.object({
@@ -41,6 +41,8 @@ const extraSchema = z.object({
 
 export default function ProjectDetail() {
   const { id = "" } = useParams();
+  const { hasRole } = useAuth();
+  const canAssignTeam = hasRole(["admin", "coordinator"]);
   const [job, setJob] = useState<BackendServiceJob | null>(null);
   const [staff, setStaff] = useState<BackendUser[]>([]);
   const [activities, setActivities] = useState<BackendJobActivity[]>([]);
@@ -48,7 +50,7 @@ export default function ProjectDetail() {
   const [extras, setExtras] = useState<BackendJobExtra[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
-  const [assignment, setAssignment] = useState({ userId: "", role: "engineer", isLead: false });
+  const [assignment, setAssignment] = useState({ userId: "", isLead: false });
   const [work, setWork] = useState({ startedAt: "", endedAt: "", workPerformed: "", testingResult: "", calibrationResult: "" });
   const [extra, setExtra] = useState({ description: "", reason: "", quantity: 1, unitPrice: 0, taxRate: 0 });
   const assignRef = useRef<HTMLDivElement>(null);
@@ -56,7 +58,7 @@ export default function ProjectDetail() {
   const extraRef = useRef<HTMLDivElement>(null);
 
   const assignValidation = useFormValidation({
-    fieldOrder: ["userId", "role"],
+    fieldOrder: ["userId"],
     schema: assignSchema,
   });
   const workValidation = useFormValidation({
@@ -71,7 +73,11 @@ export default function ProjectDetail() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [record, users, audit] = await Promise.all([api.getJob(id), api.listUsers({ isActive: true }), api.getJobActivities(id)]);
+      const [record, audit, users] = await Promise.all([
+        api.getJob(id),
+        api.getJobActivities(id),
+        canAssignTeam ? api.listUsers({ isActive: true }) : Promise.resolve([] as BackendUser[]),
+      ]);
       setJob(record);
       setLogs(record.workLogs ?? []);
       setExtras(record.extras ?? []);
@@ -82,18 +88,25 @@ export default function ProjectDetail() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, canAssignTeam]);
 
   useEffect(() => { void load(); }, [load]);
 
   const assign = async () => {
     if (!assignValidation.validateAll(assignment, undefined, assignRef.current)) return;
+    const member = staff.find((user) => user.id === assignment.userId);
     setSaving("assign");
     try {
-      await api.assignJobStaff(id, assignment);
-      setAssignment({ userId: "", role: "engineer", isLead: false });
+      await api.assignJobStaff(id, {
+        userId: assignment.userId,
+        role: member?.role || "member",
+        isLead: assignment.isLead,
+      });
+      setAssignment({ userId: "", isLead: false });
       assignValidation.reset();
       toast({ title: "Staff assignment saved" });
+      const record = await api.getJob(id);
+      setJob(record);
     } catch (error) {
       if (!assignValidation.applyApiErrors(error, assignRef.current)) {
         toast.apiError(error, { fallback: "Request failed" });
@@ -151,62 +164,55 @@ export default function ProjectDetail() {
         <Card>
           <CardHeader><CardTitle className="text-base"><UserPlus className="mr-2 inline h-4 w-4" />Project team</CardTitle></CardHeader>
           <CardContent ref={assignRef} className="space-y-3">
-            <form
-              noValidate
-              onSubmit={(e) => {
-                e.preventDefault();
-                void assign();
-              }}
-            >
-              <div className="space-y-3">
-                <div className="grid gap-2" data-field="userId">
-                  <Label className={assignValidation.shouldShow("userId") ? "text-destructive" : undefined}>
-                    Staff member
-                    <RequiredMark />
-                  </Label>
-                  <Select
-                    value={assignment.userId}
-                    onValueChange={(userId) => {
-                      const next = { ...assignment, userId };
-                      setAssignment(next);
-                      assignValidation.handleChange("userId", next);
-                    }}
-                  >
-                    <SelectTrigger
-                      className={fieldErrorClass(assignValidation.shouldShow("userId"))}
-                      {...fieldAria("userId", assignValidation.shouldShow("userId") ? assignValidation.errors.userId : null)}
+            {canAssignTeam ? (
+              <form
+                noValidate
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void assign();
+                }}
+              >
+                <div className="space-y-3">
+                  <div className="grid gap-2" data-field="userId">
+                    <Label className={assignValidation.shouldShow("userId") ? "text-destructive" : undefined}>
+                      Staff member
+                      <RequiredMark />
+                    </Label>
+                    <Select
+                      value={assignment.userId}
+                      onValueChange={(userId) => {
+                        const next = { ...assignment, userId };
+                        setAssignment(next);
+                        assignValidation.handleChange("userId", next);
+                      }}
                     >
-                      <SelectValue placeholder="Select staff" />
-                    </SelectTrigger>
-                    <SelectContent>{staff.map((user) => <SelectItem key={user.id} value={user.id}>{user.name} · {user.role}</SelectItem>)}</SelectContent>
-                  </Select>
-                  {assignValidation.shouldShow("userId") && <FormFieldError field="userId" message={assignValidation.errors.userId} />}
+                      <SelectTrigger
+                        className={fieldErrorClass(assignValidation.shouldShow("userId"))}
+                        {...fieldAria("userId", assignValidation.shouldShow("userId") ? assignValidation.errors.userId : null)}
+                      >
+                        <SelectValue placeholder="Select staff" />
+                      </SelectTrigger>
+                      <SelectContent>{staff.map((user) => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                    {assignValidation.shouldShow("userId") && <FormFieldError field="userId" message={assignValidation.errors.userId} />}
+                  </div>
+                  <Button type="submit" className="w-full" disabled={saving === "assign"}>
+                    {saving === "assign" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Add to team
+                  </Button>
                 </div>
-                <div className="grid gap-2" data-field="role">
-                  <Label htmlFor="project-role" className={assignValidation.shouldShow("role") ? "text-destructive" : undefined}>
-                    Project role
-                    <RequiredMark />
-                  </Label>
-                  <Input
-                    id="project-role"
-                    name="role"
-                    value={assignment.role}
-                    className={fieldErrorClass(assignValidation.shouldShow("role"))}
-                    {...fieldAria("role", assignValidation.shouldShow("role") ? assignValidation.errors.role : null)}
-                    onChange={(event) => {
-                      const next = { ...assignment, role: event.target.value };
-                      setAssignment(next);
-                      assignValidation.handleChange("role", next);
-                    }}
-                    onBlur={() => assignValidation.handleBlur("role", assignment)}
-                  />
-                  {assignValidation.shouldShow("role") && <FormFieldError field="role" message={assignValidation.errors.role} />}
-                </div>
-                <Button type="submit" className="w-full" disabled={saving === "assign"}>
-                  {saving === "assign" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Add to team
-                </Button>
+              </form>
+            ) : null}
+            {job.assignments?.length ? (
+              <div className="space-y-2">
+                {job.assignments.map((member) => (
+                  <div key={member.id} className="rounded-lg border px-3 py-2 text-sm">
+                    <p className="font-medium">{member.user?.name ?? "Team member"}{member.isLead ? " · Lead" : ""}</p>
+                  </div>
+                ))}
               </div>
-            </form>
+            ) : (
+              <p className="text-sm text-muted-foreground">Lead: {job.engineer || "Not assigned"}</p>
+            )}
           </CardContent>
         </Card>
         <Card className="xl:col-span-2">

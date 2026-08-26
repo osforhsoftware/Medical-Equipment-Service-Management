@@ -38,6 +38,13 @@ async function main() {
         where: { tenantId: TENANT_ID, type, slug: term.slug },
       });
       if (existing) continue;
+      let parentId: string | undefined;
+      if (term.parentSlug) {
+        const parent = await prisma.taxonomyTerm.findFirst({
+          where: { tenantId: TENANT_ID, type: "inventory_category", slug: term.parentSlug },
+        });
+        parentId = parent?.id;
+      }
       await prisma.taxonomyTerm.create({
         data: {
           tenantId: TENANT_ID,
@@ -45,6 +52,7 @@ async function main() {
           name: term.name,
           slug: term.slug,
           sortOrder: term.sortOrder,
+          parentId,
           isActive: true,
           isSystem: true,
         },
@@ -82,7 +90,7 @@ async function main() {
     ["admin", "Administrator"],
     ["coordinator", "Service Coordinator"],
     ["inspector", "Inspector"],
-    ["estimator", "Estimator"],
+    ["estimator", "Sales / Estimator"],
     ["engineer", "Service Engineer"],
     ["inventory", "Inventory Staff"],
     ["billing", "Billing Staff"],
@@ -260,7 +268,8 @@ async function main() {
       defaultTaxRate: 8,
       rbacMatrix: {
         Dashboard: ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
-        Customers: ["admin", "coordinator", "billing"],
+        Sales: ["admin", "coordinator", "estimator", "billing"],
+        Customers: ["admin", "coordinator", "estimator", "billing"],
         Equipment: ["admin", "coordinator", "inspector", "engineer", "inventory"],
         "Service Requests": ["admin", "coordinator", "inspector", "engineer"],
         Inspections: ["admin", "coordinator", "inspector"],
@@ -269,7 +278,9 @@ async function main() {
         Inventory: ["admin", "inventory", "engineer"],
         Suppliers: ["admin", "inventory"],
         "Purchase Orders": ["admin", "inventory"],
+        "Purchase Returns": ["admin", "inventory"],
         "Stock Transfers": ["admin", "inventory"],
+        "Stock Ledger": ["admin", "inventory"],
         "AMC Contracts": ["admin", "coordinator", "billing"],
         Billing: ["admin", "billing"],
         Reports: ["admin", "billing", "coordinator"],

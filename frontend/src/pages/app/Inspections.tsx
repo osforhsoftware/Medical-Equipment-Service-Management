@@ -13,9 +13,10 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { InspectionCard } from "@/components/inspections/InspectionCard";
 import { InspectionReportPanel } from "@/components/inspections/InspectionReportPanel";
+import { useInspectionReportEditor } from "@/components/inspections/useInspectionReportEditor";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { api, type BackendServiceRequest, type BackendInspectionReport } from "@/lib/api";
+import { api, type BackendServiceRequest } from "@/lib/api";
 import { formatServiceStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -36,18 +37,6 @@ export default function Inspections() {
   const [requests, setRequests] = useState<BackendServiceRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [active, setActive] = useState<BackendServiceRequest | null>(null);
-  const [existingReport, setExistingReport] = useState<BackendInspectionReport | null>(null);
-
-  const [findings, setFindings] = useState("");
-  const [recommendation, setRecommendation] = useState("");
-  const [workDetails, setWorkDetails] = useState("");
-  const [machineImage, setMachineImage] = useState<File | null>(null);
-  const [machineImages, setMachineImages] = useState<File[]>([]);
-  const [imageCaptions, setImageCaptions] = useState<string[]>([]);
-  const [severity, setSeverity] = useState("medium");
-  const [saving, setSaving] = useState(false);
-  const [loadingReport, setLoadingReport] = useState(false);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -55,18 +44,6 @@ export default function Inspections() {
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [summaryFilter, setSummaryFilter] = useState<SummaryKey | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
-
-  const newImagePreviews = useMemo(
-    () => machineImages.map((file) => ({ file, url: URL.createObjectURL(file) })),
-    [machineImages],
-  );
-
-  useEffect(
-    () => () => {
-      newImagePreviews.forEach((preview) => URL.revokeObjectURL(preview.url));
-    },
-    [newImagePreviews],
-  );
 
   const loadRequests = useCallback(async () => {
     setLoading(true);
@@ -144,93 +121,7 @@ export default function Inspections() {
   }, [requests, search, statusFilter, severityFilter, assigneeFilter, summaryFilter]);
 
   const awaitingCount = stats.awaiting + stats.inInspection;
-
-  const resetFormState = () => {
-    setFindings("");
-    setRecommendation("");
-    setWorkDetails("");
-    setMachineImage(null);
-    setMachineImages([]);
-    setImageCaptions([]);
-    setSeverity("medium");
-    setExistingReport(null);
-  };
-
-  const startInspection = async (task: BackendServiceRequest) => {
-    setActive(task);
-    resetFormState();
-
-    if (formatServiceStatus(task.status) === "new") {
-      try {
-        await api.advanceWorkflow(task.id, {
-          status: "inspection",
-          note: "Inspection started",
-        });
-        await loadRequests();
-      } catch (err) {
-        toast.apiError(err, { fallback: "Unable to start inspection for this ticket." });
-        setActive(null);
-        return;
-      }
-    }
-
-    setLoadingReport(true);
-    try {
-      const report = await api.getInspectionReport(task.id);
-      if (report) {
-        setExistingReport(report);
-        setFindings(report.findings);
-        setRecommendation(report.recommendation);
-        setSeverity(report.severity);
-      }
-    } catch {
-      /* no report yet */
-    } finally {
-      setLoadingReport(false);
-    }
-  };
-
-  const closePanel = () => {
-    if (saving) return;
-    setActive(null);
-  };
-
-  const submitReport = async () => {
-    if (!active) return;
-    if (saving) return;
-
-    setSaving(true);
-    try {
-      const files = machineImages.length > 0 ? machineImages : machineImage ? [machineImage] : [];
-      const attachments: { fileId: string; caption?: string }[] = [];
-      for (let i = 0; i < files.length; i++) {
-        const uploaded = await api.uploadFile(files[i]);
-        const caption = imageCaptions[i]?.trim();
-        attachments.push({ fileId: uploaded.id, ...(caption ? { caption } : {}) });
-      }
-
-      await api.saveInspectionReport(active.id, {
-        findings: [findings.trim(), workDetails.trim() ? `Work details:\n${workDetails.trim()}` : ""]
-          .filter(Boolean)
-          .join("\n\n"),
-        recommendation: recommendation.trim(),
-        severity,
-        attachments,
-        attachmentFileIds: attachments.map((item) => item.fileId),
-        submit: true,
-      });
-
-      toast.success("Inspection report submitted", {
-        description: "The service request has moved to Estimate.",
-      });
-      setActive(null);
-      await loadRequests();
-    } catch (err) {
-      toast.apiError(err, { fallback: "Unable to submit inspection report. Please try again." });
-    } finally {
-      setSaving(false);
-    }
-  };
+  const editor = useInspectionReportEditor(loadRequests);
 
   const toggleSummary = (key: SummaryKey) => {
     setSummaryFilter((prev) => (prev === key ? null : key));
@@ -278,7 +169,7 @@ export default function Inspections() {
         )}
 
         {!loading && !loadError ? (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
             {summaryItems.map((item) => {
               const activeSummary = summaryFilter === item.key;
               return (
@@ -287,16 +178,16 @@ export default function Inspections() {
                   type="button"
                   onClick={() => toggleSummary(item.key)}
                   className={cn(
-                    "rounded-lg border px-3 py-2.5 text-left transition-colors duration-150",
+                    "rounded-md border px-2.5 py-1.5 text-left transition-colors duration-150",
                     activeSummary
                       ? "border-primary/25 bg-primary-light"
                       : "border-border bg-card hover:bg-muted/50",
                   )}
                 >
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                     {item.label}
                   </p>
-                  <p className="mt-1 text-xl font-semibold tabular-nums text-foreground">{item.value}</p>
+                  <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground sm:text-lg">{item.value}</p>
                 </button>
               );
             })}
@@ -408,15 +299,14 @@ export default function Inspections() {
         ) : null}
 
         {loading ? (
-          <div className={cn("grid gap-4", !isMobile && "md:grid-cols-2 xl:grid-cols-3")}>
+          <div className={cn("grid gap-3", !isMobile && "md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4")}>
             {Array.from({ length: isMobile ? 3 : 6 }).map((_, i) => (
-              <div key={i} className="space-y-3 rounded-xl border border-border/60 bg-card p-5">
+              <div key={i} className="space-y-2 rounded-lg border border-border/60 bg-card p-3">
                 <div className="flex justify-between gap-3">
-                  <Skeleton className="h-5 w-2/3" />
-                  <Skeleton className="h-5 w-16 rounded-full" />
+                  <Skeleton className="h-4 w-2/3" />
+                  <Skeleton className="h-4 w-14 rounded-full" />
                 </div>
                 <Skeleton className="h-3 w-1/2" />
-                <Skeleton className="h-10 w-full" />
                 <Skeleton className="h-8 w-full" />
               </div>
             ))}
@@ -448,13 +338,13 @@ export default function Inspections() {
             </Button>
           </div>
         ) : (
-          <div className={cn("grid gap-4", !isMobile && "md:grid-cols-2 xl:grid-cols-3")}>
+          <div className={cn("grid gap-3", !isMobile && "md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4")}>
             {filteredRequests.map((task) => (
               <InspectionCard
                 key={task.id}
                 task={task}
                 mobile={isMobile}
-                onOpen={(t) => void startInspection(t)}
+                onInspect={(t) => void editor.startInspection(t)}
               />
             ))}
           </div>
@@ -462,27 +352,27 @@ export default function Inspections() {
       </div>
 
       <InspectionReportPanel
-        open={!!active}
-        onClose={closePanel}
-        active={active}
-        existingReport={existingReport}
-        loadingReport={loadingReport}
-        saving={saving}
-        onSubmit={() => void submitReport()}
-        findings={findings}
-        setFindings={setFindings}
-        recommendation={recommendation}
-        setRecommendation={setRecommendation}
-        workDetails={workDetails}
-        setWorkDetails={setWorkDetails}
-        severity={severity}
-        setSeverity={setSeverity}
-        machineImages={machineImages}
-        setMachineImages={setMachineImages}
-        setMachineImage={setMachineImage}
-        imageCaptions={imageCaptions}
-        setImageCaptions={setImageCaptions}
-        newImagePreviews={newImagePreviews}
+        open={!!editor.active}
+        onClose={editor.closePanel}
+        active={editor.active}
+        existingReport={editor.existingReport}
+        loadingReport={editor.loadingReport}
+        saving={editor.saving}
+        onSubmit={() => void editor.submitReport()}
+        findings={editor.findings}
+        setFindings={editor.setFindings}
+        recommendation={editor.recommendation}
+        setRecommendation={editor.setRecommendation}
+        workDetails={editor.workDetails}
+        setWorkDetails={editor.setWorkDetails}
+        severity={editor.severity}
+        setSeverity={editor.setSeverity}
+        machineImages={editor.machineImages}
+        setMachineImages={editor.setMachineImages}
+        setMachineImage={editor.setMachineImage}
+        imageCaptions={editor.imageCaptions}
+        setImageCaptions={editor.setImageCaptions}
+        newImagePreviews={editor.newImagePreviews}
       />
     </RoleGuard>
   );
