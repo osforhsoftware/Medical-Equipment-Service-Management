@@ -34,13 +34,17 @@ import type { Role } from "@/data/types";
 import { toast } from "@/lib/toast";
 
 const WORKFLOW_STEPS = [
-  { status: "new", label: "New" },
-  { status: "inspection", label: "Inspection" },
-  { status: "estimate", label: "Estimate" },
-  { status: "approval", label: "Approval" },
-  { status: "inProgress", label: "In Progress" },
-  { status: "invoiced", label: "Invoiced" },
-  { status: "completed", label: "Completed" },
+  { status: "new", statuses: ["new"], label: "New" },
+  { status: "inspection", statuses: ["inspection"], label: "Inspection" },
+  { status: "estimate", statuses: ["estimate"], label: "Estimate" },
+  { status: "approval", statuses: ["approval", "pending_approval"], label: "Approval" },
+  {
+    status: "inProgress",
+    statuses: ["inProgress", "assigned_engineer", "change_pending_approval", "pending_final_approval"],
+    label: "In Progress",
+  },
+  { status: "invoiced", statuses: ["pending_invoice", "invoiced"], label: "Invoiced" },
+  { status: "completed", statuses: ["completed", "closed", "finished"], label: "Completed" },
 ] as const;
 
 const ASSIGNABLE_ROLES: Role[] = ["coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
@@ -94,7 +98,7 @@ export default function ServiceRequestDetail() {
   const canCreate = hasRole(["admin", "coordinator"]);
   const canAssign = hasRole(["admin", "coordinator"]);
   const canBuildEstimate = hasRole(["admin", "coordinator", "estimator"]);
-  const canApproveEstimate = hasRole(["admin", "coordinator", "inspector", "engineer"]);
+  const canApproveEstimate = hasRole(["admin", "coordinator"]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -134,7 +138,9 @@ export default function ServiceRequestDetail() {
       .finally(() => setLoadingAssignStaff(false));
   }, [assignOpen, assignRole]);
 
-  const currentStepIndex = WORKFLOW_STEPS.findIndex((s) => s.status === request?.status || formatServiceStatus(request?.status ?? "") === s.status);
+  const currentStepIndex = WORKFLOW_STEPS.findIndex((step) =>
+    (step.statuses as readonly string[]).includes(request?.status ?? ""),
+  );
 
   const submitWorkflow = async () => {
     if (!request || !workflowStatus) return;
@@ -188,6 +194,23 @@ export default function ServiceRequestDetail() {
       }
     } finally {
       setAssignSaving(false);
+    }
+  };
+
+  const confirmCompletedWork = async () => {
+    if (!request) return;
+    setWorkflowSaving(true);
+    try {
+      const updated = await api.grantTicketFinalApproval(request.id, {
+        note: "Completed work confirmed by the service coordinator.",
+      });
+      setRequest(updated);
+      setTimeline(await api.getServiceRequestTimeline(request.id));
+      toast({ title: "Completed work confirmed", description: "The ticket is ready for invoicing." });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to confirm completed work" });
+    } finally {
+      setWorkflowSaving(false);
     }
   };
 
@@ -300,7 +323,7 @@ export default function ServiceRequestDetail() {
           <Card>
             <CardHeader className="pb-3"><CardTitle className="text-base">Actions</CardTitle></CardHeader>
             <CardContent className="space-y-2">
-              {canCreate && currentStepIndex >= 0 && currentStepIndex < WORKFLOW_STEPS.length - 1 ? (
+              {canCreate && currentStepIndex >= 0 && currentStepIndex < 2 ? (
                 <Button
                   className="w-full"
                   onClick={() => {
@@ -331,16 +354,31 @@ export default function ServiceRequestDetail() {
                   <UserCheck className="mr-1.5 h-4 w-4" /> Assign / Reassign
                 </Button>
               ) : null}
-              {canBuildEstimate && (request.status === "estimate" || request.status === "inspection" || request.status === "approval" || request.status === "pending_approval") ? (
+              {canBuildEstimate && (request.status === "estimate" || request.status === "inspection") ? (
                 <Button asChild variant="outline" className="w-full">
                   <Link to={`/app/estimates/${request.id}/build`}>Open estimate builder</Link>
                 </Button>
               ) : null}
-              {canApproveEstimate && !canBuildEstimate ? (
+              {canApproveEstimate && ["approval", "pending_approval"].includes(request.status) ? (
                 <Button asChild variant="outline" className="w-full">
-                  <Link to="/app/estimates">Review estimates</Link>
+                  <Link to={`/app/estimates?status=pendingAdminApproval&search=${encodeURIComponent(request.reference)}`}>
+                    Review estimate & assign engineer
+                  </Link>
                 </Button>
               ) : null}
+              {canApproveEstimate && request.status === "pending_final_approval" ? (
+                <Button
+                  className="w-full"
+                  disabled={workflowSaving}
+                  onClick={() => void confirmCompletedWork()}
+                >
+                  {workflowSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Confirm completed work
+                </Button>
+              ) : null}
+              <Button asChild variant="outline" className="w-full">
+                <Link to={`/app/inspections/${request.id}`}>View inspection details</Link>
+              </Button>
             </CardContent>
           </Card>
         ) : undefined}

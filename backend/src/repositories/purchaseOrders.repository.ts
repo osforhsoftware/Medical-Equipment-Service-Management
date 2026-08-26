@@ -47,8 +47,15 @@ export class PurchaseOrdersRepository {
     return data;
   }
 
-  async findById(id: string, tenantId: string): Promise<PurchaseOrder | null> {
-    return prisma.purchaseOrder.findFirst({ where: { id, tenantId } });
+  async findById(id: string, tenantId: string) {
+    return prisma.purchaseOrder.findFirst({
+      where: { id, tenantId },
+      include: {
+        lineItems: true,
+        receipts: true,
+        purchaseReturns: { include: { lines: true }, orderBy: { createdAt: "desc" } },
+      },
+    });
   }
 
   async create(tenantId: string, data: Omit<Prisma.PurchaseOrderUncheckedCreateInput, "tenantId">): Promise<PurchaseOrder> {

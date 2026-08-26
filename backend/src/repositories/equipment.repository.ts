@@ -68,7 +68,14 @@ export class EquipmentRepository {
   }
 
   async findByAssetTag(assetTag: string, tenantId: string): Promise<Equipment | null> {
-    return prisma.equipment.findFirst({ where: { assetTag, tenantId } });
+    const tag = assetTag.trim();
+    if (!tag) return null;
+    return prisma.equipment.findFirst({
+      where: {
+        tenantId,
+        OR: [{ assetTag: tag }, { serialNumber: tag }],
+      },
+    });
   }
 
   async create(tenantId: string, data: Omit<Prisma.EquipmentUncheckedCreateInput, "tenantId">): Promise<Equipment> {

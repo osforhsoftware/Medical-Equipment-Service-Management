@@ -1,6 +1,15 @@
+import { Link } from "react-router-dom";
 import { CheckCircle2, Circle } from "lucide-react";
-import { api, type BillingJobContext, type BillingVerificationItem } from "@/lib/api";
-import { formatCurrency, formatDateTime } from "@/lib/format";
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { EstimateItemsTable } from "@/components/estimates/EstimateItemsTable";
+import { api, type BillingJobContext, type BillingVerificationItem, type EstimateLineInput } from "@/lib/api";
+import {
+  BILLING_CHARGE_GROUPS,
+  billingLineTypeLabel,
+  extraLineTotal,
+  type BillingChargeGroupKey,
+} from "@/lib/billingCharges";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -16,6 +25,28 @@ export function InfoRow({ label, value }: { label: string; value: React.ReactNod
     <div className="flex items-start justify-between gap-4 py-1 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className="text-right font-medium">{value}</span>
+    </div>
+  );
+}
+
+export function ChargeBreakdown({
+  groups,
+  total,
+  label = "Final amount",
+}: {
+  groups: Record<BillingChargeGroupKey, number>;
+  total: number;
+  label?: string;
+}) {
+  return (
+    <div className="space-y-1">
+      {BILLING_CHARGE_GROUPS.map((group) => (
+        <InfoRow key={group.key} label={group.label} value={formatCurrency(groups[group.key])} />
+      ))}
+      <div className="flex items-start justify-between gap-4 border-t pt-2 text-sm">
+        <span className="font-semibold">{label}</span>
+        <span className="text-right text-base font-semibold">{formatCurrency(total)}</span>
+      </div>
     </div>
   );
 }
@@ -53,6 +84,109 @@ export function VerificationChecklist({ items }: { items: BillingVerificationIte
   );
 }
 
+function estimateViewLines(context: BillingJobContext): EstimateLineInput[] {
+  return (context.job.estimate?.lineItems ?? []).map((line) => ({
+    type: line.type as EstimateLineInput["type"],
+    description: line.description,
+    catalogItemId: line.catalogItemId,
+    inventoryItemId: line.inventoryItemId,
+    partNumber: line.partNumber,
+    quantity: Number(line.quantity),
+    unitPrice: Number(line.unitPrice),
+    taxRate: Number(line.taxRate),
+    discount: Number(line.discount),
+  }));
+}
+
+export function BillingEstimateDetails({ context }: { context: BillingJobContext }) {
+  const estimate = context.job.estimate;
+  if (!estimate) {
+    return <p className="text-sm text-muted-foreground">No estimate is linked to this job.</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="font-medium">{estimate.reference}</p>
+          <p className="text-xs text-muted-foreground">
+            Rev {estimate.revision} · Valid until {formatDate(estimate.validUntil)}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <StatusBadge status={estimate.status} />
+          <ButtonLink to={`/app/estimates/${estimate.id}`}>Open estimate</ButtonLink>
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <InfoRow label="Customer" value={estimate.customerName} />
+        <InfoRow label="Equipment" value={estimate.equipmentName} />
+        <InfoRow label="Labor" value={formatCurrency(estimate.laborCost)} />
+        <InfoRow label="Parts" value={formatCurrency(estimate.partsCost)} />
+        <InfoRow label="Subtotal" value={formatCurrency(estimate.subtotal ?? 0)} />
+        <InfoRow label="Discount" value={formatCurrency(estimate.discount ?? 0)} />
+        <InfoRow label="Tax" value={formatCurrency(estimate.tax ?? 0)} />
+        <InfoRow label="Estimate total" value={formatCurrency(estimate.total)} />
+      </div>
+      <EstimateItemsTable mode="view" lines={estimateViewLines(context)} />
+      {estimate.notes ? (
+        <Section title="Notes">
+          <p className="whitespace-pre-line text-sm text-muted-foreground">{estimate.notes}</p>
+        </Section>
+      ) : null}
+      {estimate.terms ? (
+        <Section title="Terms & conditions">
+          <p className="whitespace-pre-line text-sm text-muted-foreground">{estimate.terms}</p>
+        </Section>
+      ) : null}
+    </div>
+  );
+}
+
+function ButtonLink({ to, children }: { to: string; children: React.ReactNode }) {
+  return (
+    <Link to={to} className="text-xs font-medium text-primary hover:underline">
+      {children}
+    </Link>
+  );
+}
+
+export function BillingEngineerExtras({ context }: { context: BillingJobContext }) {
+  const extras = context.job.extras ?? [];
+  if (!extras.length) {
+    return <p className="text-sm text-muted-foreground">The service engineer did not add extra products, equipment, or machines.</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {extras.map((extra) => (
+        <div key={extra.id} className="rounded-lg border p-3 text-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-medium">{extra.description}</p>
+              <p className="text-xs text-muted-foreground">
+                {billingLineTypeLabel(extra.type || "product")}
+                {extra.inventoryItem?.sku ? ` · ${extra.inventoryItem.sku}` : ""}
+              </p>
+              {extra.reason ? <p className="mt-1 text-xs text-muted-foreground">{extra.reason}</p> : null}
+            </div>
+            <StatusBadge status={extra.status} />
+          </div>
+          <div className="mt-2 flex justify-between text-xs text-muted-foreground">
+            <span>
+              {Number(extra.quantity)} × {formatCurrency(extra.unitPrice)}
+            </span>
+            <span className="font-medium text-foreground">{formatCurrency(extraLineTotal(extra))}</span>
+          </div>
+          {extra.status !== "approved" ? (
+            <p className="mt-2 text-xs text-amber-700">Not billed until this extra is approved.</p>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function BillingServiceContext({ context }: { context: BillingJobContext }) {
   return (
     <div className="space-y-4">
@@ -71,19 +205,6 @@ export function BillingServiceContext({ context }: { context: BillingJobContext 
 
       <Section title="Inspection">
         <p className="text-sm">{context.job.serviceRequest?.inspectionReport?.findings ?? "No inspection report on file."}</p>
-      </Section>
-
-      <Section title="Estimate">
-        <InfoRow label="Total" value={formatCurrency(context.costs.estimateAmount)} />
-        <InfoRow label="Discount" value={formatCurrency(context.costs.discount)} />
-        <div className="mt-2 space-y-1">
-          {(context.job.estimate?.lineItems ?? []).map((line) => (
-            <div key={line.id} className="flex justify-between text-xs text-muted-foreground">
-              <span>{line.description}</span>
-              <span>{formatCurrency(line.lineTotal)}</span>
-            </div>
-          ))}
-        </div>
       </Section>
 
       <Section title="Engineer report">

@@ -10,6 +10,7 @@ import {
   commissionSchema,
   convertStockPurchaseRequestSchema,
   createPurchaseOrderSchema,
+  createPurchaseReturnSchema,
   createStockTransferSchema,
   estimateDecisionSchema,
   estimateRevisionSchema,
@@ -56,25 +57,30 @@ router.post("/inspection-reports/:id/recommendations", requireRole("admin", "coo
 router.post("/inspection-reports/:id/attachments", requireRole("admin", "coordinator", "inspector"), validate(attachmentLinkSchema), c.inspectionAttachment);
 
 router.post("/estimates/:id/revisions", requireRole("admin", "coordinator", "estimator"), validate(estimateRevisionSchema), c.estimateRevision);
-router.post("/estimates/:id/decisions", requireRole("admin", "coordinator", "inspector", "engineer", "customer"), validate(estimateDecisionSchema), c.estimateDecision);
+router.post("/estimates/:id/decisions", requireRole("admin", "coordinator", "customer"), validate(estimateDecisionSchema), c.estimateDecision);
 
 router.post("/jobs/:id/assignments", operations, validate(jobAssignmentSchema), c.jobAssignment);
 router.post("/jobs/:id/work-logs", requireRole("admin", "coordinator", "engineer"), validate(workLogSchema), c.workLog);
 router.post("/jobs/:id/extras", requireRole("admin", "coordinator", "engineer"), validate(jobExtraSchema), c.jobExtra);
-router.post("/job-extras/:id/approve", requireRole("admin", "coordinator", "estimator"), c.approveJobExtra);
+router.post("/job-extras/:id/approve", requireRole("admin", "coordinator"), c.approveJobExtra);
 
 router.get("/stock/reservations", inventory, c.reservations);
 router.post("/stock/reservations/:id/action", inventory, validate(reservationActionSchema), c.reservationAction);
 router.get("/stock/movements", inventory, c.movements);
-router.get("/stock-purchase-requests", requireRole("admin", "inventory", "inspector", "engineer"), c.stockPurchaseRequests);
-router.post("/stock-purchase-requests", requireRole("admin", "inventory", "inspector", "engineer"), validate(stockPurchaseRequestSchema), c.stockPurchaseRequestCreate);
+router.get("/branches", inventory, c.branches);
+router.get("/stock-purchase-requests", requireRole("admin", "coordinator", "inventory", "inspector", "engineer"), c.stockPurchaseRequests);
+router.post("/stock-purchase-requests", requireRole("admin", "coordinator", "inventory", "inspector", "engineer"), validate(stockPurchaseRequestSchema), c.stockPurchaseRequestCreate);
 router.post("/stock-purchase-requests/:id/convert", inventory, validate(convertStockPurchaseRequestSchema), c.stockPurchaseRequestConvert);
 router.get("/stock-transfers", inventory, c.stockTransfers);
 router.post("/stock-transfers", inventory, validate(createStockTransferSchema), c.stockTransferCreate);
+router.get("/stock-transfers/:id", inventory, c.stockTransferById);
 router.post("/stock-transfers/:id/dispatch", inventory, c.stockTransferDispatch);
 router.post("/stock-transfers/:id/receive", inventory, c.stockTransferReceive);
 router.post("/purchase-orders", inventory, validate(createPurchaseOrderSchema), c.purchaseOrder);
 router.post("/purchase-orders/:id/receipts", inventory, validate(receivePurchaseOrderSchema), c.receivePurchaseOrder);
+router.get("/purchase-returns", inventory, c.purchaseReturns);
+router.post("/purchase-returns", inventory, validate(createPurchaseReturnSchema), c.purchaseReturnCreate);
+router.get("/purchase-returns/:id", inventory, c.purchaseReturnById);
 
 router.post("/invoices/from-job", finance, validate(invoiceFromJobSchema), c.invoiceFromJob);
 router.post("/invoices/:id/payments", finance, validate(paymentSchema), c.payment);

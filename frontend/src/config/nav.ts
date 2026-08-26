@@ -22,6 +22,9 @@ import {
   BadgeIndianRupee,
   Tags,
   Store,
+  ArrowLeftRight,
+  History,
+  Undo2,
   type LucideIcon,
 } from "lucide-react";
 import type { Role } from "@/data/types";
@@ -54,6 +57,9 @@ export const navItems: NavItem[] = [
   { label: "Stock Purchase Requests", to: "/app/stock-purchase-requests", icon: ShoppingCart, roles: ["admin", "inventory", "inspector", "engineer"], group: "Supply Chain" },
   { label: "Suppliers", to: "/app/suppliers", icon: Truck, roles: ["admin", "inventory"], group: "Supply Chain" },
   { label: "Purchase Orders", to: "/app/purchase-orders", icon: ShoppingCart, roles: ["admin", "inventory"], group: "Supply Chain" },
+  { label: "Purchase Returns", to: "/app/purchase-returns", icon: Undo2, roles: ["admin", "inventory"], group: "Supply Chain" },
+  { label: "Stock Transfers", to: "/app/stock-transfers", icon: ArrowLeftRight, roles: ["admin", "inventory"], group: "Supply Chain" },
+  { label: "Stock Ledger", to: "/app/stock-ledger", icon: History, roles: ["admin", "inventory"], group: "Supply Chain" },
 
   { label: "Billing", to: "/app/billing", icon: Receipt, roles: ["admin", "billing"], group: "Contracts & Finance" },
   { label: "Expenses & Commissions", to: "/app/finance-operations", icon: BadgeIndianRupee, roles: ["admin", "billing"], group: "Contracts & Finance" },

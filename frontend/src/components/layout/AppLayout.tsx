@@ -79,11 +79,11 @@ export function AppLayout() {
           <Outlet />
         </MobileLayout>
       ) : (
-        <div className="flex min-h-screen w-full bg-background">
+        <div className="app-print-shell flex min-h-screen w-full bg-background">
           <AppSidebar open={sidebarOpen} onClose={() => setOpen(false)} />
           <div className="flex min-w-0 flex-1 flex-col">
             <Topbar sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
-            <main className="flex-1 animate-fade-in px-5 py-5 lg:px-7 lg:py-6">
+            <main className="flex-1 px-5 py-5 lg:px-7 lg:py-6">
               <div className="mx-auto w-full max-w-[1600px]">
                 <Outlet />
               </div>

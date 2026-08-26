@@ -25,7 +25,7 @@ export class ServiceTicketWorkflowService {
   private async assertEstimateApprover(actorId: string, tenantId: string, actorRole: string) {
     const allowed = await userHasAnyRoleKey(actorId, tenantId, actorRole, ESTIMATE_STAFF_APPROVER_ROLES);
     if (!allowed) {
-      throw new AppError("Only administrators, coordinators, inspection staff, or service staff can approve estimates", 403);
+      throw new AppError("Only administrators and service coordinators can approve estimates", 403);
     }
   }
 

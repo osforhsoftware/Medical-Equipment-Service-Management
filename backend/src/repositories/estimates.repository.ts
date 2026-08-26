@@ -12,6 +12,7 @@ const listIncludes = {
 
 export interface EstimateListFilters {
   status?: string;
+  estimatorId?: string;
   search?: string;
   customerId?: string;
   createdFrom?: string;
@@ -26,6 +27,14 @@ function buildWhere(tenantId: string, filters: Omit<EstimateListFilters, "skip" 
     tenantId,
     ...(filters.status ? { status: filters.status as never } : {}),
     ...(filters.customerId ? { customerId: filters.customerId } : {}),
+    ...(filters.estimatorId
+      ? {
+          OR: [
+            { salespersonId: filters.estimatorId },
+            { revisions: { some: { createdBy: filters.estimatorId } } },
+          ],
+        }
+      : {}),
   };
 
   if (filters.createdFrom || filters.createdTo) {
@@ -36,12 +45,13 @@ function buildWhere(tenantId: string, filters: Omit<EstimateListFilters, "skip" 
   }
 
   if (filters.search) {
-    where.OR = [
+    const searchFilters: Prisma.EstimateWhereInput[] = [
       { reference: searchContains(filters.search) },
       { customerName: searchContains(filters.search) },
       { equipmentName: searchContains(filters.search) },
       { requestRef: searchContains(filters.search) },
     ];
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: searchFilters }];
   }
 
   return where;

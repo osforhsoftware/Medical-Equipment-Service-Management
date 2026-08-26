@@ -61,7 +61,7 @@ export default function EstimateDetail() {
     fieldOrder: ["engineerId", "decisionNote"],
     schema: decisionSchema,
   });
-  const canApprove = hasRole(["admin", "coordinator", "inspector", "engineer", "estimator"]);
+  const canApprove = hasRole(["admin", "coordinator"]);
   const canBuild = hasRole(["admin", "coordinator", "estimator"]);
   const isSalesQuote = Boolean(estimate && !estimate.serviceRequestId);
 
@@ -288,7 +288,7 @@ export default function EstimateDetail() {
             ),
           },
         ] : undefined}
-        sidebar={estimate ? (
+        sidebar={estimate && canApprove ? (
           <div ref={decisionRef}>
             <EstimateDecisionPanel
               status={estimate.status}

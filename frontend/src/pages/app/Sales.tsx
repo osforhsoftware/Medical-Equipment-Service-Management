@@ -1,29 +1,24 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  AlertTriangle,
-  ArrowRight,
-  FileText,
   IndianRupee,
   Loader2,
   Package,
   Plus,
   Receipt,
-  ShoppingCart,
+  ShoppingBag,
+  Sparkles,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatCard } from "@/components/shared/StatCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import { EstimateNewSheet } from "@/components/estimates/EstimateNewSheet";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/context/AuthContext";
 import { api, ApiError, type BackendSalesOrder } from "@/lib/api";
-import { estimateStatusLabel } from "@/lib/estimates";
 import { formatCurrency, formatCurrencyShort, formatDate } from "@/lib/format";
-import { useState } from "react";
 
 function paymentLabel(order: BackendSalesOrder) {
   if (order.paymentStatus === "paid") return "Paid";
@@ -36,7 +31,6 @@ export default function Sales() {
   const { hasRole } = useAuth();
   const canBuild = hasRole(["admin", "coordinator", "estimator"]);
   const canBill = hasRole(["admin", "billing"]);
-  const [newOpen, setNewOpen] = useState(false);
 
   const deskQuery = useQuery({
     queryKey: ["sales", "desk"],
@@ -54,21 +48,41 @@ export default function Sales() {
   const desk = deskQuery.data;
   const kpis = desk?.kpis;
   const reports = reportsQuery.data;
+  const orders = ordersQuery.data ?? [];
 
   return (
     <RoleGuard roles={["admin", "coordinator", "estimator", "billing", "inventory"]}>
       <div className="space-y-6">
         <PageHeader
-          title="Product Sales"
-          description="Sell equipment, spare parts, accessories, consumables and service packages using existing inventory, quotations and billing."
+          title="Sales floor"
+          description="Record sold items with a sale price. Quotations stay on Estimates — this desk is the actual deal."
           actions={
             canBuild ? (
-              <Button variant="brand" onClick={() => setNewOpen(true)}>
-                <Plus className="mr-1 h-4 w-4" /> New quotation
+              <Button variant="brand" onClick={() => navigate("/app/sales/new")}>
+                <Plus className="mr-1 h-4 w-4" /> New sale
               </Button>
             ) : undefined
           }
         />
+
+        <div className="overflow-hidden rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50 via-card to-teal-50 p-4 dark:border-amber-900/40 dark:from-amber-950/20 dark:to-teal-950/20">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-amber-500 text-white">
+              <Sparkles className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">Counter, not quotation</p>
+              <p className="text-sm text-muted-foreground">
+                Pick any customer, add sold items, edit the sale price, then deliver and invoice.
+              </p>
+            </div>
+            {canBuild ? (
+              <Button variant="outline" onClick={() => navigate("/app/sales/new")}>
+                <ShoppingBag className="mr-1 h-4 w-4" /> Open counter
+              </Button>
+            ) : null}
+          </div>
+        </div>
 
         {deskQuery.isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -83,50 +97,58 @@ export default function Sales() {
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard label="Today's sales" value={formatCurrencyShort(kpis?.todaySales ?? 0)} icon={IndianRupee} accent="success" />
           <StatCard label="Monthly sales" value={formatCurrencyShort(kpis?.monthlySales ?? 0)} icon={Receipt} />
-          <StatCard label="Total orders" value={String(kpis?.totalOrders ?? 0)} icon={ShoppingCart} />
+          <StatCard label="Total orders" value={String(kpis?.totalOrders ?? 0)} icon={ShoppingBag} />
           <StatCard label="Pending orders" value={String(kpis?.pendingOrders ?? 0)} icon={Package} accent="warning" />
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Open quotations" value={String(kpis?.openQuotes ?? 0)} icon={FileText} accent="accent" />
-          <StatCard label="Pending payments" value={String(kpis?.pendingPayments ?? 0)} icon={AlertTriangle} accent="warning" />
+          <StatCard label="Pending payments" value={String(kpis?.pendingPayments ?? 0)} icon={IndianRupee} accent="warning" />
           <StatCard label="Outstanding" value={formatCurrencyShort(kpis?.outstanding ?? 0)} icon={IndianRupee} accent="warning" />
           <StatCard label="Collected" value={formatCurrencyShort(kpis?.collected ?? 0)} icon={Receipt} accent="success" />
+          <StatCard label="Customers" value={String(kpis?.activeCustomers ?? 0)} icon={Package} />
         </div>
 
-        <Tabs defaultValue="desk">
+        <Tabs defaultValue="sales">
           <TabsList>
-            <TabsTrigger value="desk">Desk</TabsTrigger>
-            <TabsTrigger value="orders">Sales orders</TabsTrigger>
+            <TabsTrigger value="sales">Sold items</TabsTrigger>
             <TabsTrigger value="reports">Reports</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="desk" className="space-y-6">
+          <TabsContent value="sales" className="space-y-6">
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                  <CardTitle className="text-base">Recent quotations</CardTitle>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link to="/app/estimates">View all</Link>
-                  </Button>
+                  <CardTitle className="text-base">Recent sales</CardTitle>
+                  {canBuild ? (
+                    <Button variant="ghost" size="sm" onClick={() => navigate("/app/sales/new")}>
+                      New
+                    </Button>
+                  ) : null}
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {(desk?.recentQuotes ?? []).length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No product quotations yet. Select a customer and add parts or services.</p>
+                  {ordersQuery.isLoading ? (
+                    <p className="text-sm text-muted-foreground">Loading sales…</p>
+                  ) : orders.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No sales yet. Open the counter and add a sold item.
+                    </p>
                   ) : (
-                    desk?.recentQuotes.map((quote) => (
+                    orders.slice(0, 8).map((order) => (
                       <button
-                        key={quote.id}
+                        key={order.id}
                         type="button"
-                        className="flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left hover:bg-muted/50"
-                        onClick={() => navigate(`/app/estimates/${quote.id}`)}
+                        className="flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left transition hover:-translate-y-0.5 hover:bg-amber-50/60 dark:hover:bg-amber-950/20"
+                        onClick={() => navigate(`/app/sales/orders/${order.id}`)}
                       >
                         <div className="min-w-0">
-                          <p className="font-mono text-sm font-medium">{quote.reference}</p>
-                          <p className="truncate text-xs text-muted-foreground">{quote.customerName}</p>
+                          <p className="font-mono text-sm font-medium">{order.reference}</p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {order.customerName} · {order.lines.length} item{order.lines.length === 1 ? "" : "s"} ·{" "}
+                            {formatDate(order.orderedAt)}
+                          </p>
                         </div>
                         <div className="shrink-0 text-right">
-                          <StatusBadge status={quote.status} label={estimateStatusLabel(quote.status)} />
-                          <p className="mt-1 text-xs font-medium">{formatCurrency(quote.total)}</p>
+                          <StatusBadge status={order.deliveryStatus} />
+                          <p className="mt-1 text-xs font-medium">{formatCurrency(order.total)}</p>
                         </div>
                       </button>
                     ))
@@ -140,7 +162,7 @@ export default function Sales() {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {(desk?.topSellingProducts ?? []).length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Sales orders will populate this list.</p>
+                    <p className="text-sm text-muted-foreground">Record a sale to populate this list.</p>
                   ) : (
                     desk?.topSellingProducts.map((row) => (
                       <div key={row.name} className="flex items-center justify-between text-sm">
@@ -154,6 +176,38 @@ export default function Sales() {
                 </CardContent>
               </Card>
             </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">All sales</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {orders.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Nothing sold yet.</p>
+                ) : (
+                  orders.map((order) => (
+                    <button
+                      key={order.id}
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left hover:bg-muted/50"
+                      onClick={() => navigate(`/app/sales/orders/${order.id}`)}
+                    >
+                      <div className="min-w-0">
+                        <p className="font-mono text-sm font-medium">{order.reference}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {order.customerName} · {order.salespersonName} · {formatDate(order.orderedAt)}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <StatusBadge status={order.deliveryStatus} />
+                        <p className="mt-1 text-xs text-muted-foreground">{paymentLabel(order)}</p>
+                        <p className="text-xs font-medium">{formatCurrency(order.total)}</p>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </CardContent>
+            </Card>
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
@@ -177,42 +231,6 @@ export default function Sales() {
                         {item.name} <span className="font-mono text-xs text-muted-foreground">{item.sku}</span>
                       </span>
                       <span className="text-warning-foreground">{item.available} available</span>
-                    </button>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="orders">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Sales orders</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {ordersQuery.isLoading ? (
-                  <p className="text-sm text-muted-foreground">Loading orders…</p>
-                ) : (ordersQuery.data ?? []).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Approve a quotation, then convert it to a sales order.</p>
-                ) : (
-                  ordersQuery.data?.map((order) => (
-                    <button
-                      key={order.id}
-                      type="button"
-                      className="flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left hover:bg-muted/50"
-                      onClick={() => navigate(`/app/sales/orders/${order.id}`)}
-                    >
-                      <div className="min-w-0">
-                        <p className="font-mono text-sm font-medium">{order.reference}</p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {order.customerName} · {order.salespersonName} · {formatDate(order.orderedAt)}
-                        </p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <StatusBadge status={order.deliveryStatus} />
-                        <p className="mt-1 text-xs text-muted-foreground">{paymentLabel(order)}</p>
-                        <p className="text-xs font-medium">{formatCurrency(order.total)}</p>
-                      </div>
                     </button>
                   ))
                 )}
@@ -253,34 +271,18 @@ export default function Sales() {
                 </Card>
               ))}
             </div>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-3">
-                <CardTitle className="text-base">Outstanding payments</CardTitle>
-                {canBill ? (
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link to="/app/billing">
-                      Billing <ArrowRight className="ml-1 h-4 w-4" />
-                    </Link>
-                  </Button>
-                ) : null}
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {(reports?.outstanding ?? []).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No outstanding product-sales invoices.</p>
-                ) : (
-                  reports?.outstanding.map((row) => (
-                    <div key={row.id} className="flex justify-between text-sm">
-                      <span>{row.customerName}</span>
-                      <span>{formatCurrency(row.balanceDue)} due</span>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
+            {canBill ? (
+              <p className="text-xs text-muted-foreground">
+                Outstanding product-sales invoices live in{" "}
+                <Link className="underline" to="/app/billing">
+                  Billing
+                </Link>
+                .
+              </p>
+            ) : null}
           </TabsContent>
         </Tabs>
       </div>
-      <EstimateNewSheet open={newOpen} onOpenChange={setNewOpen} />
     </RoleGuard>
   );
 }

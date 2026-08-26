@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Printer } from "lucide-react";
 import { MesmsLogo } from "@/components/shared/MesmsLogo";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/context/SettingsContext";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { groupDocumentLines } from "@/lib/billingCharges";
+import { formatDate, formatDocumentCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export interface DocumentLine {
@@ -22,6 +23,7 @@ interface ProfessionalDocumentProps {
   customerName: string;
   customerAddress?: string;
   customerPhone?: string;
+  equipmentName?: string;
   issueDate: string;
   validOrDueLabel?: string;
   validOrDueDate?: string;
@@ -36,12 +38,24 @@ interface ProfessionalDocumentProps {
   className?: string;
 }
 
+function lineNet(line: DocumentLine) {
+  return Math.max(0, line.quantity * line.unitPrice - (line.discount ?? 0));
+}
+
+function termParagraphs(terms: string) {
+  return terms
+    .split(/\n+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 export function ProfessionalDocument({
   kind,
   reference,
   customerName,
   customerAddress,
   customerPhone,
+  equipmentName,
   issueDate,
   validOrDueLabel,
   validOrDueDate,
@@ -56,23 +70,32 @@ export function ProfessionalDocument({
   className,
 }: ProfessionalDocumentProps) {
   const { settings } = useSettings();
-  const subtotal = lines.reduce(
-    (sum, line) => sum + line.quantity * line.unitPrice - (line.discount ?? 0),
-    0,
-  );
-  const tax = lines.reduce((sum, line) => {
-    const taxable = line.quantity * line.unitPrice - (line.discount ?? 0);
-    return sum + taxable * ((line.taxRate ?? 0) / 100);
-  }, 0);
+  const company = settings?.companyName ?? "MESMS";
+  const subtotal = lines.reduce((sum, line) => sum + lineNet(line), 0);
+  const tax = lines.reduce((sum, line) => sum + lineNet(line) * ((line.taxRate ?? 0) / 100), 0);
   const total = Math.max(0, subtotal - discount) + tax;
+  const termParts = terms ? termParagraphs(terms) : [];
+
+  useEffect(() => {
+    const previousTitle = document.title;
+    const printTitle = `${kind} ${reference} · ${company}`;
+    const onBeforePrint = () => {
+      document.title = printTitle;
+    };
+    const onAfterPrint = () => {
+      document.title = previousTitle;
+    };
+    window.addEventListener("beforeprint", onBeforePrint);
+    window.addEventListener("afterprint", onAfterPrint);
+    return () => {
+      window.removeEventListener("beforeprint", onBeforePrint);
+      window.removeEventListener("afterprint", onAfterPrint);
+      document.title = previousTitle;
+    };
+  }, [company, kind, reference]);
 
   return (
-    <section
-      className={cn(
-        "professional-document bg-white p-6 text-slate-950 sm:p-10",
-        className,
-      )}
-    >
+    <section className={cn("professional-document bg-white text-slate-900", className)}>
       {!hideToolbar ? (
         <div className="no-print mb-5 flex justify-end">
           <Button type="button" variant="outline" onClick={() => window.print()}>
@@ -81,127 +104,186 @@ export function ProfessionalDocument({
         </div>
       ) : null}
 
-      <header className="flex items-start justify-between gap-6 border-b-2 border-slate-900 pb-5">
-        <div className="flex items-center gap-3">
-          {settings?.logoUrl ? (
-            <img src={settings.logoUrl} alt="" className="h-14 w-14 object-contain" />
-          ) : (
-            <MesmsLogo size="lg" />
-          )}
-          <div>
-            <h1 className="text-xl font-bold">{settings?.companyName ?? "MESMS"}</h1>
-            {settings?.supportEmail ? <p className="text-sm text-slate-600">{settings.supportEmail}</p> : null}
+      <div className="doc-sheet">
+        <header className="doc-header">
+          <div className="doc-brand">
+            <div className="doc-logo">
+              {settings?.logoUrl ? (
+                <img src={settings.logoUrl} alt="" />
+              ) : (
+                <MesmsLogo size="lg" className="h-10 max-w-[8.5rem]" />
+              )}
+            </div>
+            <div className="doc-company">
+              <p className="doc-company-name">{company}</p>
+              {settings?.supportEmail ? (
+                <p className="doc-company-email">{settings.supportEmail}</p>
+              ) : null}
+            </div>
           </div>
-        </div>
-        <div className="text-right">
-          <p className="text-2xl font-bold uppercase tracking-wide">{kind}</p>
-          <p className="font-mono text-sm">{reference}</p>
-        </div>
-      </header>
+          <div className="doc-title-block">
+            <p className="doc-kind">{kind}</p>
+            <p className="doc-reference">{reference}</p>
+          </div>
+        </header>
 
-      <div className="grid gap-6 py-6 text-sm sm:grid-cols-2">
-        <div>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Bill to</p>
-          <p className="font-semibold">{customerName}</p>
-          {customerAddress ? <p className="whitespace-pre-line text-slate-600">{customerAddress}</p> : null}
-          {customerPhone ? <p className="text-slate-600">{customerPhone}</p> : null}
-        </div>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 sm:ml-auto sm:text-right">
-          <dt className="text-slate-500">Issue date</dt>
-          <dd>{formatDate(issueDate)}</dd>
-          {validOrDueLabel && validOrDueDate ? (
-            <>
-              <dt className="text-slate-500">{validOrDueLabel}</dt>
-              <dd>{formatDate(validOrDueDate)}</dd>
-            </>
-          ) : null}
-          {ticketRef ? (
-            <>
-              <dt className="text-slate-500">Ticket</dt>
-              <dd className="font-mono">{ticketRef}</dd>
-            </>
-          ) : null}
-        </dl>
-      </div>
-
-      {lines.length > 0 ? (
-        <>
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-y border-slate-300 bg-slate-100 text-left text-[11px] uppercase tracking-wide">
-                <th className="p-2.5 font-semibold">Description</th>
-                <th className="p-2.5 text-right font-semibold">Qty</th>
-                <th className="p-2.5 text-right font-semibold">Price</th>
-                <th className="p-2.5 text-right font-semibold">Tax</th>
-                <th className="p-2.5 text-right font-semibold">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((line) => {
-                const net = line.quantity * line.unitPrice - (line.discount ?? 0);
-                return (
-                  <tr key={line.id} className="border-b border-slate-200">
-                    <td className="p-2.5">
-                      <p>{line.description}</p>
-                      {line.type ? <p className="text-xs capitalize text-slate-500">{line.type}</p> : null}
-                    </td>
-                    <td className="p-2.5 text-right">{line.quantity}</td>
-                    <td className="p-2.5 text-right">{formatCurrency(line.unitPrice)}</td>
-                    <td className="p-2.5 text-right">{line.taxRate ? `${line.taxRate}%` : "—"}</td>
-                    <td className="p-2.5 text-right">{formatCurrency(net)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <dl className="ml-auto mt-5 grid w-full max-w-xs grid-cols-2 gap-y-1.5 text-sm">
-            <dt className="text-slate-500">Subtotal</dt>
-            <dd className="text-right">{formatCurrency(subtotal)}</dd>
-            {discount > 0 ? (
-              <>
-                <dt className="text-slate-500">Discount</dt>
-                <dd className="text-right">-{formatCurrency(discount)}</dd>
-              </>
+        <div className="doc-meta">
+          <div className="doc-bill-to">
+            <p className="doc-label">Bill to</p>
+            <p className="doc-customer">{customerName}</p>
+            {customerAddress ? <p className="doc-muted whitespace-pre-line">{customerAddress}</p> : null}
+            {customerPhone ? <p className="doc-muted">{customerPhone}</p> : null}
+            {equipmentName ? <p className="doc-equipment">Equipment: {equipmentName}</p> : null}
+          </div>
+          <dl className="doc-dates">
+            <div>
+              <dt>Issue Date</dt>
+              <dd>{formatDate(issueDate)}</dd>
+            </div>
+            {validOrDueLabel && validOrDueDate ? (
+              <div>
+                <dt>{validOrDueLabel}</dt>
+                <dd>{formatDate(validOrDueDate)}</dd>
+              </div>
             ) : null}
-            <dt className="text-slate-500">Tax</dt>
-            <dd className="text-right">{formatCurrency(tax)}</dd>
-            <dt className="border-t border-slate-400 pt-2 text-base font-bold">Total</dt>
-            <dd className="border-t border-slate-400 pt-2 text-right text-base font-bold">{formatCurrency(total)}</dd>
+            {ticketRef ? (
+              <div>
+                <dt>Reference</dt>
+                <dd className="doc-ref-value">{ticketRef}</dd>
+              </div>
+            ) : null}
           </dl>
-        </>
-      ) : null}
-
-      {children}
-
-      {notes ? (
-        <div className="mt-8 border-t border-slate-200 pt-4 text-sm">
-          <p className="font-semibold">Notes</p>
-          <p className="mt-1 whitespace-pre-line text-slate-600">{notes}</p>
         </div>
-      ) : null}
-      {terms ? (
-        <div className="mt-4 text-sm">
-          <p className="font-semibold">Terms & Conditions</p>
-          <p className="mt-1 whitespace-pre-line text-slate-600">{terms}</p>
-        </div>
-      ) : null}
 
-      {showSignature ? (
-        <div className="mt-12 grid grid-cols-2 gap-10 text-sm">
-          <div>
-            <div className="h-12 border-b border-slate-400" />
-            <p className="mt-2 text-xs uppercase tracking-wide text-slate-500">Authorized signature</p>
+        {lines.length > 0 ? (
+          <>
+            <table className="billing-doc-table doc-table">
+              <colgroup>
+                <col className="col-num" />
+                <col className="col-desc" />
+                <col className="col-qty" />
+                <col className="col-rate" />
+                <col className="col-tax" />
+                <col className="col-amt" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className="cell-num">#</th>
+                  <th className="cell-desc">Description</th>
+                  <th className="cell-qty">Qty</th>
+                  <th className="cell-rate">Rate</th>
+                  <th className="cell-tax">Tax</th>
+                  <th className="cell-amt">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const grouped = groupDocumentLines(lines);
+                  const rows = grouped.length ? grouped : [{ key: "all", label: "", lines }];
+                  let n = 0;
+                  return rows.flatMap((group) => [
+                    group.label ? (
+                      <tr key={`g-${group.key}`} className="doc-group-row">
+                        <td colSpan={6} className="cell-desc font-semibold uppercase tracking-wide text-xs text-slate-500">
+                          {group.label}
+                        </td>
+                      </tr>
+                    ) : null,
+                    ...group.lines.map((line) => {
+                      n += 1;
+                      const net = lineNet(line);
+                      return (
+                        <tr key={line.id}>
+                          <td className="cell-num">{n}</td>
+                          <td className="cell-desc">
+                            <p className="doc-line-name">{line.description}</p>
+                            {(line.discount ?? 0) > 0 ? (
+                              <p className="doc-line-sub">Discount {formatDocumentCurrency(line.discount ?? 0)}</p>
+                            ) : null}
+                          </td>
+                          <td className="cell-qty">{line.quantity}</td>
+                          <td className="cell-rate">{formatDocumentCurrency(line.unitPrice)}</td>
+                          <td className="cell-tax">{`${line.taxRate ?? 0}%`}</td>
+                          <td className="cell-amt">{formatDocumentCurrency(net)}</td>
+                        </tr>
+                      );
+                    }),
+                  ]);
+                })()}
+              </tbody>
+            </table>
+
+            <div className="doc-totals-wrap">
+              <dl className="doc-totals">
+                <div>
+                  <dt>Subtotal</dt>
+                  <dd>{formatDocumentCurrency(subtotal)}</dd>
+                </div>
+                {discount > 0 ? (
+                  <div>
+                    <dt>Discount</dt>
+                    <dd>-{formatDocumentCurrency(discount)}</dd>
+                  </div>
+                ) : null}
+                <div>
+                  <dt>Tax</dt>
+                  <dd>{formatDocumentCurrency(tax)}</dd>
+                </div>
+                <div className="doc-total-row">
+                  <dt>{kind === "Invoice" ? "Final Amount" : "Total"}</dt>
+                  <dd>{formatDocumentCurrency(total)}</dd>
+                </div>
+              </dl>
+            </div>
+          </>
+        ) : null}
+
+        {children}
+
+        {notes ? (
+          <div className="doc-notes">
+            <p className="doc-section-heading">Notes</p>
+            <p className="doc-section-body">{notes}</p>
           </div>
-          <div>
-            <div className="h-12 border-b border-slate-400" />
-            <p className="mt-2 text-xs uppercase tracking-wide text-slate-500">Customer acknowledgement</p>
-          </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      <footer className="mt-10 border-t border-slate-200 pt-3 text-xs text-slate-500">
-        {settings?.companyName ?? "MESMS"} · {kind} {reference}
-      </footer>
+        {termParts.length > 0 ? (
+          <div className="doc-terms">
+            <p className="doc-section-heading">Terms &amp; Conditions</p>
+            {termParts.length === 1 ? (
+              <p className="doc-section-body">{termParts[0]}</p>
+            ) : (
+              <ul className="doc-terms-list">
+                {termParts.map((part, index) => (
+                  <li key={`${index}-${part.slice(0, 24)}`}>{part}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+
+        {showSignature ? (
+          <div className="doc-signatures">
+            <div className="doc-sign">
+              <p className="doc-label">Authorized Signature</p>
+              <div className="doc-sign-line" />
+              <p className="doc-sign-caption">{company}</p>
+            </div>
+            <div className="doc-sign">
+              <p className="doc-label">Customer Acknowledgement</p>
+              <div className="doc-sign-line" />
+              <p className="doc-sign-caption">Customer Signature</p>
+            </div>
+          </div>
+        ) : null}
+
+        <footer className="doc-footer">
+          <span>
+            {company} · {kind} {reference}
+          </span>
+          <span className="doc-page">Page 1 of 1</span>
+        </footer>
+      </div>
     </section>
   );
 }

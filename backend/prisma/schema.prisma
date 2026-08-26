@@ -31,6 +31,7 @@ model Tenant {
   inventoryItems         InventoryItem[]
   suppliers              Supplier[]
   purchaseOrders         PurchaseOrder[]
+  purchaseReturns        PurchaseReturn[]
   stockTransfers         StockTransfer[]
   stockTransferLines     StockTransferLine[]
   amcContracts           AmcContract[]
@@ -689,7 +690,7 @@ enum EstimateStatus {
 model SalesOrder {
   id               String   @id @default(cuid())
   tenantId         String   @map("tenant_id")
-  estimateId       String   @unique @map("estimate_id")
+  estimateId       String?  @unique @map("estimate_id")
   customerId       String   @map("customer_id")
   salespersonId    String?  @map("salesperson_id")
   branchId         String?  @map("branch_id")
@@ -710,7 +711,7 @@ model SalesOrder {
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  estimate      Estimate           @relation(fields: [estimateId], references: [id], onDelete: Restrict)
+  estimate      Estimate?          @relation(fields: [estimateId], references: [id], onDelete: Restrict)
   customer      Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
   lines         SalesOrderLine[]
   invoices      Invoice[]
@@ -850,6 +851,7 @@ model JobExtra {
   jobId           String    @map("job_id")
   inventoryItemId String?   @map("inventory_item_id")
   description     String
+  type            String    @default("product")
   reason          String    @db.Text
   quantity        Decimal   @default(1) @db.Decimal(12, 3)
   unitPrice       Decimal   @map("unit_price") @db.Decimal(12, 2)
@@ -987,6 +989,7 @@ model InventoryItem {
   movements                 StockMovement[]
   purchaseOrderLines        PurchaseOrderLine[]
   receiptLines              PurchaseReceiptLine[]
+  purchaseReturnLines       PurchaseReturnLine[]
   inspectionRecommendations InspectionRecommendation[]
   transferSourceLines       StockTransferLine[]        @relation("TransferSourceItem")
   transferDestinationLines  StockTransferLine[]        @relation("TransferDestinationItem")
@@ -1116,8 +1119,9 @@ model Supplier {
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  purchaseOrders PurchaseOrder[]
-  inventoryItems InventoryItem[]
+  purchaseOrders  PurchaseOrder[]
+  purchaseReturns PurchaseReturn[]
+  inventoryItems  InventoryItem[]
 
   @@index([tenantId])
   @@map("suppliers")
@@ -1142,6 +1146,7 @@ model PurchaseOrder {
   supplierRecord        Supplier?              @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   lineItems             PurchaseOrderLine[]
   receipts              PurchaseReceipt[]
+  purchaseReturns       PurchaseReturn[]
   stockPurchaseRequests StockPurchaseRequest[]
 
   @@unique([tenantId, reference])
@@ -1159,6 +1164,7 @@ model PurchaseOrderLine {
   description      String
   quantityOrdered  Int      @map("quantity_ordered")
   quantityReceived Int      @default(0) @map("quantity_received")
+  quantityReturned Int      @default(0) @map("quantity_returned")
   unitCost         Decimal  @map("unit_cost") @db.Decimal(12, 2)
   taxRate          Decimal  @default(0) @map("tax_rate") @db.Decimal(5, 2)
   lineTotal        Decimal  @map("line_total") @db.Decimal(12, 2)
@@ -1167,6 +1173,7 @@ model PurchaseOrderLine {
   purchaseOrder PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   inventoryItem InventoryItem?        @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
   receiptLines  PurchaseReceiptLine[]
+  returnLines   PurchaseReturnLine[]
 
   @@index([purchaseOrderId])
   @@map("purchase_order_lines")
@@ -1213,6 +1220,55 @@ enum PurchaseOrderStatus {
   received
   partial
   cancelled
+}
+
+model PurchaseReturn {
+  id              String   @id @default(cuid())
+  tenantId        String   @map("tenant_id")
+  purchaseOrderId String   @map("purchase_order_id")
+  supplierId      String?  @map("supplier_id")
+  reference       String
+  reason          String?
+  notes           String?  @db.Text
+  status          String   @default("posted")
+  returnedBy      String   @map("returned_by")
+  returnedAt      DateTime @default(now()) @map("returned_at")
+  items           Int      @default(0)
+  total           Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  purchaseOrder PurchaseOrder       @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  supplier      Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  lines         PurchaseReturnLine[]
+
+  @@unique([tenantId, reference])
+  @@index([tenantId])
+  @@index([purchaseOrderId])
+  @@index([supplierId])
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnLine {
+  id                  String   @id @default(cuid())
+  purchaseReturnId    String   @map("purchase_return_id")
+  purchaseOrderLineId String   @map("purchase_order_line_id")
+  inventoryItemId     String   @map("inventory_item_id")
+  sku                 String
+  description         String
+  quantity            Int
+  unitCost            Decimal  @map("unit_cost") @db.Decimal(12, 2)
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  purchaseReturn    PurchaseReturn    @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  purchaseOrderLine PurchaseOrderLine @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)
+  inventoryItem     InventoryItem     @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseReturnId])
+  @@index([purchaseOrderLineId])
+  @@index([inventoryItemId])
+  @@map("purchase_return_lines")
 }
 
 // ── StockTransfer ─────────────────────────────────────────────────────────────

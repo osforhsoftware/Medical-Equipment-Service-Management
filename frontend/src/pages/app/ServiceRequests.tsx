@@ -189,7 +189,7 @@ function TicketColumn({
 
 export default function ServiceRequests() {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { hasRole } = useAuth();
   const [searchParams] = useSearchParams();
   const overdueOnly = searchParams.get("filter") === "overdue";
   const [open, setOpen] = useState(false);
@@ -233,7 +233,7 @@ export default function ServiceRequests() {
     schema,
   });
 
-  const canCreate = user?.role === "coordinator" || user?.role === "admin";
+  const canCreate = hasRole(["coordinator", "admin"]);
 
   const customersQuery = useQuery({
     queryKey: ["customers", "options"],

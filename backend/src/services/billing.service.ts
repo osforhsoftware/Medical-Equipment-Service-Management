@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
+import { extraChargeType, extraLineTotal, summarizeChargeGroups } from "@/utils/invoiceCharges";
 
 export const BILLING_CHECKLIST = [
   { key: "engineerReportSubmitted", label: "Engineer Report Submitted" },
@@ -9,7 +10,7 @@ export const BILLING_CHECKLIST = [
   { key: "customerApprovalAvailable", label: "Customer Approval Available" },
   { key: "partsConsumptionRecorded", label: "Parts Consumption Recorded" },
   { key: "labourRecorded", label: "Labour Recorded" },
-  { key: "serviceReportUploaded", label: "Service Report Uploaded" },
+  { key: "serviceReportUploaded", label: "Service Report Uploaded (optional)" },
   { key: "customerSignatureAvailable", label: "Customer Signature Available" },
   { key: "equipmentReturned", label: "Equipment Returned" },
   { key: "warrantyUpdated", label: "Warranty Updated" },
@@ -44,6 +45,7 @@ const jobInclude = {
   customer: true,
   workLogs: true,
   signature: true,
+  extras: { include: { inventoryItem: true }, orderBy: { createdAt: "asc" as const } },
   stockMovements: { where: { type: "consume" } },
   reservations: true,
   invoices: { include: { payments: true } },
@@ -127,7 +129,8 @@ export function computeVerificationChecklist(job: {
     stockAdjusted: stockOk,
   };
 
-  const allPassed = Object.values(checks).every(Boolean);
+  const requiredKeys = BILLING_CHECKLIST.map((item) => item.key).filter((key) => key !== "serviceReportUploaded");
+  const allPassed = requiredKeys.every((key) => checks[key]);
   return { checks, allPassed, items: BILLING_CHECKLIST.map((item) => ({ ...item, passed: checks[item.key] })) };
 }
 
@@ -335,7 +338,7 @@ export class BillingService {
       include: {
         ...jobInclude,
         photos: { include: { file: true } },
-        extras: { where: { status: "approved" } },
+        extras: { include: { inventoryItem: true }, orderBy: { createdAt: "asc" } },
         invoices: { include: { lineItems: true, payments: { orderBy: { paidAt: "desc" } }, documents: true } },
         stockMovements: { include: { inventoryItem: true } },
       },
@@ -367,6 +370,23 @@ export class BillingService {
 
     const verification = computeVerificationChecklist({ ...job, serviceReportDoc: !!serviceReportDoc });
     const invoice = job.invoices[0] ?? null;
+    const estimateLines = (job.estimate?.lineItems ?? []).map((line) => ({
+      type: line.type,
+      quantity: num(line.quantity),
+      unitPrice: num(line.unitPrice),
+      discount: num(line.discount),
+      taxRate: num(line.taxRate),
+      lineTotal: num(line.lineTotal),
+    }));
+    const approvedExtras = job.extras.filter((extra) => extra.status === "approved");
+    const extraLines = approvedExtras.map((extra) => ({
+      type: extraChargeType(extra),
+      quantity: num(extra.quantity),
+      unitPrice: num(extra.unitPrice),
+      taxRate: num(extra.taxRate),
+      lineTotal: extraLineTotal(extra),
+    }));
+    const charges = summarizeChargeGroups([...estimateLines, ...extraLines]);
 
     return {
       job,
@@ -379,6 +399,13 @@ export class BillingService {
         partsCost: partsCostFromJob(job),
         labourCharges: labourFromEstimate(job.estimate),
         discount: num(job.estimate?.discount),
+        products: charges.groups.products,
+        equipment: charges.groups.equipment,
+        machines: charges.groups.machines,
+        serviceCharges: charges.groups.serviceCharges,
+        otherCharges: charges.groups.otherCharges,
+        engineerExtras: extraLines.reduce((sum, line) => sum + line.lineTotal, 0),
+        proposedTotal: charges.total,
       },
     };
   }

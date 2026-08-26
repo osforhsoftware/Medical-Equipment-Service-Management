@@ -30,7 +30,10 @@ export class ServiceRequestsController {
 
   async getStatusCounts(req: Request, res: Response, next: NextFunction) {
     try {
-      const statusesRaw = String(req.query.statuses ?? "new,inspection,estimate,approval,inProgress,completed");
+      const statusesRaw = String(
+        req.query.statuses
+          ?? "new,inspection,estimate,pending_approval,assigned_engineer,change_pending_approval,pending_final_approval,pending_invoice,invoiced,closed",
+      );
       const statuses = statusesRaw.split(",").map((s) => s.trim()).filter(Boolean);
       const counts = await serviceRequestsService.getStatusCounts(
         req.tenantId!,

@@ -122,6 +122,7 @@ export const jobExtraSchema = z.object({
   body: z.object({
     inventoryItemId: z.string().cuid().nullable().optional(),
     description: z.string().trim().min(1).max(500),
+    type: z.enum(["product", "equipment", "machine", "other"]).default("product"),
     reason: z.string().trim().min(1).max(5000),
     quantity: z.coerce.number().positive(),
     unitPrice: money,
@@ -139,6 +140,18 @@ export const reservationActionSchema = z.object({
 export const receivePurchaseOrderSchema = z.object({
   body: z.object({
     reference: z.string().trim().min(1).max(80),
+    notes: z.string().max(2000).optional(),
+    lines: z.array(z.object({
+      purchaseOrderLineId: z.string().cuid(),
+      quantity: positiveInt,
+    })).min(1),
+  }),
+});
+
+export const createPurchaseReturnSchema = z.object({
+  body: z.object({
+    purchaseOrderId: z.string().cuid(),
+    reason: z.enum(["damaged", "excess", "wrong_item", "quality", "other"]),
     notes: z.string().max(2000).optional(),
     lines: z.array(z.object({
       purchaseOrderLineId: z.string().cuid(),
@@ -181,7 +194,16 @@ export const invoiceFromJobSchema = z.object({
   body: z.object({
     jobId: z.string().cuid(),
     dueAt: z.coerce.date(),
-    currency: z.string().trim().length(3).default("USD"),
+    currency: z.string().trim().length(3).default("INR"),
+    additionalLines: z.array(z.object({
+      type: z.enum(["product", "equipment", "machine", "service", "other", "labor", "part"]).default("other"),
+      description: z.string().trim().min(1).max(500),
+      quantity: z.coerce.number().positive(),
+      unitPrice: money,
+      taxRate: z.coerce.number().min(0).max(100).default(0),
+      discount: money.default(0),
+      catalogItemId: z.string().cuid().nullable().optional(),
+    })).optional(),
   }),
 });
 

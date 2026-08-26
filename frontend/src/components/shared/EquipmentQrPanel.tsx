@@ -1,26 +1,17 @@
 import { useEffect, useState } from "react";
-import { Download, Loader2, QrCode, RefreshCw, Tag } from "lucide-react";
+import { Download, Loader2, QrCode } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
-import {
-  downloadEquipmentQrLabel,
-  downloadEquipmentQrPng,
-  equipmentQrDataUrl,
-  generateEquipmentAssetTag,
-} from "@/lib/equipmentQr";
+import { downloadEquipmentQrPng, equipmentQrDataUrl } from "@/lib/equipmentQr";
 import { fieldAria, fieldErrorClass } from "@/lib/formValidation";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 type EquipmentQrPanelProps = {
   assetTag: string;
-  name?: string;
-  manufacturer?: string;
-  model?: string;
-  existingTags?: string[];
   required?: boolean;
   showInput?: boolean;
   error?: string | null;
@@ -30,10 +21,6 @@ type EquipmentQrPanelProps = {
 
 export function EquipmentQrPanel({
   assetTag,
-  name,
-  manufacturer,
-  model,
-  existingTags = [],
   required = false,
   showInput = true,
   error = null,
@@ -41,7 +28,7 @@ export function EquipmentQrPanel({
   onBlur,
 }: EquipmentQrPanelProps) {
   const [qrDataUrl, setQrDataUrl] = useState("");
-  const [busy, setBusy] = useState<"png" | "label" | null>(null);
+  const [busy, setBusy] = useState(false);
   const tag = assetTag.trim();
 
   useEffect(() => {
@@ -62,25 +49,19 @@ export function EquipmentQrPanel({
     };
   }, [tag]);
 
-  const generateTag = () => {
-    const next = generateEquipmentAssetTag(existingTags.concat(tag ? [tag] : []));
-    onAssetTagChange?.(next);
-  };
-
-  const runDownload = async (kind: "png" | "label") => {
+  const runDownload = async () => {
     if (!tag) return;
-    setBusy(kind);
+    setBusy(true);
     try {
-      if (kind === "png") await downloadEquipmentQrPng(tag);
-      else await downloadEquipmentQrLabel({ assetTag: tag, name, manufacturer, model });
+      await downloadEquipmentQrPng(tag);
       toast({
-        title: kind === "png" ? "QR code downloaded" : "Equipment label downloaded",
-        description: `${tag} is ready to print and stick on the machine.`,
+        title: "QR image downloaded",
+        description: `${tag} PNG is ready to print and stick on the machine.`,
       });
     } catch {
       toast({ title: "Download failed", description: "Unable to create the QR file.", variant: "destructive" });
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
@@ -92,7 +73,7 @@ export function EquipmentQrPanel({
         </div>
         <div>
           <p className="text-sm font-semibold">Asset QR code</p>
-          <p className="text-xs text-muted-foreground">Generate a tag, preview the QR, then download it for the machine.</p>
+          <p className="text-xs text-muted-foreground">Enter a tag to preview the QR, then download it for the machine.</p>
         </div>
       </div>
 
@@ -103,7 +84,7 @@ export function EquipmentQrPanel({
           ) : (
             <div className="px-3 text-center text-xs text-muted-foreground">
               <QrCode className="mx-auto mb-2 h-8 w-8 opacity-40" />
-              Enter or generate an asset tag to preview the QR
+              Enter an asset tag to preview the QR
             </div>
           )}
         </div>
@@ -115,21 +96,15 @@ export function EquipmentQrPanel({
                 Asset tag
                 {required ? <RequiredMark /> : null}
               </Label>
-              <div className="flex gap-2">
-                <Input
-                  id="asset-tag"
-                  value={assetTag}
-                  onChange={(e) => onAssetTagChange?.(e.target.value)}
-                  onBlur={onBlur}
-                  placeholder="MED-AX-2207"
-                  className={fieldErrorClass(Boolean(error), "font-mono")}
-                  {...fieldAria("assetTag", error)}
-                />
-                <Button type="button" variant="outline" onClick={generateTag} className="shrink-0">
-                  <RefreshCw className="h-4 w-4" />
-                  Generate
-                </Button>
-              </div>
+              <Input
+                id="asset-tag"
+                value={assetTag}
+                onChange={(e) => onAssetTagChange?.(e.target.value)}
+                onBlur={onBlur}
+                placeholder="MED-AX-2207"
+                className={fieldErrorClass(Boolean(error), "font-mono")}
+                {...fieldAria("assetTag", error)}
+              />
               {error ? <FormFieldError field="assetTag" message={error} /> : (
                 <p className="text-xs text-muted-foreground">This exact tag is encoded in the QR and used in QR Tracking lookup.</p>
               )}
@@ -142,13 +117,9 @@ export function EquipmentQrPanel({
           )}
 
           <div className={cn("flex flex-wrap gap-2", !tag && "opacity-70")}>
-            <Button type="button" variant="outline" size="sm" disabled={!tag || busy !== null} onClick={() => void runDownload("png")}>
-              {busy === "png" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              Download QR
-            </Button>
-            <Button type="button" variant="outline" size="sm" disabled={!tag || busy !== null} onClick={() => void runDownload("label")}>
-              {busy === "label" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Tag className="h-4 w-4" />}
-              Download label
+            <Button type="button" variant="outline" size="sm" disabled={!tag || busy} onClick={() => void runDownload()}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Download image
             </Button>
           </div>
         </div>

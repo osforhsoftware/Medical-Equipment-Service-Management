@@ -255,7 +255,7 @@ export default function Customers() {
     <div className="space-y-6">
       <PageHeader
         title="Customers"
-          description="Parties for sales quotations and service work."
+        description="Parties for product sales and service work."
         actions={
           <Button onClick={openCreate} variant="brand">
             <Plus className="mr-1 h-4 w-4" /> Add Customer

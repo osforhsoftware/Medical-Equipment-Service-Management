@@ -5,8 +5,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { navGroups, navItems } from "@/config/nav";
-import { roleLabels } from "@/data/mock";
-import { getUserRoles, userCanAccessModule } from "@/lib/userRoles";
+import { userCanAccessModule } from "@/lib/userRoles";
 
 interface AppSidebarProps {
   open: boolean;
@@ -91,9 +90,6 @@ export function AppSidebar({ open, onClose }: AppSidebarProps) {
             </div>
             <div className="min-w-0 leading-tight">
               <p className="truncate text-[13px] font-medium text-foreground">{user.name}</p>
-              <p className="truncate text-[11px] text-muted-foreground">
-                {getUserRoles(user).map((role) => roleLabels[role]).join(" · ")}
-              </p>
             </div>
           </div>
         </div>

@@ -100,7 +100,7 @@ export function MobileLayout({ children }: MobileLayoutProps) {
         </div>
       )}
 
-      <main className={cn("mobile-main animate-fade-in", showFab && "mobile-main-with-fab")}>
+      <main className={cn("mobile-main", showFab && "mobile-main-with-fab")}>
         {children ?? <Outlet />}
       </main>
 

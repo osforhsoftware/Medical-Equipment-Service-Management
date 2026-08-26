@@ -31,7 +31,7 @@ export class EstimatesService {
     return item;
   }
 
-  async create(tenantId: string, data: CreateEstimateData) {
+  async create(tenantId: string, actorId: string, data: CreateEstimateData) {
     const reference = await generateReference(tenantId, "EST", "estimate");
     const total = (Number(data.laborCost) || 0) + (Number(data.partsCost) || 0);
 
@@ -56,6 +56,7 @@ export class EstimatesService {
         requestRef: "SALE",
         customerName: customer.name,
         equipmentName,
+        salespersonId: actorId,
         laborCost: data.laborCost,
         partsCost: data.partsCost,
         total,
@@ -75,6 +76,7 @@ export class EstimatesService {
       requestRef: sr.reference,
       customerName: sr.customerName,
       equipmentName: (sr.equipmentName ?? "Equipment").split(" (")[0],
+      salespersonId: actorId,
       laborCost: data.laborCost,
       partsCost: data.partsCost,
       total,

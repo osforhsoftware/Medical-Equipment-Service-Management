@@ -60,10 +60,6 @@ export function formatDateTime(value: string | Date | null | undefined) {
   });
 }
 
-export function formatFileTimestamp(file: File) {
-  return formatDateTime(file.lastModified ? new Date(file.lastModified) : new Date());
-}
-
 export const CURRENCY_SYMBOL = "₹";
 
 export function toMoney(value: string | number) {
@@ -72,6 +68,46 @@ export function toMoney(value: string | number) {
 
 export function formatCurrency(value: string | number) {
   return `${CURRENCY_SYMBOL}${toMoney(value)}`;
+}
+
+/** Invoice/estimate amounts always show two decimal places (₹0.00, ₹1,250.00). */
+export function formatDocumentCurrency(value: string | number) {
+  const amount = Number(value);
+  const n = Number.isFinite(amount) ? amount : 0;
+  return `${CURRENCY_SYMBOL}${n.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+const ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+const TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+
+function wordsUnderThousand(n: number) {
+  if (n < 20) return ONES[n];
+  if (n < 100) return `${TENS[Math.floor(n / 10)]}${n % 10 ? ` ${ONES[n % 10]}` : ""}`;
+  return `${ONES[Math.floor(n / 100)]} Hundred${n % 100 ? ` ${wordsUnderThousand(n % 100)}` : ""}`;
+}
+
+/** Indian numbering (Rupees / Paise) for invoice totals. */
+export function formatAmountInWords(value: string | number) {
+  const amount = Math.max(0, Number(value) || 0);
+  const rupees = Math.floor(amount + 1e-9);
+  const paise = Math.round((amount - rupees) * 100);
+  if (rupees === 0 && paise === 0) return "Zero Rupees Only";
+
+  const crore = Math.floor(rupees / 10_000_000);
+  const lakh = Math.floor((rupees % 10_000_000) / 100_000);
+  const thousand = Math.floor((rupees % 100_000) / 1000);
+  const rest = rupees % 1000;
+  const parts: string[] = [];
+  if (crore) parts.push(`${wordsUnderThousand(crore)} Crore`);
+  if (lakh) parts.push(`${wordsUnderThousand(lakh)} Lakh`);
+  if (thousand) parts.push(`${wordsUnderThousand(thousand)} Thousand`);
+  if (rest) parts.push(wordsUnderThousand(rest));
+  const rupeeWords = rupees === 0 ? "Zero Rupees" : `${parts.join(" ")} Rupee${rupees === 1 ? "" : "s"}`;
+  const paiseWords = paise ? ` and ${wordsUnderThousand(paise)} Paise` : "";
+  return `${rupeeWords}${paiseWords} Only`;
 }
 
 export function formatCurrencyShort(amount: number) {

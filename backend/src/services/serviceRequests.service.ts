@@ -15,7 +15,7 @@ import {
 } from "@/services/workflow/serviceTicketStateMachine";
 
 const ASSIGNABLE_STAFF_ROLES = ["coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
-const ASSIGNMENT_SCOPED_ROLES = ["inspector", "estimator", "engineer", "inventory", "billing"];
+const ASSIGNMENT_SCOPED_ROLES = ["inspector", "engineer", "inventory", "billing"];
 
 type CreateServiceRequestData = {
   customerId: string;
@@ -114,12 +114,29 @@ export class ServiceRequestsService {
     return this.enrichCreatedBy(tenantId, record);
   }
 
-  private assertActorAccess(
-    request: { assignedTo: string | null; assignedInspectorId?: string | null; assignedEngineerId?: string | null },
+  private async assertActorAccess(
+    request: { id: string; tenantId: string; assignedTo: string | null; assignedInspectorId?: string | null; assignedEngineerId?: string | null },
     actorId?: string,
     actorRole?: string,
   ) {
     if (!actorId || !actorRole) return;
+    if (actorRole === "estimator") {
+      const ownedEstimate = await prisma.estimate.findFirst({
+        where: {
+          tenantId: request.tenantId,
+          serviceRequestId: request.id,
+          OR: [
+            { salespersonId: actorId },
+            { revisions: { some: { createdBy: actorId } } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!ownedEstimate) {
+        throw new AppError("You can only access service tickets for estimates created by you", 403);
+      }
+      return;
+    }
     const assigneeId =
       actorRole === "inspector"
         ? request.assignedInspectorId ?? request.assignedTo
@@ -174,11 +191,11 @@ export class ServiceRequestsService {
     actorRole: string,
     filters: import("@/repositories/serviceRequests.repository").ServiceRequestListFilters,
   ) {
-    const restrictedRoles = ["inspector", "estimator", "engineer", "inventory", "billing"];
-    const assignedToFilter = restrictedRoles.includes(actorRole) ? actorId : filters.assignedTo;
+    const assignedToFilter = ASSIGNMENT_SCOPED_ROLES.includes(actorRole) ? actorId : filters.assignedTo;
     const { data, total } = await serviceRequestsRepository.findPaginated(tenantId, {
       ...filters,
       assignedTo: assignedToFilter,
+      estimatorId: actorRole === "estimator" ? actorId : undefined,
     });
     return { data: await this.enrichCreatedByList(tenantId, data), total };
   }
@@ -190,10 +207,10 @@ export class ServiceRequestsService {
     statuses: string[],
     filters?: { overdue?: boolean; priority?: string; assignee?: string; search?: string },
   ) {
-    const restrictedRoles = ["inspector", "estimator", "engineer", "inventory", "billing"];
-    const assignedTo = restrictedRoles.includes(actorRole) ? actorId : undefined;
+    const assignedTo = ASSIGNMENT_SCOPED_ROLES.includes(actorRole) ? actorId : undefined;
     return serviceRequestsRepository.countByStatus(tenantId, {
       assignedTo,
+      estimatorId: actorRole === "estimator" ? actorId : undefined,
       priority: filters?.priority,
       assignee: filters?.assignee,
       overdue: filters?.overdue,
@@ -202,16 +219,19 @@ export class ServiceRequestsService {
   }
 
   async getAll(tenantId: string, actorId: string, actorRole: string, filters?: { status?: string }) {
-    const restrictedRoles = ["inspector", "estimator", "engineer", "inventory", "billing"];
-    const assignedToFilter = restrictedRoles.includes(actorRole) ? actorId : undefined;
-    const rows = await serviceRequestsRepository.findAll(tenantId, { ...filters, assignedTo: assignedToFilter });
+    const assignedToFilter = ASSIGNMENT_SCOPED_ROLES.includes(actorRole) ? actorId : undefined;
+    const rows = await serviceRequestsRepository.findAll(tenantId, {
+      ...filters,
+      assignedTo: assignedToFilter,
+      estimatorId: actorRole === "estimator" ? actorId : undefined,
+    });
     return this.enrichCreatedByList(tenantId, rows);
   }
 
   async getById(id: string, tenantId: string, actorId?: string, actorRole?: string) {
     const sr = await serviceRequestsRepository.findById(id, tenantId);
     if (!sr) throw new AppError("Service ticket not found", 404);
-    this.assertActorAccess(sr, actorId, actorRole);
+    await this.assertActorAccess(sr, actorId, actorRole);
     return this.enrichCreatedBy(tenantId, sr);
   }
 

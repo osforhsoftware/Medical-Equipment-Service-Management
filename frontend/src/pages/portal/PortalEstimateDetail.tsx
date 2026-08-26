@@ -101,21 +101,23 @@ export default function PortalEstimateDetail() {
         </Button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border bg-white">
-        <ProfessionalDocument
-          kind="Estimate"
-          reference={estimate.reference}
-          customerName={estimate.customerName}
-          issueDate={estimate.createdAt}
-          validOrDueLabel="Valid until"
-          validOrDueDate={estimate.validUntil}
-          ticketRef={estimate.requestRef}
-          lines={estimateToDocumentLines(estimate)}
-          discount={Number(estimate.discount ?? 0)}
-          notes={estimate.notes ?? undefined}
-          terms={estimate.terms ?? undefined}
-          hideToolbar
-        />
+      <div className="print-area overflow-visible rounded-lg border border-border bg-card">
+          <ProfessionalDocument
+            kind="Estimate"
+            reference={estimate.reference}
+            customerName={estimate.customerName}
+            equipmentName={estimate.equipmentName}
+            issueDate={estimate.createdAt}
+            validOrDueLabel="Valid until"
+            validOrDueDate={estimate.validUntil}
+            ticketRef={estimate.requestRef}
+            lines={estimateToDocumentLines(estimate)}
+            discount={Number(estimate.discount ?? 0)}
+            notes={estimate.notes ?? undefined}
+            terms={estimate.terms ?? undefined}
+            hideToolbar
+            showSignature
+          />
       </div>
 
       {actionable ? (

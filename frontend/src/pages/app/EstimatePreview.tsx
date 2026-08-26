@@ -16,6 +16,8 @@ export default function EstimatePreview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [pdfBusy, setPdfBusy] = useState(false);
+
   const load = useCallback(async () => {
     if (!id) return;
     setLoading(true);
@@ -45,6 +47,23 @@ export default function EstimatePreview() {
 
   const backTo = isPortal ? (estimate ? `/portal/estimates/${estimate.id}` : "/portal/estimates") : (estimate ? `/app/estimates/${estimate.id}` : "/app/estimates");
 
+  const downloadPdf = async () => {
+    if (!estimate) return;
+    if (isPortal) {
+      window.print();
+      return;
+    }
+    setPdfBusy(true);
+    try {
+      const doc = await api.generateDocument("estimate", estimate.id);
+      if (doc.file?.id) window.open(api.fileDownloadUrl(doc.file.id), "_blank");
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to generate PDF" });
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
   const body = (
     <div className="print-preview-page min-h-[70vh] space-y-4">
       <div className="no-print flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -58,8 +77,8 @@ export default function EstimatePreview() {
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="mr-1 h-4 w-4" /> Print
           </Button>
-          <Button variant="outline" size="sm" onClick={() => window.print()}>
-            <Download className="mr-1 h-4 w-4" /> PDF
+          <Button variant="outline" size="sm" disabled={!estimate || pdfBusy} onClick={() => void downloadPdf()}>
+            {pdfBusy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Download className="mr-1 h-4 w-4" />} PDF
           </Button>
         </div>
       </div>
@@ -82,11 +101,12 @@ export default function EstimatePreview() {
           </Button>
         </div>
       ) : (
-        <div className="print-area mx-auto max-w-[210mm] overflow-hidden rounded-sm border border-border bg-white shadow-sm">
+        <div className="print-area mx-auto w-full max-w-[210mm] border border-border bg-white shadow-sm print:mx-0 print:max-w-none print:border-0 print:shadow-none">
           <ProfessionalDocument
             kind="Estimate"
             reference={estimate.reference}
             customerName={estimate.customerName}
+            equipmentName={estimate.equipmentName}
             issueDate={estimate.createdAt}
             validOrDueLabel="Valid until"
             validOrDueDate={estimate.validUntil}

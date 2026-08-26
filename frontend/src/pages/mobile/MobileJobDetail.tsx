@@ -45,7 +45,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { api, type BackendInventoryItem, type BackendServiceJob, type JobPhotoInput } from "@/lib/api";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
-import { defaultDatePlusDays, formatDate, formatDateTime, formatFileTimestamp, formatJobStatus } from "@/lib/format";
+import { defaultDatePlusDays, formatDate, formatDateTime, formatJobStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 const JOB_STATUS_OPTIONS = [
@@ -153,7 +153,7 @@ export default function MobileJobDetail() {
   });
 
   const isEngineer = user?.role === "engineer";
-  const canUpdateJob = isEngineer || user?.role === "admin" || user?.role === "coordinator";
+  const canUpdateJob = isEngineer || user?.role === "admin";
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -243,6 +243,7 @@ export default function MobileJobDetail() {
     try {
       await api.addJobExtra(job.id, {
         description: partsNote.trim().slice(0, 120),
+        type: "product",
         reason: partsNote.trim(),
         quantity: 1,
         unitPrice: 0,
@@ -529,7 +530,7 @@ export default function MobileJobDetail() {
           <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => {
             const files = Array.from(e.target.files ?? []);
             setPhotoFiles(files);
-            setPhotoCaptions(files.map((file) => formatFileTimestamp(file)));
+            setPhotoCaptions(files.map(() => ""));
             photosValidation.clearError("photos");
             photosValidation.handleChange("photos", { photoCount: files.length });
             e.target.value = "";

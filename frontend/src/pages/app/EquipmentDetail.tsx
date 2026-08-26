@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Pencil } from "lucide-react";
+import { EquipmentFormDialog } from "@/components/equipment/EquipmentFormDialog";
 import {
   ActivityTimeline,
   DetailInfoGrid,
@@ -8,7 +10,9 @@ import {
 } from "@/components/shared/RecordDetailLayout";
 import { EquipmentQrPanel } from "@/components/shared/EquipmentQrPanel";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/context/AuthContext";
 import { api, ApiError, type BackendEquipment, type BackendEquipmentHistory } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
@@ -17,7 +21,10 @@ import { useQuery } from "@tanstack/react-query";
 
 export default function EquipmentDetail() {
   const { id = "" } = useParams();
+  const { hasRole } = useAuth();
+  const canManage = hasRole(["admin", "coordinator", "inventory"]);
   const [searchParams, setSearchParams] = useSearchParams();
+  const [editOpen, setEditOpen] = useState(false);
   const [equipment, setEquipment] = useState<BackendEquipment | null>(null);
   const [history, setHistory] = useState<BackendEquipmentHistory | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,6 +71,7 @@ export default function EquipmentDetail() {
   }, [load]);
 
   return (
+    <>
     <RecordDetailLayout
       backTo="/app/equipment"
       backLabel="Back to Equipment"
@@ -71,6 +79,11 @@ export default function EquipmentDetail() {
       subtitle={equipment ? `${equipment.assetTag} · ${equipment.customerName}` : undefined}
       status={equipment ? equipment.condition : undefined}
       statusLabel={equipment ? conditionName : undefined}
+      actions={canManage && equipment ? (
+        <Button variant="outline" onClick={() => setEditOpen(true)}>
+          <Pencil className="mr-1 h-4 w-4" /> Edit
+        </Button>
+      ) : undefined}
       meta={equipment ? [
         { label: "Category", value: categoryName },
         { label: "Location", value: equipment.location || "—" },
@@ -183,13 +196,21 @@ export default function EquipmentDetail() {
           </Card>
           <EquipmentQrPanel
             assetTag={equipment.assetTag}
-            name={equipment.name}
-            manufacturer={equipment.manufacturer}
-            model={equipment.model}
             showInput={false}
           />
         </div>
       ) : undefined}
     />
+    <EquipmentFormDialog
+      open={editOpen}
+      onOpenChange={setEditOpen}
+      equipment={equipment}
+      existingAssetTags={equipment ? [equipment.assetTag] : []}
+      onSaved={(saved) => {
+        setEquipment(saved);
+        void load();
+      }}
+    />
+    </>
   );
 }

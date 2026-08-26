@@ -16,7 +16,6 @@ import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import { NOTIFICATIONS_UPDATED } from "@/lib/notifications-events";
-import { roleLabels } from "@/data/mock";
 
 export function Topbar({
   sidebarOpen,
@@ -110,7 +109,6 @@ export function Topbar({
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>
               <p className="text-sm font-medium">{user.name}</p>
-              <p className="text-xs font-normal text-muted-foreground">{roleLabels[user.role]}</p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => navigate("/app/settings")}>

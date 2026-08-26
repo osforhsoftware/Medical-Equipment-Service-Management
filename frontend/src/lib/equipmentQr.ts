@@ -35,78 +35,39 @@ function downloadDataUrl(dataUrl: string, filename: string) {
   link.remove();
 }
 
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Unable to create QR image"));
+    img.src = src;
+  });
+}
+
 export async function downloadEquipmentQrPng(assetTag: string) {
   const tag = assetTag.trim();
   if (!tag) return;
-  const dataUrl = await equipmentQrDataUrl(tag, 640);
-  downloadDataUrl(dataUrl, `${tag}-qr.png`);
-}
 
-function safeLabel(value: string | undefined, fallback: string) {
-  const text = value?.trim();
-  return text && text.length > 0 ? text : fallback;
-}
-
-export async function downloadEquipmentQrLabel(options: {
-  assetTag: string;
-  name?: string;
-  manufacturer?: string;
-  model?: string;
-}) {
-  const tag = options.assetTag.trim();
-  if (!tag) return;
-
-  const qr = await equipmentQrDataUrl(tag, 420);
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Unable to draw QR label"));
-    img.src = qr;
-  });
+  const qrSize = 720;
+  const padding = 40;
+  const footer = 80;
+  const qr = await equipmentQrDataUrl(tag, qrSize);
+  const image = await loadImage(qr);
 
   const canvas = document.createElement("canvas");
-  canvas.width = 720;
-  canvas.height = 960;
+  canvas.width = padding * 2 + qrSize;
+  canvas.height = padding * 2 + qrSize + footer;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  ctx.fillStyle = "#0f766e";
-  ctx.fillRect(0, 0, canvas.width, 88);
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "700 28px Inter, Arial, sans-serif";
-  ctx.fillText("MESMS", 40, 56);
-  ctx.font = "400 16px Inter, Arial, sans-serif";
-  ctx.fillText("Equipment asset label", 160, 56);
-
-  const qrX = (canvas.width - 420) / 2;
-  ctx.drawImage(image, qrX, 130, 420, 420);
+  ctx.drawImage(image, padding, padding, qrSize, qrSize);
 
   ctx.fillStyle = "#0f172a";
   ctx.textAlign = "center";
   ctx.font = "700 36px ui-monospace, Consolas, monospace";
-  ctx.fillText(tag, canvas.width / 2, 620);
+  ctx.fillText(tag, canvas.width / 2, padding + qrSize + 52);
 
-  ctx.font = "600 28px Inter, Arial, sans-serif";
-  ctx.fillText(safeLabel(options.name, "Unnamed equipment"), canvas.width / 2, 680);
-
-  ctx.fillStyle = "#475569";
-  ctx.font = "400 22px Inter, Arial, sans-serif";
-  ctx.fillText(
-    [options.manufacturer, options.model].filter((part) => part?.trim()).join(" · ") || "Ready for site install",
-    canvas.width / 2,
-    722,
-  );
-
-  ctx.strokeStyle = "#cbd5e1";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(24, 24, canvas.width - 48, canvas.height - 48);
-
-  ctx.fillStyle = "#64748b";
-  ctx.font = "400 16px Inter, Arial, sans-serif";
-  ctx.fillText("Scan to look up this machine in MESMS", canvas.width / 2, 880);
-
-  downloadDataUrl(canvas.toDataURL("image/png"), `${tag}-label.png`);
+  downloadDataUrl(canvas.toDataURL("image/png"), `${tag}-qr.png`);
 }

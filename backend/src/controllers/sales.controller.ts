@@ -43,6 +43,24 @@ export class SalesController {
     }
   }
 
+  async createOrder(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await salesService.createOrder(req.tenantId!, actor(req), req.body);
+      res.status(201).json(success("Sale recorded successfully", data));
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async updateOrder(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await salesService.updateOrder(req.tenantId!, req.params.id, req.body);
+      res.json(success("Sale updated successfully", data));
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async deliver(req: Request, res: Response, next: NextFunction) {
     try {
       const data = await salesService.deliver(req.tenantId!, req.params.id, req.user!.userId);

@@ -116,7 +116,8 @@ export function mapEstimateLine(line: BackendEstimateLine): DocumentLine {
 }
 
 export function formatLineType(type: string) {
-  return ESTIMATE_LINE_TYPES.find((item) => item.value === type)?.label ?? type;
+  return ESTIMATE_LINE_TYPES.find((item) => item.value === type)?.label
+    ?? type.replace(/_/g, " ").replace(/^\w/, (letter) => letter.toUpperCase());
 }
 
 export function workflowStepIndex(status?: string | null, hasLines = false, hasValidity = false) {

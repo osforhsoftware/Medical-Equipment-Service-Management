@@ -81,7 +81,7 @@ export function PortalLayout() {
         )}
       </header>
 
-      <main className="mx-auto max-w-7xl animate-fade-in px-4 py-6 sm:px-6 lg:py-7">
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:py-7">
         <Outlet />
       </main>
     </div>

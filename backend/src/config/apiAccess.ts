@@ -14,13 +14,14 @@ export const API_WRITE_ACCESS = {
   "tickets.delete": ["admin"],
   "inspections.write": ["admin", "coordinator", "inspector"],
   "estimates.write": ["admin", "coordinator", "estimator"],
-  "estimates.decide": ["admin", "coordinator", "inspector", "engineer", "customer"],
+  "estimates.decide": ["admin", "coordinator", "customer"],
   "jobs.write": ["admin", "coordinator", "engineer"],
   "inventory.write": ["admin", "inventory"],
   "inventory.adjust": ["admin", "inventory"],
   "suppliers.write": ["admin", "inventory"],
   "purchaseOrders.write": ["admin", "inventory"],
   "purchaseOrders.receive": ["admin", "inventory"],
+  "purchaseReturns.write": ["admin", "inventory"],
   "stockTransfers.write": ["admin", "inventory"],
   "amc.write": ["admin", "coordinator", "billing"],
   "sales.write": ["admin", "coordinator", "estimator"],
@@ -48,7 +49,7 @@ export const ALL_ROLES = [
 export type AppRole = (typeof ALL_ROLES)[number];
 
 /** Staff who can approve/reject estimates and assign an engineer. */
-export const ESTIMATE_STAFF_APPROVER_ROLES = ["admin", "coordinator", "inspector", "engineer"] as const;
+export const ESTIMATE_STAFF_APPROVER_ROLES = ["admin", "coordinator"] as const;
 
 export function rolesFor(permission: ApiWritePermission): readonly string[] {
   return API_WRITE_ACCESS[permission];

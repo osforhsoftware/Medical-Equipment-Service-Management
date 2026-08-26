@@ -160,11 +160,11 @@ export class SalesService {
 
     return {
       process: [
-        { key: "party", label: "Customer", hint: "Pick the hospital or clinic" },
-        { key: "quotation", label: "Quotation", hint: "Products, qty, price, tax" },
-        { key: "approval", label: "Approval", hint: "Customer / internal decision" },
-        { key: "order", label: "Sales order", hint: "Reserve stock and deliver" },
-        { key: "invoice", label: "Invoice & pay", hint: "Reuse billing collection" },
+        { key: "party", label: "Customer", hint: "Any hospital, clinic, or walk-in" },
+        { key: "items", label: "Sold items", hint: "Add parts, set sale price" },
+        { key: "order", label: "Sale", hint: "Save the deal" },
+        { key: "deliver", label: "Deliver", hint: "Stock goes out" },
+        { key: "invoice", label: "Invoice & pay", hint: "Billing collection" },
       ],
       kpis: {
         activeCustomers,
@@ -219,6 +219,141 @@ export class SalesService {
     });
     if (!order) throw new AppError("Sales order not found", 404);
     return this.serializeOrder(order);
+  }
+
+  async createOrder(
+    tenantId: string,
+    actor: { userId: string; name?: string },
+    input: {
+      customerId: string;
+      notes?: string | null;
+      lines: Array<{
+        inventoryItemId?: string | null;
+        catalogItemId?: string | null;
+        type?: string;
+        description: string;
+        sku?: string | null;
+        quantity: number;
+        unitPrice: number;
+        discount?: number;
+        taxRate?: number;
+      }>;
+    },
+  ) {
+    return prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.findFirst({ where: { id: input.customerId, tenantId } });
+      if (!customer) throw new AppError("Customer not found", 404);
+      const user = await tx.user.findFirst({ where: { id: actor.userId, tenantId } });
+      const salespersonName = user?.name ?? actor.name ?? "Sales";
+      const lines = await this.resolveSaleLines(tx, tenantId, input.lines);
+      await this.assertStockForLines(tx, tenantId, lines);
+      const totals = this.totalsFromLines(lines);
+      const reference = await generateReference(tenantId, "SO", "salesOrder");
+      const order = await tx.salesOrder.create({
+        data: {
+          tenantId,
+          estimateId: null,
+          customerId: customer.id,
+          salespersonId: actor.userId,
+          branchId: user?.branchId ?? customer.branchId ?? null,
+          reference,
+          customerName: customer.name,
+          salespersonName,
+          status: "confirmed",
+          deliveryStatus: "pending",
+          paymentStatus: "unpaid",
+          subtotal: totals.subtotal,
+          discount: totals.discount,
+          tax: totals.tax,
+          total: totals.total,
+          notes: input.notes ?? null,
+          lines: {
+            create: lines.map((line) => ({
+              inventoryItemId: line.inventoryItemId,
+              catalogItemId: line.catalogItemId,
+              type: line.type,
+              description: line.description,
+              sku: line.sku,
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+              discount: line.discount,
+              taxRate: line.taxRate,
+              lineTotal: line.lineTotal,
+            })),
+          },
+        },
+        include: orderInclude,
+      });
+      return this.serializeOrder(order);
+    });
+  }
+
+  async updateOrder(
+    tenantId: string,
+    id: string,
+    input: {
+      customerId: string;
+      notes?: string | null;
+      lines: Array<{
+        inventoryItemId?: string | null;
+        catalogItemId?: string | null;
+        type?: string;
+        description: string;
+        sku?: string | null;
+        quantity: number;
+        unitPrice: number;
+        discount?: number;
+        taxRate?: number;
+      }>;
+    },
+  ) {
+    return prisma.$transaction(async (tx) => {
+      const order = await tx.salesOrder.findFirst({
+        where: { id, tenantId },
+        include: { invoices: true, lines: true },
+      });
+      if (!order) throw new AppError("Sales order not found", 404);
+      if (order.deliveryStatus === "delivered") {
+        throw new AppError("Delivered sales cannot be edited", 409);
+      }
+      if (order.invoices.some((inv) => inv.status !== "closed")) {
+        throw new AppError("Invoiced sales cannot be edited", 409);
+      }
+      const customer = await tx.customer.findFirst({ where: { id: input.customerId, tenantId } });
+      if (!customer) throw new AppError("Customer not found", 404);
+      const lines = await this.resolveSaleLines(tx, tenantId, input.lines);
+      await this.assertStockForLines(tx, tenantId, lines);
+      const totals = this.totalsFromLines(lines);
+      await tx.salesOrderLine.deleteMany({ where: { salesOrderId: order.id } });
+      const updated = await tx.salesOrder.update({
+        where: { id: order.id },
+        data: {
+          customerId: customer.id,
+          customerName: customer.name,
+          notes: input.notes ?? null,
+          subtotal: totals.subtotal,
+          discount: totals.discount,
+          tax: totals.tax,
+          total: totals.total,
+          lines: {
+            create: lines.map((line) => ({
+              inventoryItemId: line.inventoryItemId,
+              catalogItemId: line.catalogItemId,
+              type: line.type,
+              description: line.description,
+              sku: line.sku,
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+              discount: line.discount,
+              taxRate: line.taxRate,
+              lineTotal: line.lineTotal,
+            })),
+          },
+        },
+        include: orderInclude,
+      });
+      return this.serializeOrder(updated);
+    });
   }
 
   async convertQuote(
@@ -562,9 +697,123 @@ export class SalesService {
     };
   }
 
+  private async resolveSaleLines(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    lines: Array<{
+      inventoryItemId?: string | null;
+      catalogItemId?: string | null;
+      type?: string;
+      description: string;
+      sku?: string | null;
+      quantity: number;
+      unitPrice: number;
+      discount?: number;
+      taxRate?: number;
+    }>,
+  ) {
+    if (!lines.length) throw new AppError("Add at least one sold item", 422);
+    const resolved: Array<{
+      inventoryItemId: string | null;
+      catalogItemId: string | null;
+      type: string;
+      description: string;
+      sku: string | null;
+      quantity: number;
+      unitPrice: Prisma.Decimal;
+      discount: Prisma.Decimal;
+      taxRate: Prisma.Decimal;
+      lineTotal: Prisma.Decimal;
+    }> = [];
+
+    for (const line of lines) {
+      let inventoryItemId = line.inventoryItemId ?? null;
+      let description = line.description.trim();
+      let sku = line.sku?.trim() || null;
+      let type = line.type?.trim() || (inventoryItemId ? "part" : "other");
+      if (inventoryItemId) {
+        const item = await tx.inventoryItem.findFirst({ where: { id: inventoryItemId, tenantId } });
+        if (!item) throw new AppError(`Inventory item not found for ${description || "line"}`, 404);
+        if (!description) description = item.name;
+        if (!sku) sku = item.sku;
+        if (!line.type) type = "part";
+      }
+      if (!description) throw new AppError("Each sold item needs a name", 422);
+      const quantity = Number(line.quantity);
+      const unitPrice = money(line.unitPrice);
+      const discount = money(line.discount ?? 0);
+      const taxRate = money(line.taxRate ?? 0);
+      if (!(quantity > 0)) throw new AppError(`Quantity must be greater than 0 for ${description}`, 422);
+      const net = unitPrice.mul(quantity).minus(discount);
+      if (net.lt(0)) throw new AppError(`Discount cannot exceed the amount for ${description}`, 422);
+      const taxAmt = net.mul(taxRate).div(100);
+      resolved.push({
+        inventoryItemId,
+        catalogItemId: line.catalogItemId ?? null,
+        type,
+        description,
+        sku,
+        quantity,
+        unitPrice,
+        discount,
+        taxRate,
+        lineTotal: net.plus(taxAmt).toDecimalPlaces(2),
+      });
+    }
+    return resolved;
+  }
+
+  private totalsFromLines(
+    lines: Array<{
+      quantity: number;
+      unitPrice: Prisma.Decimal;
+      discount: Prisma.Decimal;
+      taxRate: Prisma.Decimal;
+    }>,
+  ) {
+    const subtotal = lines.reduce((sum, line) => sum.plus(line.unitPrice.mul(line.quantity)), money(0));
+    const discount = lines.reduce((sum, line) => sum.plus(line.discount), money(0));
+    const tax = lines.reduce((sum, line) => {
+      const net = line.unitPrice.mul(line.quantity).minus(line.discount);
+      return sum.plus(net.mul(line.taxRate).div(100));
+    }, money(0));
+    return {
+      subtotal: subtotal.toDecimalPlaces(2),
+      discount: discount.toDecimalPlaces(2),
+      tax: tax.toDecimalPlaces(2),
+      total: subtotal.minus(discount).plus(tax).toDecimalPlaces(2),
+    };
+  }
+
+  private async assertStockForLines(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    lines: Array<{ inventoryItemId: string | null; description: string; quantity: number }>,
+  ) {
+    const needed = new Map<string, { name: string; qty: number }>();
+    for (const line of lines) {
+      if (!line.inventoryItemId) continue;
+      const qty = Math.ceil(Number(line.quantity));
+      const current = needed.get(line.inventoryItemId);
+      if (current) current.qty += qty;
+      else needed.set(line.inventoryItemId, { name: line.description, qty });
+    }
+    for (const [itemId, row] of needed) {
+      const item = await tx.inventoryItem.findFirst({ where: { id: itemId, tenantId } });
+      if (!item) throw new AppError(`Inventory item not found for ${row.name}`, 404);
+      const available = Math.max(0, item.inStock - item.reserved);
+      if (row.qty > available) {
+        throw new AppError(
+          `Not enough stock for ${item.name} (${item.sku}). Available ${available}, requested ${row.qty}.`,
+          409,
+        );
+      }
+    }
+  }
+
   private serializeOrder(order: {
     id: string;
-    estimateId: string;
+    estimateId: string | null;
     customerId: string;
     salespersonId: string | null;
     branchId: string | null;
