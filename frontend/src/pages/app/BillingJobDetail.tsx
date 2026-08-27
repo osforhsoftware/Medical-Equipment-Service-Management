@@ -193,7 +193,7 @@ export default function BillingJobDetail() {
                       </Button>
                     </CardContent>
                   </Card>
-                )}
+                ) : null}
               </div>
             </div>
           </div>
