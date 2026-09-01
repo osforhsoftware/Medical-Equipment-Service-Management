@@ -100,8 +100,9 @@ export class DomainController {
         await documentsService.generate(
           req.tenantId!,
           req.user!.userId,
-          req.params.kind as "estimate" | "invoice" | "service-report",
+          req.params.kind as "estimate" | "invoice" | "service-report" | "inspection-report",
           req.params.id,
+          req.user!.role,
         ),
         201,
       );

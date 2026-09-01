@@ -44,6 +44,7 @@ const documentRole = (req: Request, res: Response, next: NextFunction) => {
     estimate: ["admin", "coordinator", "estimator", "billing"],
     invoice: ["admin", "billing"],
     "service-report": ["admin", "coordinator", "engineer"],
+    "inspection-report": ["admin", "coordinator", "inspector", "estimator", "billing"],
   };
   return requireRole(...(permissions[req.params.kind] ?? []))(req, res, next);
 };

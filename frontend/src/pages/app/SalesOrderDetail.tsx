@@ -4,7 +4,7 @@ import { ArrowLeft, Loader2, Pencil, Printer, Truck } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { SalePad } from "@/components/sales/SalePad";
+import { SaleFormDialog } from "@/components/sales/SaleFormDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/context/AuthContext";
@@ -96,11 +96,6 @@ export default function SalesOrderDetail() {
                       <Pencil className="mr-1 h-4 w-4" /> Edit sold items
                     </Button>
                   ) : null}
-                  {editing ? (
-                    <Button variant="outline" onClick={() => setEditing(false)}>
-                      Done editing
-                    </Button>
-                  ) : null}
                   {order.estimateId ? (
                     <Button variant="outline" asChild>
                       <Link to={`/app/estimates/${order.estimateId}/preview`}>
@@ -133,8 +128,10 @@ export default function SalesOrderDetail() {
               <StatusBadge status={order.paymentStatus} />
             </div>
 
-            {editing && canEdit && !locked ? (
-              <SalePad
+            {canEdit && !locked ? (
+              <SaleFormDialog
+                open={editing}
+                onOpenChange={setEditing}
                 mode="edit"
                 initial={order}
                 onSaved={async () => {
@@ -142,12 +139,13 @@ export default function SalesOrderDetail() {
                   await refresh();
                 }}
               />
-            ) : (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Sold items</CardTitle>
-                </CardHeader>
-                <CardContent className="overflow-x-auto">
+            ) : null}
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Sold items</CardTitle>
+              </CardHeader>
+              <CardContent className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b text-left text-xs uppercase text-muted-foreground">
@@ -201,7 +199,6 @@ export default function SalesOrderDetail() {
                   </dl>
                 </CardContent>
               </Card>
-            )}
 
             <p className="text-xs text-muted-foreground">
               After delivery, register sold equipment under Customers → Equipment if this was a machine sale. Payments

@@ -26,6 +26,7 @@ import ServiceRequests from "./pages/app/ServiceRequests.tsx";
 import ServiceRequestDetail from "./pages/app/ServiceRequestDetail.tsx";
 import Inspections from "./pages/app/Inspections.tsx";
 import InspectionDetail from "./pages/app/InspectionDetail.tsx";
+import InspectionReportView from "./pages/app/InspectionReportView.tsx";
 import Estimates from "./pages/app/Estimates.tsx";
 import EstimateDetail from "./pages/app/EstimateDetail.tsx";
 import EstimateBuilder from "./pages/app/EstimateBuilder.tsx";
@@ -104,6 +105,7 @@ const App = () => (
               <Route path="service-tickets" element={<ModuleGuard module="Service Tickets"><ServiceRequests /></ModuleGuard>} />
               <Route path="service-tickets/:id" element={<ModuleGuard module="Service Tickets"><ServiceRequestDetail /></ModuleGuard>} />
               <Route path="inspections" element={<ModuleGuard module="Inspections"><Inspections /></ModuleGuard>} />
+              <Route path="inspections/:id/report" element={<ModuleGuard module="Inspections"><InspectionReportView /></ModuleGuard>} />
               <Route path="inspections/:id" element={<ModuleGuard module="Inspections"><InspectionDetail /></ModuleGuard>} />
               <Route path="estimates" element={<ModuleGuard module="Estimates"><Estimates /></ModuleGuard>} />
               <Route path="estimates/new" element={<ModuleGuard module="Estimates"><EstimateBuilder /></ModuleGuard>} />

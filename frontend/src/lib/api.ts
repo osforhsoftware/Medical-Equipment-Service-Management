@@ -305,12 +305,20 @@ export interface BackendInspectionReport {
   findings: string;
   recommendation: string;
   severity: string;
+  machineCondition?: string | null;
+  errorCodes?: unknown;
+  checklist?: unknown;
+  measurements?: unknown;
+  calibrationStatus?: string | null;
+  technicianRemarks?: string | null;
   reportedBy: string;
   reportedAt: string;
   submittedAt?: string | null;
   version?: number;
+  createdAt?: string;
+  updatedAt?: string;
   recommendations?: BackendInspectionRecommendation[];
-  attachments?: { id: string; fileId: string; caption?: string | null; kind: string; file?: { id: string; originalName: string } }[];
+  attachments?: { id: string; fileId: string; caption?: string | null; kind: string; createdAt?: string; file?: { id: string; originalName: string } }[];
 }
 
 export interface BackendServiceRequest {
@@ -1733,7 +1741,7 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
-  generateDocument: (kind: "estimate" | "invoice" | "service-report", id: string) =>
+  generateDocument: (kind: "estimate" | "invoice" | "service-report" | "inspection-report", id: string) =>
     request<{ document: { id: string; fileId: string }; file: { id: string }; downloadUrl: string; reference: string }>(
       `/api/domain/documents/${kind}/${id}`,
       { method: "POST", body: JSON.stringify({}) },

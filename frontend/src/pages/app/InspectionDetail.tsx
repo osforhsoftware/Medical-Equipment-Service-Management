@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { FilePenLine } from "lucide-react";
+import { FilePenLine, FileText } from "lucide-react";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { InspectionReportPanel } from "@/components/inspections/InspectionReportPanel";
 import { splitInspectionFindings, useInspectionReportEditor } from "@/components/inspections/useInspectionReportEditor";
@@ -88,11 +88,23 @@ export default function InspectionDetail() {
         notFoundTitle="Inspection not found"
         notFoundDescription="This inspection ticket could not be found."
         onRetry={() => void load()}
-        actions={request && canInspect ? (
-          <Button variant="brand" onClick={() => void editor.startInspection(request)}>
-            <FilePenLine className="mr-1.5 h-4 w-4" />
-            {inspectLabel}
-          </Button>
+        actions={request ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {report ? (
+              <Button variant="outline" asChild>
+                <Link to={`/app/inspections/${request.id}/report`}>
+                  <FileText className="mr-1.5 h-4 w-4" />
+                  Full report
+                </Link>
+              </Button>
+            ) : null}
+            {canInspect ? (
+              <Button variant="brand" onClick={() => void editor.startInspection(request)}>
+                <FilePenLine className="mr-1.5 h-4 w-4" />
+                {inspectLabel}
+              </Button>
+            ) : null}
+          </div>
         ) : undefined}
         sidebar={request ? (
           <Card>

@@ -319,9 +319,16 @@ export default function EstimateBuilder() {
                 <p className="mt-1 whitespace-pre-line text-muted-foreground">{inspection.recommendation || "—"}</p>
               </div>
             </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Inspector {inspection.reportedBy} · {formatDate(inspection.reportedAt)}
-            </p>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                Inspector {inspection.reportedBy} · {formatDate(inspection.reportedAt)}
+              </p>
+              {ticketId ? (
+                <Button variant="link" size="sm" className="h-auto p-0 text-xs" asChild>
+                  <Link to={`/app/inspections/${ticketId}/report`}>View full inspection report</Link>
+                </Button>
+              ) : null}
+            </div>
           </section>
         ) : null}
 

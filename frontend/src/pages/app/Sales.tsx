@@ -1,5 +1,6 @@
-import { Link, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IndianRupee,
   Loader2,
@@ -13,6 +14,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { StatCard } from "@/components/shared/StatCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { SaleFormDialog } from "@/components/sales/SaleFormDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -28,9 +30,20 @@ function paymentLabel(order: BackendSalesOrder) {
 
 export default function Sales() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { hasRole } = useAuth();
   const canBuild = hasRole(["admin", "coordinator", "estimator"]);
   const canBill = hasRole(["admin", "billing"]);
+  const [saleOpen, setSaleOpen] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get("new") !== "1" || !canBuild) return;
+    setSaleOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("new");
+    setSearchParams(next, { replace: true });
+  }, [canBuild, searchParams, setSearchParams]);
 
   const deskQuery = useQuery({
     queryKey: ["sales", "desk"],
@@ -58,7 +71,7 @@ export default function Sales() {
           description="Record sold items with a sale price. Quotations stay on Estimates — this desk is the actual deal."
           actions={
             canBuild ? (
-              <Button variant="brand" onClick={() => navigate("/app/sales/new")}>
+              <Button variant="brand" onClick={() => setSaleOpen(true)}>
                 <Plus className="mr-1 h-4 w-4" /> New sale
               </Button>
             ) : undefined
@@ -77,8 +90,8 @@ export default function Sales() {
               </p>
             </div>
             {canBuild ? (
-              <Button variant="outline" onClick={() => navigate("/app/sales/new")}>
-                <ShoppingBag className="mr-1 h-4 w-4" /> Open counter
+              <Button variant="outline" onClick={() => setSaleOpen(true)}>
+                <ShoppingBag className="mr-1 h-4 w-4" /> New sale
               </Button>
             ) : null}
           </div>
@@ -119,7 +132,7 @@ export default function Sales() {
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                   <CardTitle className="text-base">Recent sales</CardTitle>
                   {canBuild ? (
-                    <Button variant="ghost" size="sm" onClick={() => navigate("/app/sales/new")}>
+                    <Button variant="ghost" size="sm" onClick={() => setSaleOpen(true)}>
                       New
                     </Button>
                   ) : null}
@@ -282,6 +295,16 @@ export default function Sales() {
             ) : null}
           </TabsContent>
         </Tabs>
+
+        <SaleFormDialog
+          open={saleOpen}
+          onOpenChange={setSaleOpen}
+          mode="create"
+          onSaved={(order) => {
+            void queryClient.invalidateQueries({ queryKey: ["sales"] });
+            navigate(`/app/sales/orders/${order.id}`);
+          }}
+        />
       </div>
     </RoleGuard>
   );

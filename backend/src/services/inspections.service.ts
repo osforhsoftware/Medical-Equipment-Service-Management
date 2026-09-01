@@ -32,6 +32,7 @@ export class InspectionsService {
     actorId: string,
     actorRole: string,
   ) {
+    if (["admin", "coordinator", "estimator", "billing"].includes(actorRole)) return;
     if (actorRole === "inspector") {
       const lockedTo = request.assignedInspectorId ?? request.assignedTo;
       if (lockedTo && lockedTo !== actorId) {
