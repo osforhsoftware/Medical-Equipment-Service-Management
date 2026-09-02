@@ -36,10 +36,14 @@ import { cn } from "@/lib/utils";
 function matchesFilter(status: string, filter: string): boolean {
   const s = formatJobStatus(status);
   if (filter === "all") return true;
-  if (filter === "assigned") return ["new", "scheduled"].includes(s);
+  if (filter === "assigned") {
+    return ["new", "scheduled", "assigned_engineer", "assigned-engineer"].includes(s);
+  }
   if (filter === "inspection") return s === "inspection";
-  if (filter === "estimate") return ["estimate", "approval", "review"].includes(s);
-  if (filter === "in-progress") return ["in-progress", "parts-pending"].includes(s);
+  if (filter === "estimate") return ["estimate", "approval", "pending_approval", "review"].includes(s);
+  if (filter === "in-progress") {
+    return ["in-progress", "parts-pending", "assigned_engineer", "change_pending_approval"].includes(s);
+  }
   if (filter === "completed") return s === "completed";
   if (filter === "billing") return ["invoiced", "sent"].includes(s);
   return true;

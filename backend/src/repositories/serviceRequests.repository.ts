@@ -12,6 +12,7 @@ export interface ServiceRequestListFilters {
   status?: string;
   assignedTo?: string;
   estimatorId?: string;
+  engineerId?: string;
   priority?: string;
   assignee?: string;
   overdue?: boolean;
@@ -24,6 +25,10 @@ export interface ServiceRequestListFilters {
   orderBy: Prisma.ServiceRequestOrderByWithRelationInput | Prisma.ServiceRequestOrderByWithRelationInput[];
 }
 
+function pushAnd(where: Prisma.ServiceRequestWhereInput, clause: Prisma.ServiceRequestWhereInput) {
+  where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), clause];
+}
+
 function buildWhere(
   tenantId: string,
   filters: Omit<ServiceRequestListFilters, "skip" | "take" | "orderBy">,
@@ -33,8 +38,16 @@ function buildWhere(
     ...(filters.status ? { status: filters.status as ServiceRequest["status"] } : {}),
     ...(filters.statuses?.length ? { status: { in: filters.statuses as ServiceRequest["status"][] } } : {}),
     ...(filters.assignedTo ? { assignedTo: filters.assignedTo } : {}),
-    ...(filters.estimatorId
-      ? {
+    ...(filters.priority ? { priority: filters.priority as ServiceRequest["priority"] } : {}),
+    ...(filters.assignee ? { assignedName: filters.assignee } : {}),
+  };
+
+  if (filters.estimatorId) {
+    pushAnd(where, {
+      OR: [
+        { assignedEstimatorId: filters.estimatorId },
+        { assignedTo: filters.estimatorId },
+        {
           estimates: {
             some: {
               OR: [
@@ -43,11 +56,20 @@ function buildWhere(
               ],
             },
           },
-        }
-      : {}),
-    ...(filters.priority ? { priority: filters.priority as ServiceRequest["priority"] } : {}),
-    ...(filters.assignee ? { assignedName: filters.assignee } : {}),
-  };
+        },
+        { assignedEstimatorId: null, status: { in: ["estimate"] } },
+      ],
+    });
+  }
+
+  if (filters.engineerId) {
+    pushAnd(where, {
+      OR: [
+        { assignedEngineerId: filters.engineerId },
+        { assignedTo: filters.engineerId },
+      ],
+    });
+  }
 
   if (filters.overdue) {
     const start = new Date();
@@ -57,13 +79,15 @@ function buildWhere(
   }
 
   if (filters.search) {
-    where.OR = [
-      { reference: searchContains(filters.search) },
-      { customerName: searchContains(filters.search) },
-      { equipmentName: searchContains(filters.search) },
-      { description: searchContains(filters.search) },
-      { assignedName: searchContains(filters.search) },
-    ];
+    pushAnd(where, {
+      OR: [
+        { reference: searchContains(filters.search) },
+        { customerName: searchContains(filters.search) },
+        { equipmentName: searchContains(filters.search) },
+        { description: searchContains(filters.search) },
+        { assignedName: searchContains(filters.search) },
+      ],
+    });
   }
 
   return where;
@@ -111,7 +135,7 @@ export class ServiceRequestsRepository {
 
   async findAll(
     tenantId: string,
-    filters?: { status?: string; assignedTo?: string; estimatorId?: string },
+    filters?: { status?: string; assignedTo?: string; estimatorId?: string; engineerId?: string },
   ) {
     const { data } = await this.findPaginated(tenantId, {
       ...filters,

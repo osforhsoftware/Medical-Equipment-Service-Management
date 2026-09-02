@@ -1,10 +1,11 @@
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Loader2, Pencil, Printer, Truck } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { SaleFormDialog } from "@/components/sales/SaleFormDialog";
+import { SALES_BILL_ROLES, SALES_DESK_ROLES, SALES_WRITE_ROLES } from "@/config/roles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/context/AuthContext";
@@ -15,12 +16,11 @@ import { useState } from "react";
 
 export default function SalesOrderDetail() {
   const { id = "" } = useParams();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { hasRole } = useAuth();
   const canDeliver = hasRole(["admin", "inventory", "coordinator"]);
-  const canBill = hasRole(["admin", "billing"]);
-  const canEdit = hasRole(["admin", "coordinator", "estimator"]);
+  const canBill = hasRole(SALES_BILL_ROLES);
+  const canEdit = hasRole(SALES_WRITE_ROLES);
   const [working, setWorking] = useState(false);
   const [editing, setEditing] = useState(false);
 
@@ -59,7 +59,6 @@ export default function SalesOrderDetail() {
       const created = await api.invoiceSalesOrder(order.id);
       toast({ title: "Invoice created", description: created.reference });
       await refresh();
-      navigate(`/app/billing/invoices/${created.id}`);
     } catch (err) {
       toast.apiError(err, { fallback: "Unable to create invoice" });
     } finally {
@@ -68,7 +67,7 @@ export default function SalesOrderDetail() {
   };
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "estimator", "billing", "inventory"]}>
+    <RoleGuard roles={SALES_DESK_ROLES}>
       <div className="space-y-6">
         <Button variant="ghost" size="sm" className="-ml-2 w-fit text-muted-foreground" asChild>
           <Link to="/app/sales">
@@ -113,7 +112,7 @@ export default function SalesOrderDetail() {
                       Create invoice
                     </Button>
                   ) : null}
-                  {invoice ? (
+                  {invoice && hasRole(["admin", "billing"]) ? (
                     <Button variant="brand" asChild>
                       <Link to={`/app/billing/invoices/${invoice.id}`}>Open invoice</Link>
                     </Button>
@@ -201,8 +200,8 @@ export default function SalesOrderDetail() {
               </Card>
 
             <p className="text-xs text-muted-foreground">
-              After delivery, register sold equipment under Customers → Equipment if this was a machine sale. Payments
-              are recorded on the invoice in Billing (Cash, Bank, UPI, Card, Other).
+              After delivery, register sold equipment under Customers → Equipment if this was a machine sale. Sale
+              invoices are created on this order; payments can be recorded by billing staff.
             </p>
           </>
         ) : null}

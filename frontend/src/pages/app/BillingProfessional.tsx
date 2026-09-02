@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { SERVICE_BILLING_ROLES } from "@/config/roles";
 import { ApiError, api, type BillingQueueKey, type BillingQueueRow } from "@/lib/api";
 import { formatCurrency, formatCurrencyShort, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
@@ -123,11 +124,11 @@ export default function BillingProfessional() {
   }, [queueParam]);
 
   return (
-    <RoleGuard roles={["admin", "billing"]}>
+    <RoleGuard roles={SERVICE_BILLING_ROLES}>
       <div className="space-y-6">
         <PageHeader
-          title="Billing Operations"
-          description="Service completion verification, invoicing, and payment collection — the final operational stage."
+          title="Service ticket billing"
+          description="Verify completed jobs, create service invoices, and collect payment. Product sale invoices stay on the Sales floor."
           actions={
             readyCount > 0 ? (
               <Button variant="brand" asChild>

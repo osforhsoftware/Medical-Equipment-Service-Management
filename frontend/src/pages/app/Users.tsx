@@ -57,9 +57,9 @@ const userSchema = z.object({
   isActive: z.boolean(),
 });
 
-const staffRoles: Role[] = ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing", "customer"];
-const filterRoles: (Role | "all")[] = ["all", "admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
-const multiAssignableRoles: Role[] = ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
+const staffRoles: Role[] = ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing", "customer"];
+const filterRoles: (Role | "all")[] = ["all", "admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing"];
+const multiAssignableRoles: Role[] = ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing"];
 
 type FormState = {
   name: string;

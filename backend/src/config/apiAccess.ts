@@ -4,7 +4,7 @@
  */
 export const API_WRITE_ACCESS = {
   "users.write": ["admin"],
-  "customers.write": ["admin", "coordinator", "estimator"],
+  "customers.write": ["admin", "coordinator", "estimator", "sales"],
   "equipment.write": ["admin", "coordinator", "inventory"],
   "tickets.create": ["admin", "coordinator"],
   "tickets.update": ["admin", "coordinator"],
@@ -24,13 +24,15 @@ export const API_WRITE_ACCESS = {
   "purchaseReturns.write": ["admin", "inventory"],
   "stockTransfers.write": ["admin", "inventory"],
   "amc.write": ["admin", "coordinator", "billing"],
-  "sales.write": ["admin", "coordinator", "estimator"],
+  "sales.write": ["admin", "coordinator", "sales"],
   "sales.fulfill": ["admin", "inventory", "coordinator"],
+  "sales.bill": ["admin", "billing", "sales"],
+  "billing.write": ["admin", "billing", "estimator"],
   "settings.write": ["admin"],
   "taxonomy.write": ["admin", "coordinator", "inventory"],
   "auditLogs.write": ["admin"],
-  "files.upload": ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
-  "notifications.write": ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
+  "files.upload": ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing"],
+  "notifications.write": ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing"],
 } as const;
 
 export type ApiWritePermission = keyof typeof API_WRITE_ACCESS;
@@ -40,6 +42,7 @@ export const ALL_ROLES = [
   "coordinator",
   "inspector",
   "estimator",
+  "sales",
   "engineer",
   "inventory",
   "billing",
@@ -47,6 +50,15 @@ export const ALL_ROLES = [
 ] as const;
 
 export type AppRole = (typeof ALL_ROLES)[number];
+
+export const SALES_DESK_ROLES = ["admin", "coordinator", "sales", "billing", "inventory"] as const;
+export const SALES_WRITE_ROLES = ["admin", "coordinator", "sales"] as const;
+export const SALES_BILL_ROLES = ["admin", "billing", "sales"] as const;
+export const ESTIMATE_READ_ROLES = ["admin", "coordinator", "estimator", "billing", "inspector", "engineer"] as const;
+export const ESTIMATE_WRITE_ROLES = ["admin", "coordinator", "estimator"] as const;
+export const SERVICE_BILLING_ROLES = ["admin", "billing", "estimator"] as const;
+export const CUSTOMER_READ_ROLES = ["admin", "coordinator", "estimator", "sales", "billing"] as const;
+export const CUSTOMER_WRITE_ROLES = ["admin", "coordinator", "estimator", "sales"] as const;
 
 /** Staff who can approve/reject estimates and assign an engineer. */
 export const ESTIMATE_STAFF_APPROVER_ROLES = ["admin", "coordinator"] as const;

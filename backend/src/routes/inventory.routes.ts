@@ -9,7 +9,7 @@ import { stockAdjustmentSchema } from "@/schemas/domain.schema";
 const router = Router();
 router.use(authenticate, resolveTenant);
 
-const canRead = requireRole("admin", "coordinator", "inventory", "engineer", "inspector", "estimator", "billing");
+const canRead = requireRole("admin", "coordinator", "inventory", "engineer", "inspector", "estimator", "sales", "billing");
 const canManage = requireRole("admin", "inventory");
 const canAdjust = requireRole("admin");
 

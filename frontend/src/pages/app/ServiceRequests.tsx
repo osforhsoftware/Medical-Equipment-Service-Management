@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { Plus, AlertCircle, Loader2, X } from "lucide-react";
+import { Plus, AlertCircle, ChevronDown, Loader2, X } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -76,6 +76,7 @@ const columns = [
 ] as const;
 
 const ALL_KANBAN_STATUSES = columns.flatMap((col) => col.statuses).join(",");
+const KANBAN_PAGE_SIZE = 10;
 
 const ASSIGNABLE_ROLES: Role[] = ["coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
 
@@ -110,12 +111,12 @@ function TicketColumn({
 }) {
   const navigate = useNavigate();
   const query = useInfiniteQuery({
-    queryKey: ["service-requests", { statuses: statuses.join(","), overdue: overdueOnly }],
+    queryKey: ["service-requests", { statuses: statuses.join(","), overdue: overdueOnly, limit: KANBAN_PAGE_SIZE }],
     queryFn: ({ pageParam }) =>
       api.listServiceRequests({
         statuses: statuses.join(","),
         page: pageParam,
-        limit: 20,
+        limit: KANBAN_PAGE_SIZE,
         overdue: overdueOnly || undefined,
       }),
     initialPageParam: 1,
@@ -125,17 +126,18 @@ function TicketColumn({
   // Guard against infinite-query page overlap (e.g. non-deterministic ordering on identical timestamps).
   // Keep the first occurrence order stable.
   const itemsDeduped = Array.from(new Map(items.map((it) => [it.id, it])).values());
+  const remaining = Math.max(0, count - itemsDeduped.length);
   const colorClass = STATUS_COLOR[columnKey] ?? STATUS_COLOR[statuses[0] ?? ""] ?? "";
 
   return (
-    <div className="flex min-w-0 flex-col rounded-lg border border-border bg-muted/30 p-3">
-      <div className="mb-3 flex items-center justify-between px-1">
+    <div className="flex max-h-[calc(100vh-14rem)] min-h-0 min-w-0 flex-col rounded-lg border border-border bg-muted/30 p-3">
+      <div className="mb-3 flex shrink-0 items-center justify-between px-1">
         <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${colorClass}`}>{label}</span>
         <span className="rounded-full border border-primary/10 bg-secondary px-2.5 py-0.5 text-xs font-semibold text-primary">
           {count}
         </span>
       </div>
-      <div className="space-y-2">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
         {query.isLoading ? (
           <p className="px-1 py-6 text-center text-xs text-muted-foreground">Loading…</p>
         ) : query.isError ? (
@@ -169,20 +171,24 @@ function TicketColumn({
             );
           })
         )}
-        {query.hasNextPage ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="w-full"
-            onClick={() => void query.fetchNextPage()}
-            disabled={query.isFetchingNextPage}
-          >
-            {query.isFetchingNextPage ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-            Load more
-          </Button>
-        ) : null}
       </div>
+      {query.hasNextPage ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mt-2 h-8 w-full shrink-0 text-xs"
+          onClick={() => void query.fetchNextPage()}
+          disabled={query.isFetchingNextPage}
+        >
+          {query.isFetchingNextPage ? (
+            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <ChevronDown className="mr-1 h-3.5 w-3.5" />
+          )}
+          See more{remaining > 0 ? ` (${remaining})` : ""}
+        </Button>
+      ) : null}
     </div>
   );
 }

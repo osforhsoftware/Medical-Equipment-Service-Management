@@ -972,8 +972,10 @@
   }
 
   .professional-document .doc-sheet {
-    min-height: 0;
-    padding: 6mm 0 10mm;
+    display: block !important;
+    min-height: 0 !important;
+    height: auto !important;
+    padding: 6mm 0 8mm;
   }
 
   .professional-document .doc-header {
@@ -1029,13 +1031,21 @@
   }
 
   .professional-document .doc-footer {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    margin-top: 0;
-    padding: 6px 0 0;
+    position: static !important;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    width: 100%;
+    height: auto !important;
+    min-height: 0 !important;
+    margin-top: 16px;
+    padding: 8px 0 0;
     background: #fff;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .professional-document .doc-page::after {

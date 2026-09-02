@@ -97,8 +97,8 @@ export class ServiceRequestsController {
 
   async assign(req: Request, res: Response, next: NextFunction) {
     try {
-      const { assignedTo, note } = req.body as { assignedTo: string; note?: string };
-      const data = await serviceRequestsService.assign(req.params.id, req.tenantId!, req.user!.userId, assignedTo, note);
+      const { assignedTo, note, role } = req.body as { assignedTo: string; note?: string; role?: string };
+      const data = await serviceRequestsService.assign(req.params.id, req.tenantId!, req.user!.userId, assignedTo, note, role);
       res.json(success("Service request assigned successfully", data));
     } catch (err) { next(err); }
   }

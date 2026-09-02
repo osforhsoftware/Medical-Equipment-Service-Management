@@ -63,9 +63,8 @@ function splitInspectionFindings(raw: string) {
 }
 
 function displayValue(value: unknown) {
-  if (value === null || value === undefined) return "Not Provided";
-  const text = String(value).trim();
-  return text || "Not Provided";
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
 }
 
 export class DocumentsService {
@@ -305,6 +304,10 @@ export class DocumentsService {
     const range = doc.bufferedPageRange();
     for (let i = 0; i < range.count; i += 1) {
       doc.switchToPage(range.start + i);
+      // PDFKit auto-adds a page when text is drawn past margin.bottom. The footer
+      // lives in that margin, so drop it for the stamp or two blank pages appear.
+      const bottomMargin = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
       const y = doc.page.height - 40;
       doc.moveTo(LEFT, y).lineTo(RIGHT, y).strokeColor(RULE).stroke();
       doc.fillColor(MUTED).font("Helvetica").fontSize(8);
@@ -317,6 +320,7 @@ export class DocumentsService {
         align: "right",
         lineBreak: false,
       });
+      doc.page.margins.bottom = bottomMargin;
     }
   }
 
@@ -413,7 +417,7 @@ export class DocumentsService {
 
   private bodyParagraph(doc: PDFKit.PDFDocument, text: string) {
     this.ensureSpace(doc, 24);
-    doc.fillColor(INK).font("Helvetica").fontSize(9).text(text || "Not Provided", {
+    doc.fillColor(INK).font("Helvetica").fontSize(9).text(text || " ", {
       width: WIDTH,
       align: "left",
     });
@@ -715,7 +719,10 @@ export class DocumentsService {
         const eq = sr.equipment;
         equipmentRows.push(
           { label: "Equipment", value: displayValue(eq.name) },
-          { label: "Brand / Model", value: `${displayValue(eq.manufacturer)} · ${displayValue(eq.model)}` },
+          {
+            label: "Brand / Model",
+            value: [displayValue(eq.manufacturer), displayValue(eq.model)].filter(Boolean).join(" · "),
+          },
           { label: "Serial no.", value: displayValue(eq.serialNumber) },
           { label: "Asset ID", value: displayValue(eq.assetTag) },
           { label: "Location", value: displayValue(eq.location) },
@@ -737,7 +744,7 @@ export class DocumentsService {
       this.keyValueRows(doc, equipmentRows);
 
       this.sectionHeading(doc, "Inspection Findings");
-      this.bodyParagraph(doc, split.findings || "Not Provided");
+      this.bodyParagraph(doc, split.findings);
 
       if (split.workDetails) {
         this.sectionHeading(doc, "Work Required");
@@ -745,7 +752,7 @@ export class DocumentsService {
       }
 
       this.sectionHeading(doc, "Recommendations");
-      this.bodyParagraph(doc, report.recommendation || "Not Provided");
+      this.bodyParagraph(doc, report.recommendation);
       if (report.recommendations.length) {
         this.ensureSpace(doc, 30);
         doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(8);

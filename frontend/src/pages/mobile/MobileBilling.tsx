@@ -7,6 +7,7 @@ import { FilterPills } from "@/components/mobile/FilterPills";
 import { WorkflowStatusChip } from "@/components/mobile/WorkflowStatusChip";
 import { useMobilePullRefresh, useMobileUnreadCount } from "@/components/mobile/MobileLayout";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { SERVICE_BILLING_ROLES } from "@/config/roles";
 import { ApiError, api, type BillingQueueKey, type BillingQueueRow } from "@/lib/api";
 import { formatCurrency, formatCurrencyShort, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
@@ -91,7 +92,7 @@ export default function MobileBilling() {
   }, [items]);
 
   return (
-    <RoleGuard roles={["admin", "billing"]}>
+    <RoleGuard roles={SERVICE_BILLING_ROLES}>
       <div className="mobile-page">
         <MobileHeader
           title="Billing"

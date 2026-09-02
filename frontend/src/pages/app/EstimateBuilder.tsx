@@ -25,6 +25,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { ESTIMATE_WRITE_ROLES } from "@/config/roles";
 import {
   ApiError,
   api,
@@ -264,7 +265,7 @@ export default function EstimateBuilder() {
   }
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "estimator"]}>
+    <RoleGuard roles={ESTIMATE_WRITE_ROLES}>
       <div className="space-y-5 pb-24">
         <div className="sticky top-0 z-20 -mx-1 space-y-3 border-b border-border bg-background/95 px-1 py-3 backdrop-blur">
           <Button variant="ghost" size="sm" className="-ml-2 w-fit text-muted-foreground" asChild>

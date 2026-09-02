@@ -79,7 +79,10 @@ function equipmentRows(
   if (equipment.length) {
     return equipment.flatMap((item) => [
       { label: "Equipment", value: displayOrFallback(item.name) },
-      { label: "Brand / Model", value: `${displayOrFallback(item.manufacturer)} · ${displayOrFallback(item.model)}` },
+      {
+        label: "Brand / Model",
+        value: [displayOrFallback(item.manufacturer), displayOrFallback(item.model)].filter(Boolean).join(" · "),
+      },
       { label: "Serial No.", value: displayOrFallback(item.serialNumber) },
       { label: "Asset ID", value: displayOrFallback(item.assetTag) },
       { label: "Location", value: displayOrFallback(item.location) },
@@ -195,7 +198,7 @@ export function InspectionReportDocument({
 
         <Section title="Inspection Findings">
           <p className="doc-text-block whitespace-pre-wrap">
-            {split.findings.trim() || "Not Provided"}
+            {split.findings.trim()}
           </p>
         </Section>
 
@@ -207,7 +210,7 @@ export function InspectionReportDocument({
 
         <Section title="Recommendations">
           <p className="doc-text-block whitespace-pre-wrap">
-            {report.recommendation.trim() || "Not Provided"}
+            {report.recommendation.trim()}
           </p>
           {report.recommendations?.length ? (
             <table className="doc-simple-table mt-3">

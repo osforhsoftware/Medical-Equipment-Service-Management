@@ -74,9 +74,17 @@ function roleQuickActions(role: Role): QuickAction[] {
       ];
     case "estimator":
       return [
+        { label: "Pending Estimates", to: "/app/estimates", icon: FileText },
+        { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList },
+        { label: "Ticket Billing", to: "/app/billing", icon: Receipt },
+        { label: "Notifications", to: "/app/notifications", icon: Bell },
+      ];
+    case "sales":
+      return [
         { label: "Sales Desk", to: "/app/sales", icon: ShoppingCart },
         { label: "New Sale", to: "/app/sales/new", icon: ShoppingCart },
         { label: "Customers", to: "/app/customers", icon: FileText },
+        { label: "Sale Reports", to: "/app/sales", icon: IndianRupee },
         { label: "Notifications", to: "/app/notifications", icon: Bell },
       ];
     case "engineer":
@@ -141,6 +149,13 @@ function overviewCards(role: Role, data: DashboardData) {
         { label: "Approved", value: String(personal.completedThisMonth), icon: CheckCircle2, accent: "success" as const },
         { label: "Unread Alerts", value: String(stats.unreadNotifications), icon: Bell, accent: "accent" as const },
       ];
+    case "sales":
+      return [
+        { label: "Pending Bills", value: String(stats.pendingInvoices), icon: Receipt, accent: "primary" as const },
+        { label: "Overdue Payments", value: String(stats.overdueInvoices), icon: AlertTriangle, accent: "destructive" as const },
+        { label: "Revenue (MTD)", value: stats.revenueMtdLabel, icon: IndianRupee, accent: "success" as const, trend: data.trends.revenue },
+        { label: "Unread Alerts", value: String(stats.unreadNotifications), icon: Bell, accent: "accent" as const },
+      ];
     case "engineer":
       return [
         { label: "Assigned Jobs", value: String(personal.assignedOpen || stats.activeJobs), icon: Wrench, accent: "primary" as const },
@@ -186,6 +201,8 @@ function queueTitle(role: Role) {
       return "Assigned Inspections";
     case "estimator":
       return "Estimate Workload";
+    case "sales":
+      return "Sales Workload";
     case "engineer":
       return "My Assigned Jobs";
     case "inventory":
@@ -383,7 +400,7 @@ export default function Dashboard() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => navigate(data.myQueue[0]?.href ?? actions[0]?.to ?? "/app")}
+              onClick={() => navigate(actions[0]?.to ?? data.myQueue[0]?.href ?? "/app")}
             >
               View all <ArrowRight className="ml-1 h-3.5 w-3.5" />
             </Button>
@@ -513,7 +530,12 @@ export default function Dashboard() {
                 <p className="py-6 text-center text-sm text-muted-foreground">No upcoming scheduled jobs.</p>
               ) : (
                 data.upcomingJobs.map((job) => (
-                  <div key={job.id} className="rounded-lg border border-border p-3">
+                  <button
+                    key={job.id}
+                    type="button"
+                    onClick={() => navigate(job.href)}
+                    className="w-full rounded-lg border border-border p-3 text-left hover:bg-muted/30"
+                  >
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-xs text-muted-foreground">{job.reference}</span>
                       <StatusBadge status={job.status} className="text-[10px]" />
@@ -522,7 +544,7 @@ export default function Dashboard() {
                     <p className="text-xs text-muted-foreground">
                       {job.subtitle} · {formatDate(job.scheduledFor)}
                     </p>
-                  </div>
+                  </button>
                 ))
               )}
             </CardContent>

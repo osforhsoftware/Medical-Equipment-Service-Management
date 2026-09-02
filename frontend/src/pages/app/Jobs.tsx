@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { Plus, Loader2 } from "lucide-react";
+import { Plus, ChevronDown, Loader2 } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -45,6 +45,8 @@ const columns = [
   { status: "completed", label: "Completed" },
 ] as const;
 
+const KANBAN_PAGE_SIZE = 10;
+
 const ASSIGNABLE_JOB_ROLES: Role[] = ["coordinator", "engineer"];
 
 const scheduleSchema = z.object({
@@ -56,21 +58,22 @@ const scheduleSchema = z.object({
 function JobColumn({ status, label }: { status: string; label: string }) {
   const apiStatus = toApiJobStatus(status);
   const query = useInfiniteQuery({
-    queryKey: ["jobs", { status: apiStatus }],
-    queryFn: ({ pageParam }) => api.listJobs({ status: apiStatus, page: pageParam, limit: 20 }),
+    queryKey: ["jobs", { status: apiStatus, limit: KANBAN_PAGE_SIZE }],
+    queryFn: ({ pageParam }) => api.listJobs({ status: apiStatus, page: pageParam, limit: KANBAN_PAGE_SIZE }),
     initialPageParam: 1,
     getNextPageParam: (last) => (last.meta.hasNextPage ? last.meta.page + 1 : undefined),
   });
   const items = query.data?.pages.flatMap((page) => page.data) ?? [];
   const total = query.data?.pages[0]?.meta.total ?? items.length;
+  const remaining = Math.max(0, total - items.length);
 
   return (
-    <div className="flex flex-col rounded-lg border border-border bg-muted/30 p-3">
-      <div className="mb-3 flex items-center justify-between px-1">
+    <div className="flex max-h-[calc(100vh-14rem)] min-h-0 flex-col rounded-lg border border-border bg-muted/30 p-3">
+      <div className="mb-3 flex shrink-0 items-center justify-between px-1">
         <span className="text-sm font-semibold">{label}</span>
         <span className="rounded-full border border-primary/10 bg-secondary px-2.5 py-0.5 text-xs font-semibold text-primary">{total}</span>
       </div>
-      <div className="space-y-2">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
         {query.isLoading ? (
           <p className="px-1 py-6 text-center text-xs text-muted-foreground">Loading…</p>
         ) : items.length === 0 ? (
@@ -90,20 +93,24 @@ function JobColumn({ status, label }: { status: string; label: string }) {
             </Link>
           ))
         )}
-        {query.hasNextPage ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="w-full"
-            onClick={() => void query.fetchNextPage()}
-            disabled={query.isFetchingNextPage}
-          >
-            {query.isFetchingNextPage ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-            Load more
-          </Button>
-        ) : null}
       </div>
+      {query.hasNextPage ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mt-2 h-8 w-full shrink-0 text-xs"
+          onClick={() => void query.fetchNextPage()}
+          disabled={query.isFetchingNextPage}
+        >
+          {query.isFetchingNextPage ? (
+            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <ChevronDown className="mr-1 h-3.5 w-3.5" />
+          )}
+          See more{remaining > 0 ? ` (${remaining})` : ""}
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -128,7 +135,7 @@ export default function Jobs() {
 
   const requestsQuery = useQuery({
     queryKey: ["service-requests", "job-eligible"],
-    queryFn: () => api.listServiceRequests({ statuses: "approval,estimate,inProgress", limit: 100, page: 1 }),
+    queryFn: () => api.listServiceRequests({ statuses: "approval,pending_approval,estimate,inProgress,assigned_engineer", limit: 100, page: 1 }),
     staleTime: 30_000,
   });
   const requests = requestsQuery.data?.data ?? [];

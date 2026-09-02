@@ -7,7 +7,7 @@ import {
   type BackendTimelineEvent,
 } from "@/lib/api";
 
-export function displayOrFallback(value: unknown, fallback = "Not Provided") {
+export function displayOrFallback(value: unknown, fallback = "") {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
   return text || fallback;

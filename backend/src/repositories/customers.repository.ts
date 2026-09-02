@@ -21,6 +21,7 @@ function buildWhere(tenantId: string, filters: Omit<CustomerListFilters, "skip" 
 
   if (filters.search) {
     where.OR = [
+      { reference: searchContains(filters.search) },
       { name: searchContains(filters.search) },
       { contactPerson: searchContains(filters.search) },
       { email: searchContains(filters.search) },

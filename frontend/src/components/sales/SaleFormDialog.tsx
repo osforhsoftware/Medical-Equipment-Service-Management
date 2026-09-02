@@ -25,8 +25,10 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { api, type BackendCustomer, type BackendInventoryItem, type BackendSalesOrder } from "@/lib/api";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { api, type BackendCustomer, type BackendInventoryItem, type BackendSalesOrder, type BackendTaxonomyTerm } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
+import { termLabel } from "@/lib/taxonomy";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +56,55 @@ function sellingPrice(item: BackendInventoryItem) {
 
 function availableStock(item: BackendInventoryItem) {
   return item.available ?? Math.max(0, item.inStock - item.reserved);
+}
+
+const EQUIPMENT_STOCK_PATTERN = /\bequipments?\b|\bmachines?\b/;
+
+function isEquipmentStockItem(
+  item: BackendInventoryItem,
+  inventoryCategories: BackendTaxonomyTerm[],
+  equipmentCategories: BackendTaxonomyTerm[],
+) {
+  const inventoryTerm = inventoryCategories.find(
+    (term) => term.slug === item.category || term.name === item.category,
+  );
+  const categoryText = `${item.category} ${inventoryTerm?.name ?? ""} ${inventoryTerm?.slug ?? ""}`.toLowerCase();
+  const subcategoryText = `${item.subcategory ?? ""}`.toLowerCase();
+  if (EQUIPMENT_STOCK_PATTERN.test(categoryText) || EQUIPMENT_STOCK_PATTERN.test(subcategoryText)) {
+    return true;
+  }
+  const matchesEquipmentTaxonomy = equipmentCategories.some(
+    (term) => term.slug === item.category || term.name === item.category,
+  );
+  const matchesInventoryTaxonomy = inventoryCategories.some(
+    (term) => term.slug === item.category || term.name === item.category,
+  );
+  return matchesEquipmentTaxonomy && !matchesInventoryTaxonomy;
+}
+
+async function listSaleInventoryItems(search?: string) {
+  const first = await api.listInventory({
+    limit: 100,
+    page: 1,
+    search: search || undefined,
+    sortBy: "name",
+    sortOrder: "asc",
+  });
+  const totalPages = Math.min(first.meta.totalPages || 1, search ? 1 : 5);
+  if (totalPages <= 1) return first.data;
+  const rest = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, index) =>
+      api
+        .listInventory({
+          limit: 100,
+          page: index + 2,
+          sortBy: "name",
+          sortOrder: "asc",
+        })
+        .then((result) => result.data),
+    ),
+  );
+  return first.data.concat(...rest);
 }
 
 function lineNet(line: DraftLine) {
@@ -104,6 +155,7 @@ export function SaleFormDialog({
   const [customerOpen, setCustomerOpen] = useState(false);
   const [itemOpen, setItemOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const debouncedItemSearch = useDebouncedValue(itemSearch);
 
   useEffect(() => {
     if (!open) return;
@@ -128,12 +180,26 @@ export function SaleFormDialog({
   });
 
   const inventoryQuery = useQuery({
-    queryKey: ["inventory", "sale-form"],
-    queryFn: () =>
-      api.listInventory({
-        limit: 200,
-        page: 1,
-      }),
+    queryKey: ["inventory", "sale-form", debouncedItemSearch],
+    queryFn: () => listSaleInventoryItems(debouncedItemSearch || undefined),
+    enabled: open,
+  });
+
+  const inventoryCategoriesQuery = useQuery({
+    queryKey: ["taxonomy", "inventory_category"],
+    queryFn: () => api.listTaxonomy({ type: "inventory_category" }),
+    enabled: open,
+  });
+
+  const inventorySubcategoriesQuery = useQuery({
+    queryKey: ["taxonomy", "inventory_subcategory"],
+    queryFn: () => api.listTaxonomy({ type: "inventory_subcategory" }),
+    enabled: open,
+  });
+
+  const equipmentCategoriesQuery = useQuery({
+    queryKey: ["taxonomy", "equipment_category"],
+    queryFn: () => api.listTaxonomy({ type: "equipment_category" }),
     enabled: open,
   });
 
@@ -154,7 +220,16 @@ export function SaleFormDialog({
     return rows;
   }, [customersQuery.data?.data, extraCustomers, initial]);
 
-  const inventory = inventoryQuery.data?.data ?? [];
+  const inventoryCategories = inventoryCategoriesQuery.data ?? [];
+  const inventorySubcategories = inventorySubcategoriesQuery.data ?? [];
+  const equipmentCategories = equipmentCategoriesQuery.data ?? [];
+  const inventory = useMemo(
+    () =>
+      (inventoryQuery.data ?? []).filter(
+        (item) => !isEquipmentStockItem(item, inventoryCategories, equipmentCategories),
+      ),
+    [equipmentCategories, inventoryCategories, inventoryQuery.data],
+  );
   const selectedCustomer = customers.find((c) => c.id === customerId);
   const selectedInventoryIds = useMemo(
     () => new Set(lines.map((line) => line.inventoryItemId).filter(Boolean) as string[]),
@@ -286,7 +361,7 @@ export function SaleFormDialog({
           <DialogHeader>
             <DialogTitle>{mode === "edit" ? "Edit sale" : "New sale"}</DialogTitle>
             <DialogDescription>
-              Choose a customer, pick one or more items, then set quantity and sale price.
+              Choose a customer, pick inventory items (spare parts and stock — not equipment), then set quantity and sale price.
             </DialogDescription>
           </DialogHeader>
 
@@ -340,7 +415,7 @@ export function SaleFormDialog({
                         {customers.map((customer) => (
                           <CommandItem
                             key={customer.id}
-                            value={`${customer.name} ${customer.phone} ${customer.city} ${customer.type}`}
+                            value={`${customer.reference} ${customer.name} ${customer.phone} ${customer.city} ${customer.type}`}
                             onSelect={() => {
                               setCustomerId(customer.id);
                               setCustomerOpen(false);
@@ -355,6 +430,7 @@ export function SaleFormDialog({
                             />
                             <span className="min-w-0 flex-1">
                               <span className="block truncate">{customer.name}</span>
+                              <span className="block truncate text-xs text-muted-foreground">{customer.reference}</span>
                               <span className="block truncate text-xs text-muted-foreground">
                                 {customer.phone || customer.city || customer.type}
                               </span>
@@ -371,7 +447,7 @@ export function SaleFormDialog({
             <div className="grid gap-2">
               <div className="flex items-center justify-between gap-2">
                 <Label>
-                  Items
+                  Inventory items
                   <RequiredMark />
                 </Label>
                 <Button type="button" size="sm" variant="ghost" onClick={addCustomItem}>
@@ -392,8 +468,8 @@ export function SaleFormDialog({
                       {selectedInventoryIds.size
                         ? `${selectedInventoryIds.size} item${selectedInventoryIds.size === 1 ? "" : "s"} selected`
                         : inventoryQuery.isLoading
-                          ? "Loading items…"
-                          : "Select items"}
+                          ? "Loading inventory items…"
+                          : "Select inventory items"}
                     </span>
                     <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
                   </Button>
@@ -403,30 +479,37 @@ export function SaleFormDialog({
                     align="start"
                     style={{ width: "var(--radix-popover-trigger-width)" }}
                   >
-                  <Command>
+                  <Command shouldFilter={!debouncedItemSearch}>
                     <CommandInput
-                      placeholder="Search spare, accessory, or package…"
+                      placeholder="Search inventory items…"
                       value={itemSearch}
                       onValueChange={setItemSearch}
                     />
                     <CommandList>
                       <CommandEmpty>
-                        {inventoryQuery.isLoading ? "Loading…" : "No stock matches."}
+                        {inventoryQuery.isLoading ? "Loading inventory items…" : "No inventory items found."}
                       </CommandEmpty>
-                      <CommandGroup>
+                      <CommandGroup heading="Inventory items">
                         {inventory.map((item) => {
                           const selected = selectedInventoryIds.has(item.id);
+                          const categoryName = termLabel(inventoryCategories, item.category);
+                          const subcategoryName = item.subcategory
+                            ? termLabel(inventorySubcategories, item.subcategory)
+                            : "";
                           return (
                             <CommandItem
                               key={item.id}
-                              value={`${item.name} ${item.sku ?? ""}`}
+                              value={`${item.name} ${item.sku ?? ""} ${categoryName} ${subcategoryName} ${item.supplier ?? ""}`}
                               onSelect={() => toggleInventory(item)}
                             >
                               <Check className={cn("mr-2 h-4 w-4", selected ? "opacity-100" : "opacity-0")} />
                               <span className="min-w-0 flex-1">
-                                <span className="block truncate">{item.name}</span>
+                                <span className="block truncate font-medium">{item.name}</span>
                                 <span className="block truncate font-mono text-[11px] text-muted-foreground">
                                   {item.sku}
+                                  {categoryName && categoryName !== "—" ? ` · ${categoryName}` : ""}
+                                  {subcategoryName && subcategoryName !== "—" ? ` · ${subcategoryName}` : ""}
+                                  {` · ${item.unitOfMeasure ?? "pcs"}`}
                                 </span>
                               </span>
                               <span className="ml-2 shrink-0 text-right text-xs">
@@ -466,7 +549,7 @@ export function SaleFormDialog({
               <Label>Quantity & sale price</Label>
               {lines.length === 0 ? (
                 <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
-                  Select items above, or add a custom item.
+                  Select inventory items above, or add a custom item.
                 </p>
               ) : (
                 <div className="space-y-2">

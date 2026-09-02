@@ -14,6 +14,13 @@ export class EstimatesController {
         customerId: query.customerId,
         createdFrom: query.createdFrom,
         createdTo: query.createdTo,
+        kind: query.kind === "sales" || query.kind === "service"
+          ? query.kind
+          : req.user!.role === "estimator"
+            ? "service"
+            : req.user!.role === "sales"
+              ? "sales"
+              : undefined,
         skip: query.skip,
         take: query.take,
         orderBy: query.orderBy,
@@ -31,7 +38,7 @@ export class EstimatesController {
 
   async create(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await estimatesService.create(req.tenantId!, req.user!.userId, req.body);
+      const data = await estimatesService.create(req.tenantId!, req.user!.userId, req.user!.role, req.body);
       res.status(201).json(success("Estimate created successfully", data));
     } catch (err) { next(err); }
   }

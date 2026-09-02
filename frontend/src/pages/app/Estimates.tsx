@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { ESTIMATE_READ_ROLES, ESTIMATE_WRITE_ROLES } from "@/config/roles";
 import { useAuth } from "@/context/AuthContext";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useListingUrlState } from "@/hooks/useListingUrlState";
@@ -35,8 +36,8 @@ import { cn } from "@/lib/utils";
 
 function useEstimateCount(status?: string) {
   return useQuery({
-    queryKey: ["estimates", "kpi", status ?? "all"],
-    queryFn: () => api.listEstimates({ page: 1, limit: 10, status }),
+    queryKey: ["estimates", "kpi", "service", status ?? "all"],
+    queryFn: () => api.listEstimates({ page: 1, limit: 10, status, kind: "service" }),
     select: (result) => result.meta.total,
     staleTime: 30_000,
   });
@@ -45,7 +46,7 @@ function useEstimateCount(status?: string) {
 export default function Estimates() {
   const navigate = useNavigate();
   const { hasRole } = useAuth();
-  const canBuild = hasRole(["admin", "coordinator", "estimator"]);
+  const canBuild = hasRole(ESTIMATE_WRITE_ROLES);
   const [newOpen, setNewOpen] = useState(false);
   const [moreFilters, setMoreFilters] = useState(false);
   const {
@@ -61,7 +62,7 @@ export default function Estimates() {
 
   const debouncedSearch = useDebouncedValue(search);
   const queryParams = useMemo(
-    () => ({ ...listParams, search: debouncedSearch || undefined }),
+    () => ({ ...listParams, search: debouncedSearch || undefined, kind: "service" as const }),
     [listParams, debouncedSearch],
   );
 
@@ -194,11 +195,11 @@ export default function Estimates() {
   ];
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "estimator", "billing", "inspector", "engineer"]}>
+    <RoleGuard roles={ESTIMATE_READ_ROLES}>
       <div className="space-y-5">
         <PageHeader
-          title="Estimates"
-          description="Manage quotations, approvals and customer estimates"
+          title="Service estimates"
+          description="Quotations for service tickets. Product sales are handled on the Sales floor."
           actions={
             canBuild ? (
               <Button onClick={() => setNewOpen(true)}>

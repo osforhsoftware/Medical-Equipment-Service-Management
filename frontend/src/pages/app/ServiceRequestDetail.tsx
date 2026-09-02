@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { CheckCircle2, ChevronRight, Circle, Loader2, UserCheck } from "lucide-react";
+import { CheckCircle2, ChevronRight, Circle, FileText, Loader2, UserCheck } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -15,10 +15,12 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { ESTIMATE_WRITE_ROLES } from "@/config/roles";
 import { useAuth } from "@/context/AuthContext";
 import {
   api,
@@ -97,7 +99,7 @@ export default function ServiceRequestDetail() {
 
   const canCreate = hasRole(["admin", "coordinator"]);
   const canAssign = hasRole(["admin", "coordinator"]);
-  const canBuildEstimate = hasRole(["admin", "coordinator", "estimator"]);
+  const canBuildEstimate = hasRole(ESTIMATE_WRITE_ROLES);
   const canApproveEstimate = hasRole(["admin", "coordinator"]);
 
   const load = useCallback(async () => {
@@ -141,6 +143,9 @@ export default function ServiceRequestDetail() {
   const currentStepIndex = WORKFLOW_STEPS.findIndex((step) =>
     (step.statuses as readonly string[]).includes(request?.status ?? ""),
   );
+  const isEstimateStage = request?.status === "estimate";
+  const isInspectionStage = request?.status === "inspection";
+  const isApprovalStage = ["approval", "pending_approval"].includes(request?.status ?? "");
 
   const submitWorkflow = async () => {
     if (!request || !workflowStatus) return;
@@ -178,6 +183,7 @@ export default function ServiceRequestDetail() {
     try {
       const updated = await api.assignServiceRequest(request.id, {
         assignedTo: assignTarget!.id,
+        role: assignRole || undefined,
         note: assignNote.trim() || undefined,
       });
       setRequest(updated);
@@ -186,7 +192,12 @@ export default function ServiceRequestDetail() {
       setAssignNote("");
       setAssignRole("");
       assignValidation.reset();
-      toast({ title: "Staff assigned", description: assignTarget!.name });
+      toast({
+        title: "Staff assigned",
+        description: assignRole === "estimator" && request.status === "inspection"
+          ? `${assignTarget!.name} assigned. Ticket moved to Estimate.`
+          : assignTarget!.name,
+      });
       setTimeline(await api.getServiceRequestTimeline(request.id));
     } catch (err) {
       if (!assignValidation.applyApiErrors(err, assignDialogRef.current)) {
@@ -232,6 +243,7 @@ export default function ServiceRequestDetail() {
         meta={request ? [
           { label: "Priority", value: request.priority },
           { label: "Assigned", value: request.assignedName ?? request.assignedTo ?? "Unassigned" },
+          { label: "Estimate staff", value: request.assignedEstimatorName ?? "Unassigned" },
           { label: "SLA due", value: formatDate(request.slaDue) },
         ] : undefined}
         loading={loading}
@@ -269,6 +281,35 @@ export default function ServiceRequestDetail() {
                       );
                     })}
                   </div>
+                  {isEstimateStage && canBuildEstimate ? (
+                    <Alert className="mt-4">
+                      <FileText className="h-4 w-4" />
+                      <AlertTitle>Estimate stage</AlertTitle>
+                      <AlertDescription>
+                        {request.assignedEstimatorName
+                          ? `${request.assignedEstimatorName} should build the quotation, then use Send for Approval to continue to Approval.`
+                          : "Assign Estimate Staff, then build the quotation and send it for approval to continue."}
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {isInspectionStage && canBuildEstimate ? (
+                    <Alert className="mt-4">
+                      <FileText className="h-4 w-4" />
+                      <AlertTitle>Inspection in progress</AlertTitle>
+                      <AlertDescription>
+                        Once the inspection report is submitted, this ticket moves to Estimate. You can prepare the quotation in the estimate builder at any time.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {isApprovalStage && canApproveEstimate ? (
+                    <Alert className="mt-4">
+                      <FileText className="h-4 w-4" />
+                      <AlertTitle>Awaiting approval</AlertTitle>
+                      <AlertDescription>
+                        Review the estimate, assign an engineer, and approve to move this ticket into service.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
                 </DetailSection>
                 <DetailSection title="Ticket details">
                   <DetailInfoGrid
@@ -277,6 +318,9 @@ export default function ServiceRequestDetail() {
                       { label: "Priority", value: request.priority },
                       { label: "Created by", value: request.createdBy },
                       { label: "Assigned to", value: request.assignedName ?? request.assignedTo ?? "Unassigned" },
+                      { label: "Inspection technician", value: request.assignedInspectorName ?? "—" },
+                      { label: "Estimate staff", value: request.assignedEstimatorName ?? "—" },
+                      { label: "Service engineer", value: request.assignedEngineerName ?? "—" },
                       { label: "Created", value: formatDate(request.createdAt) },
                       { label: "SLA due", value: formatDate(request.slaDue) },
                       { label: "Customer", value: request.customerId ? (
@@ -339,6 +383,21 @@ export default function ServiceRequestDetail() {
                   Move to {WORKFLOW_STEPS[currentStepIndex + 1]?.label ?? "Next"}
                 </Button>
               ) : null}
+              {canAssign && isEstimateStage && !request.assignedEstimatorId ? (
+                <Button
+                  variant="brand"
+                  className="w-full"
+                  onClick={() => {
+                    setAssignOpen(true);
+                    setAssignRole("estimator");
+                    setAssignTarget(null);
+                    setAssignNote("");
+                    assignValidation.reset();
+                  }}
+                >
+                  <UserCheck className="mr-1.5 h-4 w-4" /> Assign estimate staff
+                </Button>
+              ) : null}
               {canAssign ? (
                 <Button
                   variant="outline"
@@ -354,9 +413,11 @@ export default function ServiceRequestDetail() {
                   <UserCheck className="mr-1.5 h-4 w-4" /> Assign / Reassign
                 </Button>
               ) : null}
-              {canBuildEstimate && (request.status === "estimate" || request.status === "inspection") ? (
-                <Button asChild variant="outline" className="w-full">
-                  <Link to={`/app/estimates/${request.id}/build`}>Open estimate builder</Link>
+              {canBuildEstimate && (isEstimateStage || isInspectionStage) ? (
+                <Button asChild variant={isEstimateStage ? "brand" : "outline"} className="w-full">
+                  <Link to={`/app/estimates/${request.id}/build`}>
+                    {isEstimateStage ? "Build estimate & send for approval" : "Open estimate builder"}
+                  </Link>
                 </Button>
               ) : null}
               {canApproveEstimate && ["approval", "pending_approval"].includes(request.status) ? (
@@ -486,6 +547,10 @@ export default function ServiceRequestDetail() {
                     <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading staff…
                     </div>
+                  ) : assignStaff.length === 0 ? (
+                    <p className="text-xs text-muted-foreground py-1">
+                      No active {roleLabels[assignRole as Role]} accounts. Add one in Users, or pick this role as an extra role on an existing staff member.
+                    </p>
                   ) : (
                     <Select
                       value={assignTarget?.id ?? ""}

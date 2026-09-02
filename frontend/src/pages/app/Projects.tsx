@@ -58,7 +58,7 @@ export default function Projects() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Projects" description="Job-centred delivery view for staffing, work logs, extras and project expenses." />
+      <PageHeader title="Projects" description="Assign staff to service jobs. Use Service Jobs for work logs, parts, and billing." />
       <DataTable
         mode="server"
         data={jobs}

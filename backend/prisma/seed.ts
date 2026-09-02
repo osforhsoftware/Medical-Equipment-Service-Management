@@ -2,6 +2,7 @@ import { PrismaClient, type UserRole } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 import path from "path";
+import { DEFAULT_RBAC_MATRIX } from "../src/config/defaultRbac";
 import { DEFAULT_TAXONOMY_TERMS, TAXONOMY_TYPES } from "../src/config/taxonomyDefaults";
 
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -90,7 +91,8 @@ async function main() {
     ["admin", "Administrator"],
     ["coordinator", "Service Coordinator"],
     ["inspector", "Inspector"],
-    ["estimator", "Sales / Estimator"],
+    ["estimator", "Estimate Staff"],
+    ["sales", "Sales Staff"],
     ["engineer", "Service Engineer"],
     ["inventory", "Inventory Staff"],
     ["billing", "Billing Staff"],
@@ -163,6 +165,14 @@ async function main() {
       role: "estimator",
       branchKey: "hq",
       color: "280 60% 45%",
+    },
+    {
+      username: "sales1",
+      name: "Noah Adler",
+      email: "noah.adler@mesms.io",
+      role: "sales",
+      branchKey: "hq",
+      color: "25 85% 45%",
     },
     {
       username: "engineer1",
@@ -266,30 +276,7 @@ async function main() {
       tenantId: TENANT_ID,
       supportEmail: "support@mesms.io",
       defaultTaxRate: 8,
-      rbacMatrix: {
-        Dashboard: ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
-        Sales: ["admin", "coordinator", "estimator", "billing"],
-        Customers: ["admin", "coordinator", "estimator", "billing"],
-        Equipment: ["admin", "coordinator", "inspector", "engineer", "inventory"],
-        "Service Requests": ["admin", "coordinator", "inspector", "engineer"],
-        Inspections: ["admin", "coordinator", "inspector"],
-        Estimates: ["admin", "coordinator", "estimator", "billing", "inspector", "engineer"],
-        "Service Jobs": ["admin", "coordinator", "engineer"],
-        Inventory: ["admin", "inventory", "engineer"],
-        Suppliers: ["admin", "inventory"],
-        "Purchase Orders": ["admin", "inventory"],
-        "Purchase Returns": ["admin", "inventory"],
-        "Stock Transfers": ["admin", "inventory"],
-        "Stock Ledger": ["admin", "inventory"],
-        "AMC Contracts": ["admin", "coordinator", "billing"],
-        Billing: ["admin", "billing"],
-        Reports: ["admin", "billing", "coordinator"],
-        Notifications: ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"],
-        "QR Tracking": ["admin", "coordinator", "inspector", "engineer", "inventory"],
-        "Audit Logs": ["admin"],
-        Users: ["admin"],
-        Settings: ["admin"],
-      },
+      rbacMatrix: DEFAULT_RBAC_MATRIX as never,
     },
   });
 
@@ -383,6 +370,13 @@ async function main() {
   ];
 
   const customers: Record<string, { id: string; name: string; branchId: string }> = {};
+  let customerRefSeq = await prisma.customer.count({ where: { tenantId: TENANT_ID } });
+  const customerRefYear = new Date().getFullYear();
+  const nextCustomerRef = () => {
+    customerRefSeq += 1;
+    return `CUST-${customerRefYear}-${String(customerRefSeq).padStart(4, "0")}`;
+  };
+
   for (const c of customerDefs) {
     let customer = await prisma.customer.findFirst({
       where: { tenantId: TENANT_ID, email: c.email },
@@ -391,6 +385,7 @@ async function main() {
       customer = await prisma.customer.create({
         data: {
           tenantId: TENANT_ID,
+          reference: nextCustomerRef(),
           name: c.name,
           type: c.type,
           contactPerson: c.contactPerson,
@@ -1541,7 +1536,7 @@ async function main() {
   console.log("");
   console.log("Admin login — username: medical_equment / password: medical@961");
   console.log("Demo staff  — password for all: demo@123");
-  console.log("  coordinator1, inspector1, estimator1, engineer1, engineer2, inventory1, billing1");
+  console.log("  coordinator1, inspector1, estimator1, sales1, engineer1, engineer2, inventory1, billing1");
   console.log("");
   console.log("Dummy data includes:");
   console.log("  3 branches · 5 customers · 7 equipment · 6 service requests");

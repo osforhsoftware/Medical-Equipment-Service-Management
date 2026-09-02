@@ -34,7 +34,7 @@ export class ServiceTicketWorkflowService {
     tenantId: string,
     actorId: string,
     actorRole: string,
-    input: { estimateId: string; engineerId: string; scheduledFor?: string; note?: string },
+    input: { estimateId: string; engineerId?: string; scheduledFor?: string; note?: string },
   ) {
     await this.assertEstimateApprover(actorId, tenantId, actorRole);
     const sr = await serviceRequestsRepository.findById(id, tenantId);
@@ -55,7 +55,7 @@ export class ServiceTicketWorkflowService {
       id,
       actor?.name ?? actorId,
       "Estimate approved",
-      input.note ?? `Engineer assigned: ${input.engineerId}`,
+      input.note ?? (input.engineerId ? `Engineer assigned: ${input.engineerId}` : "Estimate approved"),
     );
 
     await notificationsService.notifyWorkflowAdvanced(tenantId, sr.reference, "assigned_engineer", actor?.name ?? actorId);

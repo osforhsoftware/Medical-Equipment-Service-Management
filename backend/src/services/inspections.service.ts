@@ -7,6 +7,7 @@ import {
   resolveTicketEventStatus,
 } from "@/services/workflow/serviceTicketStateMachine";
 import { validateInspectionSubmission } from "@/utils/inspectionValidation";
+import { ticketAssignmentService } from "@/services/ticketAssignment.service";
 
 type RecommendedPartInput = {
   inventoryItemId: string;
@@ -147,7 +148,7 @@ export class InspectionsService {
       this.assertInspectionStartAllowed(sr, actorId, actorRole);
     }
 
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       if (fileIds.length) {
         const validFiles = await tx.storedFile.count({
           where: {
@@ -318,6 +319,15 @@ export class InspectionsService {
 
       return { ...saved, partResults: submitting ? partResults : undefined };
     });
+
+    if (submitting) {
+      const ticket = await serviceRequestsRepository.findById(serviceRequestId, tenantId);
+      if (ticket) {
+        await ticketAssignmentService.applyAfterInspectionSubmitted(tenantId, ticket, reportedBy);
+      }
+    }
+
+    return result;
   }
 }
 

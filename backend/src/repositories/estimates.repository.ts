@@ -17,6 +17,7 @@ export interface EstimateListFilters {
   customerId?: string;
   createdFrom?: string;
   createdTo?: string;
+  kind?: "service" | "sales";
   skip: number;
   take: number;
   orderBy: Prisma.EstimateOrderByWithRelationInput;
@@ -27,6 +28,8 @@ function buildWhere(tenantId: string, filters: Omit<EstimateListFilters, "skip" 
     tenantId,
     ...(filters.status ? { status: filters.status as never } : {}),
     ...(filters.customerId ? { customerId: filters.customerId } : {}),
+    ...(filters.kind === "service" ? { serviceRequestId: { not: null } } : {}),
+    ...(filters.kind === "sales" ? { serviceRequestId: null } : {}),
     ...(filters.estimatorId
       ? {
           OR: [

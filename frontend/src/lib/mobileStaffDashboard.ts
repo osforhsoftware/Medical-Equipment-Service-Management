@@ -51,6 +51,13 @@ export function roleQuickActions(role: Role): MobileQuickAction[] {
       return [
         { label: "Estimates", to: "/app/estimates", icon: FileText, primary: true },
         { label: "Tickets", to: "/app/service-tickets", icon: ClipboardList },
+        { label: "Billing", to: "/app/billing", icon: Receipt },
+        { label: "Alerts", to: "/app/notifications", icon: Bell },
+      ];
+    case "sales":
+      return [
+        { label: "Sales", to: "/app/sales", icon: ShoppingCart, primary: true },
+        { label: "New Sale", to: "/app/sales/new", icon: ShoppingCart },
         { label: "Alerts", to: "/app/notifications", icon: Bell },
       ];
     case "engineer":
@@ -108,6 +115,13 @@ export function roleStats(role: Role, data: DashboardData): MobileStat[] {
         { label: "Approved", value: String(personal.completedThisMonth), icon: CheckCircle2, tone: "success" },
         { label: "Alerts", value: String(stats.unreadNotifications), icon: Bell, tone: "accent" },
       ];
+    case "sales":
+      return [
+        { label: "Pending", value: String(stats.pendingInvoices), icon: Receipt, tone: "primary" },
+        { label: "Overdue", value: String(stats.overdueInvoices), icon: AlertTriangle, tone: "destructive" },
+        { label: "Revenue", value: stats.revenueMtdLabel, icon: IndianRupee, tone: "success" },
+        { label: "Alerts", value: String(stats.unreadNotifications), icon: Bell, tone: "accent" },
+      ];
     case "engineer":
       return [
         { label: "Assigned", value: String(personal.assignedOpen || stats.activeJobs), icon: Wrench, tone: "primary", filter: "assigned" },
@@ -150,6 +164,7 @@ export function queueTitle(role: Role): string {
   switch (role) {
     case "inspector": return "Assigned Inspections";
     case "estimator": return "Estimate Workload";
+    case "sales": return "Sales Workload";
     case "engineer": return "My Assigned Work";
     case "inventory": return "Supply Chain Queue";
     case "billing": return "Billing Queue";
@@ -169,7 +184,8 @@ export const PIPELINE_STAGES = [
 
 const FILTER_OPTIONS_BY_ROLE: Partial<Record<Role, string[]>> = {
   inspector: ["all", "assigned", "inspection", "in-progress", "completed"],
-  estimator: ["all", "estimate", "assigned", "completed"],
+  estimator: ["all", "estimate", "assigned", "completed", "billing"],
+  sales: ["all", "billing", "completed"],
   engineer: ["all", "assigned", "in-progress", "completed"],
   billing: ["all", "billing", "completed"],
   inventory: ["all", "assigned", "in-progress"],
@@ -179,6 +195,7 @@ const FILTER_OPTIONS_BY_ROLE: Partial<Record<Role, string[]>> = {
 const PIPELINE_BY_ROLE: Partial<Record<Role, string[]>> = {
   inspector: ["assigned", "inspection", "in-progress", "completed"],
   estimator: ["estimate", "approval", "completed"],
+  sales: ["completed"],
   engineer: ["assigned", "in-progress", "completed"],
   billing: ["completed"],
   inventory: ["assigned", "in-progress"],
@@ -210,6 +227,7 @@ export function rolePrimaryListPath(role: Role): string {
   switch (role) {
     case "inspector": return "/app/inspections";
     case "estimator": return "/app/estimates";
+    case "sales": return "/app/sales";
     case "engineer": return "/app/jobs";
     case "billing": return "/app/billing";
     case "inventory": return "/app/inventory";
@@ -230,6 +248,8 @@ export function roleOverduePath(role: Role): string {
       return "/app/inventory";
     case "estimator":
       return "/app/estimates";
+    case "sales":
+      return "/app/sales";
     default:
       return "/app/service-tickets?filter=overdue";
   }
@@ -244,6 +264,7 @@ const PATH_TO_MODULE: Record<string, string> = {
   "/app/qr-tracking": "QR Tracking",
   "/app/service-tickets": "Service Tickets",
   "/app/estimates": "Estimates",
+  "/app/sales": "Sales",
   "/app/jobs": "Service Jobs",
   "/app/inventory": "Inventory Items",
   "/app/purchase-orders": "Purchase Orders",

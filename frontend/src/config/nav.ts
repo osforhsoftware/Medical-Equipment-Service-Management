@@ -37,18 +37,18 @@ export interface NavItem {
   group: string;
 }
 
-const ALL: Role[] = ["admin", "coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
+const ALL: Role[] = ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing"];
 
 export const navItems: NavItem[] = [
   { label: "Dashboard", to: "/app", icon: LayoutDashboard, roles: ALL, group: "Overview" },
 
-  { label: "Sales", to: "/app/sales", icon: Store, roles: ["admin", "coordinator", "estimator", "billing", "inventory"], group: "Sales" },
-  { label: "Customers", to: "/app/customers", icon: Users, roles: ["admin", "coordinator", "estimator", "billing"], group: "Sales" },
-  { label: "Estimates", to: "/app/estimates", icon: FileText, roles: ["admin", "coordinator", "estimator", "billing", "inspector", "engineer"], group: "Sales" },
+  { label: "Sales", to: "/app/sales", icon: Store, roles: ["admin", "coordinator", "sales", "billing", "inventory"], group: "Sales" },
+  { label: "Customers", to: "/app/customers", icon: Users, roles: ["admin", "coordinator", "estimator", "sales", "billing"], group: "Sales" },
 
   { label: "Equipment", to: "/app/equipment", icon: HardDrive, roles: ["admin", "coordinator", "inspector", "engineer", "inventory"], group: "Operations" },
   { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList, roles: ["admin", "coordinator", "inspector", "engineer", "estimator"], group: "Operations" },
   { label: "Inspections", to: "/app/inspections", icon: Search, roles: ["admin", "coordinator", "inspector"], group: "Operations" },
+  { label: "Estimates", to: "/app/estimates", icon: FileText, roles: ["admin", "coordinator", "estimator", "billing", "inspector", "engineer"], group: "Operations" },
   { label: "Service Jobs", to: "/app/jobs", icon: Wrench, roles: ["admin", "coordinator", "engineer"], group: "Operations" },
   { label: "Projects", to: "/app/projects", icon: FolderKanban, roles: ["admin", "coordinator", "estimator", "engineer"], group: "Operations" },
   { label: "Service Catalog", to: "/app/service-catalog", icon: BookOpen, roles: ["admin", "coordinator", "estimator"], group: "Operations" },
@@ -61,10 +61,10 @@ export const navItems: NavItem[] = [
   { label: "Stock Transfers", to: "/app/stock-transfers", icon: ArrowLeftRight, roles: ["admin", "inventory"], group: "Supply Chain" },
   { label: "Stock Ledger", to: "/app/stock-ledger", icon: History, roles: ["admin", "inventory"], group: "Supply Chain" },
 
-  { label: "Billing", to: "/app/billing", icon: Receipt, roles: ["admin", "billing"], group: "Contracts & Finance" },
+  { label: "Billing", to: "/app/billing", icon: Receipt, roles: ["admin", "billing", "estimator"], group: "Contracts & Finance" },
   { label: "Expenses & Commissions", to: "/app/finance-operations", icon: BadgeIndianRupee, roles: ["admin", "billing"], group: "Contracts & Finance" },
 
-  { label: "Reports", to: "/app/reports", icon: BarChart3, roles: ["admin", "billing", "coordinator"], group: "Insights" },
+  { label: "Reports", to: "/app/reports", icon: BarChart3, roles: ["admin", "billing", "coordinator", "sales"], group: "Insights" },
   { label: "Notifications", to: "/app/notifications", icon: Bell, roles: ALL, group: "Insights" },
   { label: "QR Tracking", to: "/app/qr-tracking", icon: QrCode, roles: ["admin", "coordinator", "inspector", "engineer", "inventory"], group: "Insights" },
   { label: "Audit Logs", to: "/app/audit-logs", icon: ScrollText, roles: ["admin"], group: "Insights" },

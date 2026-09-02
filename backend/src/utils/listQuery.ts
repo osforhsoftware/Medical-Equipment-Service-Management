@@ -38,6 +38,7 @@ export function parseEquipmentListQuery(req: Request) {
 }
 
 const CUSTOMER_SORT_FIELDS = {
+  reference: "reference",
   name: "name",
   city: "city",
   status: "status",
@@ -153,6 +154,7 @@ export function parseEstimateListQuery(req: Request) {
     customerId: parseOptionalFilter(req.query.customerId),
     createdFrom: parseOptionalFilter(req.query.createdFrom),
     createdTo: parseOptionalFilter(req.query.createdTo),
+    kind: parseOptionalFilter(req.query.kind) as "service" | "sales" | undefined,
     orderBy: toOrderBy(sort),
   };
 }

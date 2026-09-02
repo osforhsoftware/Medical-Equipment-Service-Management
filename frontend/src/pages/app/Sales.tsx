@@ -15,6 +15,7 @@ import { StatCard } from "@/components/shared/StatCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { SaleFormDialog } from "@/components/sales/SaleFormDialog";
+import { SALES_BILL_ROLES, SALES_DESK_ROLES, SALES_WRITE_ROLES } from "@/config/roles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -33,8 +34,8 @@ export default function Sales() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasRole } = useAuth();
-  const canBuild = hasRole(["admin", "coordinator", "estimator"]);
-  const canBill = hasRole(["admin", "billing"]);
+  const canBuild = hasRole(SALES_WRITE_ROLES);
+  const canBill = hasRole(SALES_BILL_ROLES);
   const [saleOpen, setSaleOpen] = useState(false);
 
   useEffect(() => {
@@ -64,11 +65,11 @@ export default function Sales() {
   const orders = ordersQuery.data ?? [];
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "estimator", "billing", "inventory"]}>
+    <RoleGuard roles={SALES_DESK_ROLES}>
       <div className="space-y-6">
         <PageHeader
           title="Sales floor"
-          description="Record sold items with a sale price. Quotations stay on Estimates — this desk is the actual deal."
+          description="Product sales, sale reports, and sale billing. Service estimates stay with Estimate Staff."
           actions={
             canBuild ? (
               <Button variant="brand" onClick={() => setSaleOpen(true)}>
@@ -84,9 +85,9 @@ export default function Sales() {
               <Sparkles className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="font-semibold">Counter, not quotation</p>
+              <p className="font-semibold">Product sales desk</p>
               <p className="text-sm text-muted-foreground">
-                Pick any customer, add sold items, edit the sale price, then deliver and invoice.
+                Add sold items, review product sale reports, then create the sale invoice from the order.
               </p>
             </div>
             {canBuild ? (
@@ -286,11 +287,7 @@ export default function Sales() {
             </div>
             {canBill ? (
               <p className="text-xs text-muted-foreground">
-                Outstanding product-sales invoices live in{" "}
-                <Link className="underline" to="/app/billing">
-                  Billing
-                </Link>
-                .
+                Create sale invoices from each order. Service-ticket invoices are billed separately under Billing.
               </p>
             ) : null}
           </TabsContent>

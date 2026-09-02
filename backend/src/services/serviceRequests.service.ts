@@ -3,6 +3,9 @@ import { customersRepository } from "@/repositories/customers.repository";
 import { equipmentRepository } from "@/repositories/equipment.repository";
 import { usersRepository } from "@/repositories/users.repository";
 import { notificationsService } from "@/services/notifications.service";
+import { ticketAssignmentService } from "@/services/ticketAssignment.service";
+import { jobsService } from "@/services/jobs.service";
+import { userHasAnyRoleKey } from "@/utils/userRoles";
 import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
 import { prisma } from "@/db/prisma";
@@ -16,6 +19,7 @@ import {
 
 const ASSIGNABLE_STAFF_ROLES = ["coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
 const ASSIGNMENT_SCOPED_ROLES = ["inspector", "engineer", "inventory", "billing"];
+
 
 type CreateServiceRequestData = {
   customerId: string;
@@ -109,18 +113,61 @@ export class ServiceRequestsService {
   private async enrichServiceRequest(
     tenantId: string,
     record: ServiceRequestRecord,
-  ): Promise<NonNullable<ServiceRequestRecord>> {
+  ): Promise<NonNullable<ServiceRequestRecord> & {
+    assignedInspectorName: string | null;
+    assignedEstimatorName: string | null;
+    assignedEngineerName: string | null;
+  }> {
     if (!record) throw new AppError("Service ticket not found", 404);
-    return this.enrichCreatedBy(tenantId, record);
+    const withCreator = await this.enrichCreatedBy(tenantId, record);
+    const ids = [
+      withCreator.assignedInspectorId,
+      withCreator.assignedEstimatorId,
+      withCreator.assignedEngineerId,
+    ].filter((id): id is string => Boolean(id));
+    const users = ids.length
+      ? await prisma.user.findMany({
+          where: { tenantId, id: { in: ids } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const names = new Map(users.map((user) => [user.id, user.name]));
+    return {
+      ...withCreator,
+      assignedInspectorName: withCreator.assignedInspectorId
+        ? names.get(withCreator.assignedInspectorId) ?? null
+        : null,
+      assignedEstimatorName: withCreator.assignedEstimatorId
+        ? names.get(withCreator.assignedEstimatorId) ?? null
+        : null,
+      assignedEngineerName: withCreator.assignedEngineerId
+        ? names.get(withCreator.assignedEngineerId) ?? null
+        : null,
+    };
   }
 
   private async assertActorAccess(
-    request: { id: string; tenantId: string; assignedTo: string | null; assignedInspectorId?: string | null; assignedEngineerId?: string | null },
+    request: {
+      id: string;
+      tenantId: string;
+      status: string;
+      assignedTo: string | null;
+      assignedInspectorId?: string | null;
+      assignedEstimatorId?: string | null;
+      assignedEngineerId?: string | null;
+    },
     actorId?: string,
     actorRole?: string,
   ) {
     if (!actorId || !actorRole) return;
     if (actorRole === "estimator") {
+      const status = normalizeTicketStatus(request.status);
+      const assignedEstimator = request.assignedEstimatorId;
+      if (assignedEstimator === actorId) return;
+      // Do not treat assignedTo as the estimator — it is usually the inspector/coordinator.
+      if (!assignedEstimator && ["inspection", "estimate", "pending_approval"].includes(status)) {
+        return;
+      }
       const ownedEstimate = await prisma.estimate.findFirst({
         where: {
           tenantId: request.tenantId,
@@ -133,7 +180,7 @@ export class ServiceRequestsService {
         select: { id: true },
       });
       if (!ownedEstimate) {
-        throw new AppError("You can only access service tickets for estimates created by you", 403);
+        throw new AppError("You can only access service tickets assigned to you for estimate work", 403);
       }
       return;
     }
@@ -191,11 +238,17 @@ export class ServiceRequestsService {
     actorRole: string,
     filters: import("@/repositories/serviceRequests.repository").ServiceRequestListFilters,
   ) {
-    const assignedToFilter = ASSIGNMENT_SCOPED_ROLES.includes(actorRole) ? actorId : filters.assignedTo;
+    const assignedToFilter =
+      actorRole === "engineer"
+        ? undefined
+        : ASSIGNMENT_SCOPED_ROLES.includes(actorRole)
+          ? actorId
+          : filters.assignedTo;
     const { data, total } = await serviceRequestsRepository.findPaginated(tenantId, {
       ...filters,
       assignedTo: assignedToFilter,
       estimatorId: actorRole === "estimator" ? actorId : undefined,
+      engineerId: actorRole === "engineer" ? actorId : undefined,
     });
     return { data: await this.enrichCreatedByList(tenantId, data), total };
   }
@@ -207,10 +260,11 @@ export class ServiceRequestsService {
     statuses: string[],
     filters?: { overdue?: boolean; priority?: string; assignee?: string; search?: string },
   ) {
-    const assignedTo = ASSIGNMENT_SCOPED_ROLES.includes(actorRole) ? actorId : undefined;
+    const assignedTo = actorRole === "engineer" ? undefined : ASSIGNMENT_SCOPED_ROLES.includes(actorRole) ? actorId : undefined;
     return serviceRequestsRepository.countByStatus(tenantId, {
       assignedTo,
       estimatorId: actorRole === "estimator" ? actorId : undefined,
+      engineerId: actorRole === "engineer" ? actorId : undefined,
       priority: filters?.priority,
       assignee: filters?.assignee,
       overdue: filters?.overdue,
@@ -219,11 +273,17 @@ export class ServiceRequestsService {
   }
 
   async getAll(tenantId: string, actorId: string, actorRole: string, filters?: { status?: string }) {
-    const assignedToFilter = ASSIGNMENT_SCOPED_ROLES.includes(actorRole) ? actorId : undefined;
+    const assignedToFilter =
+      actorRole === "engineer"
+        ? undefined
+        : ASSIGNMENT_SCOPED_ROLES.includes(actorRole)
+          ? actorId
+          : undefined;
     const rows = await serviceRequestsRepository.findAll(tenantId, {
       ...filters,
       assignedTo: assignedToFilter,
       estimatorId: actorRole === "estimator" ? actorId : undefined,
+      engineerId: actorRole === "engineer" ? actorId : undefined,
     });
     return this.enrichCreatedByList(tenantId, rows);
   }
@@ -287,10 +347,23 @@ export class ServiceRequestsService {
     }
 
     let assignedInspectorId: string | undefined;
-    if (data.assignedTo) {
+    let assignedEstimatorId: string | undefined;
+    if (!data.assignedTo) {
+      const defaultInspector = await ticketAssignmentService.defaultInspectorOnCreate(tenantId);
+      if (defaultInspector) {
+        data.assignedTo = defaultInspector.id;
+        data.assignedName = defaultInspector.name;
+        assignedInspectorId = defaultInspector.id;
+      }
+    } else {
       const assignee = await this.validateAssignee(data.assignedTo, tenantId);
       data.assignedName = assignee.name;
-      if (assignee.role === "inspector") assignedInspectorId = assignee.id;
+      if (await userHasAnyRoleKey(assignee.id, tenantId, assignee.role, ["inspector"])) {
+        assignedInspectorId = assignee.id;
+      }
+      if (await userHasAnyRoleKey(assignee.id, tenantId, assignee.role, ["estimator"])) {
+        assignedEstimatorId = assignee.id;
+      }
     }
 
     const typeOther = data.type === "Other" ? data.typeOther?.trim() || null : null;
@@ -311,6 +384,7 @@ export class ServiceRequestsService {
       assignedTo: data.assignedTo,
       assignedName: data.assignedName,
       assignedInspectorId,
+      assignedEstimatorId,
       slaDue,
     });
 
@@ -381,34 +455,58 @@ export class ServiceRequestsService {
     return updated;
   }
 
-  async assign(id: string, tenantId: string, actorId: string, assignedTo: string, note?: string) {
+  async assign(id: string, tenantId: string, actorId: string, assignedTo: string, note?: string, role?: string) {
     const existing = await this.getById(id, tenantId);
     const actor = await usersRepository.findById(actorId, tenantId);
     const assignee = await this.validateAssignee(assignedTo, tenantId);
+    const assignmentRole = role && ASSIGNABLE_STAFF_ROLES.includes(role) ? role : assignee.role;
+    if (role && !(await userHasAnyRoleKey(assignee.id, tenantId, assignee.role, [assignmentRole]))) {
+      throw new AppError("Selected staff does not have that role", 400);
+    }
 
     const updateData: {
       assignedTo: string;
       assignedName: string;
       assignedInspectorId?: string;
+      assignedEstimatorId?: string;
       assignedEngineerId?: string;
+      status?: string;
     } = {
       assignedTo,
       assignedName: assignee.name,
     };
-    if (assignee.role === "inspector") {
+    if (assignmentRole === "inspector") {
       updateData.assignedInspectorId = assignee.id;
     }
-    if (assignee.role === "engineer") {
+    if (assignmentRole === "estimator") {
+      updateData.assignedEstimatorId = assignee.id;
+      if (normalizeTicketStatus(existing.status) === "inspection") {
+        updateData.status = "estimate";
+      }
+    }
+    const ticketStatus = normalizeTicketStatus(existing.status);
+    const engineerStage = [
+      "pending_approval",
+      "assigned_engineer",
+      "change_pending_approval",
+      "pending_final_approval",
+    ].includes(ticketStatus);
+    const assigneeIsEngineer = await userHasAnyRoleKey(assignee.id, tenantId, assignee.role, ["engineer"]);
+    if (assignmentRole === "engineer" || (engineerStage && assigneeIsEngineer)) {
       updateData.assignedEngineerId = assignee.id;
     }
 
-    await serviceRequestsRepository.update(id, tenantId, updateData);
+    await serviceRequestsRepository.update(id, tenantId, updateData as never);
+
+    if (updateData.assignedEngineerId) {
+      await jobsService.ensureJobForAssignedEngineer(tenantId, id, assignee.id, actorId).catch(() => undefined);
+    }
 
     await serviceRequestsRepository.addTimelineEvent(
       id,
       actor?.name ?? actorId,
       `Assigned to ${assignee.name}`,
-      note,
+      note ?? (updateData.status === "estimate" ? "Estimate staff assigned; ticket moved to Estimate." : undefined),
     );
 
     await notificationsService.notifyAssignment(

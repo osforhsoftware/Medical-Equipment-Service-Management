@@ -111,7 +111,7 @@ export function getApiErrorMessage(
       case 401:
         return "Your session has expired. Please log in again.";
       case 403:
-        return "You don't have permission to perform this action.";
+        return error.message || "You don't have permission to perform this action.";
       case 404:
         return "The requested item was not found.";
       case 409:

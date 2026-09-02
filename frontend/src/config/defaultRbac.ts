@@ -10,6 +10,7 @@ export const RBAC_ROLES: Role[] = [
   "coordinator",
   "inspector",
   "estimator",
+  "sales",
   "engineer",
   "inventory",
   "billing",

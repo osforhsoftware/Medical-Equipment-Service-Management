@@ -5,6 +5,7 @@ const userRoleSchema = z.enum([
   "coordinator",
   "inspector",
   "estimator",
+  "sales",
   "engineer",
   "inventory",
   "billing",

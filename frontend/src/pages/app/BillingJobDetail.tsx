@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { SERVICE_BILLING_ROLES } from "@/config/roles";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -114,7 +115,7 @@ export default function BillingJobDetail() {
   const invoice = context?.invoice ?? null;
 
   return (
-    <RoleGuard roles={["admin", "billing"]}>
+    <RoleGuard roles={SERVICE_BILLING_ROLES}>
       <div className="space-y-6">
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" asChild>
