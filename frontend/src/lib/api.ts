@@ -770,7 +770,11 @@ export interface BackendJobExtra {
 }
 
 export interface CreateJobInput {
-  serviceRequestId: string;
+  serviceRequestId?: string;
+  customerId?: string;
+  equipmentId?: string;
+  type?: string;
+  typeOther?: string | null;
   engineerId: string;
   scheduledFor: string;
   status?: string;

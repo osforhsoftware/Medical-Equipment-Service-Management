@@ -568,10 +568,9 @@ export class ServiceRequestsService {
           status: "completed",
           OR: [{ serviceRequestId: id }, { requestRef: existing.reference }],
         },
-        include: { signature: true },
       });
-      if (!job?.signature) {
-        throw new AppError("Customer sign-off is required before pending final approval", 409);
+      if (!job) {
+        throw new AppError("A completed job is required before pending final approval", 409);
       }
     }
     if (targetStatus === "invoiced") {

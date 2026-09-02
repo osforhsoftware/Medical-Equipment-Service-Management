@@ -478,7 +478,7 @@ export default function JobDetail() {
                         <Link className="text-primary hover:underline normal-case" to={`/app/service-tickets/${job.serviceRequestId}`}>
                           {job.requestRef}
                         </Link>
-                      ) : job.requestRef },
+                      ) : "Not linked" },
                       { label: "Created", value: formatDate(job.createdAt) },
                       { label: "Updated", value: formatDate(job.updatedAt) },
                     ]}

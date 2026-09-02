@@ -1,5 +1,6 @@
 import { jobsRepository } from "@/repositories/jobs.repository";
 import { jobActionsRepository } from "@/repositories/jobActions.repository";
+import { customersRepository } from "@/repositories/customers.repository";
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
 import { usersRepository } from "@/repositories/users.repository";
 import { notificationsService } from "@/services/notifications.service";
@@ -23,7 +24,11 @@ const ASSIGNABLE_JOB_ROLES = ["coordinator", "engineer"];
 const jobSyncInflight = new Map<string, Promise<void>>();
 
 type CreateJobData = {
-  serviceRequestId: string;
+  serviceRequestId?: string;
+  customerId?: string;
+  equipmentId?: string;
+  type?: string;
+  typeOther?: string | null;
   engineerId: string;
   scheduledFor: string;
   status?: string;
@@ -309,11 +314,57 @@ export class JobsService {
   }
 
   async create(tenantId: string, data: CreateJobData, actorId: string) {
-    const sr = await serviceRequestsRepository.findById(data.serviceRequestId, tenantId);
-    if (!sr) throw new AppError("Service request not found", 404);
-
     const assignee = await this.resolveAssignee(data.engineerId, tenantId);
     const reference = await generateReference(tenantId, "JOB", "serviceJob");
+    const ticketId = data.serviceRequestId?.trim();
+
+    if (!ticketId) {
+      const customer = await customersRepository.findById(data.customerId!, tenantId);
+      if (!customer) throw new AppError("Customer not found", 404);
+      const equipment = await prisma.equipment.findFirst({
+        where: { id: data.equipmentId!, tenantId, customerId: customer.id },
+      });
+      if (!equipment) throw new AppError("Equipment not found for this customer", 404);
+
+      return prisma.$transaction(async (tx) => {
+        return tx.serviceJob.create({
+          data: {
+            tenantId,
+            serviceRequestId: null,
+            estimateId: null,
+            customerId: customer.id,
+            equipmentId: equipment.id,
+            reference,
+            requestRef: reference,
+            customerName: customer.name,
+            equipmentName: equipment.name,
+            engineer: assignee.name,
+            engineerId: assignee.id,
+            type: (data.type ?? "Repair") as never,
+            typeOther: data.type === "Other" ? data.typeOther ?? null : null,
+            status: (data.status ?? "scheduled") as never,
+            scheduledFor: new Date(data.scheduledFor),
+            progress: data.progress ?? 0,
+            assignments: {
+              create: {
+                tenantId,
+                userId: assignee.id,
+                role: "engineer",
+                isLead: true,
+                assignedBy: actorId,
+              },
+            },
+            activities: {
+              create: { actor: assignee.name, action: "Job scheduled", note: `Assigned to ${assignee.name}` },
+            },
+          },
+        });
+      });
+    }
+
+    const sr = await serviceRequestsRepository.findById(ticketId, tenantId);
+    if (!sr) throw new AppError("Service request not found", 404);
+
     return prisma.$transaction(async (tx) => {
       const estimate = await tx.estimate.findFirst({
         where: {
@@ -401,8 +452,6 @@ export class JobsService {
     }
 
     if (data.status === "completed" && existing.status !== "completed") {
-      const sig = await prisma.jobSignature.findUnique({ where: { jobId: id } });
-      if (!sig) throw new AppError("Customer sign-off is required before completing the job", 409);
       const updated = await prisma.$transaction(async (tx) => {
         const job = await tx.serviceJob.findFirst({
           where: { id, tenantId },
