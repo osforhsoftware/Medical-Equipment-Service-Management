@@ -29,10 +29,10 @@ import { activeTerms } from "@/lib/taxonomy";
 
 const schema = z.object({
   name: fieldRules.requiredString("Customer name"),
-  type: fieldRules.selectRequired("a customer type"),
+  type: fieldRules.optionalString(),
   contactPerson: fieldRules.optionalString(),
-  phone: fieldRules.phone(true),
-  address: fieldRules.requiredString("Site address"),
+  phone: fieldRules.phone(false),
+  address: fieldRules.optionalString(),
 });
 
 type FormState = {
@@ -70,7 +70,6 @@ export function QuickAddCustomerDialog({
     staleTime: 30_000,
   });
   const activeTypes = activeTerms(typesQuery.data);
-  const defaultType = activeTypes.find((t) => t.slug === "Hospital")?.slug ?? activeTypes[0]?.slug ?? "";
 
   const { errors, shouldShow, reset, validateAll, handleBlur, handleChange, applyApiErrors, clearError } =
     useFormValidation({
@@ -86,7 +85,6 @@ export function QuickAddCustomerDialog({
   const save = async () => {
     const payload = {
       ...form,
-      type: form.type || defaultType,
       contactPerson: form.contactPerson.trim() || form.name.trim(),
     };
     if (!validateAll(payload, undefined, dialogRef.current)) return;
@@ -94,7 +92,7 @@ export function QuickAddCustomerDialog({
     try {
       const created = await api.createCustomer({
         name: payload.name.trim(),
-        type: payload.type,
+        type: payload.type.trim(),
         contactPerson: payload.contactPerson,
         email: "",
         phone: payload.phone.trim(),
@@ -107,7 +105,7 @@ export function QuickAddCustomerDialog({
       await queryClient.invalidateQueries({ queryKey: ["customers"] });
       onCreated(created);
       reset();
-      setForm({ name: "", type: defaultType, contactPerson: "", phone: "", address: "" });
+      setForm({ name: "", type: "", contactPerson: "", phone: "", address: "" });
       onOpenChange(false);
     } catch (err) {
       if (!applyApiErrors(err, dialogRef.current)) {
@@ -149,20 +147,19 @@ export function QuickAddCustomerDialog({
             <FormFieldError message={shouldShow("name") ? errors.name : undefined} />
           </div>
           <div>
-            <Label>
-              Type <RequiredMark />
-            </Label>
+            <Label>Type</Label>
             <Select
-              value={form.type || defaultType}
+              value={form.type || "__none__"}
               onValueChange={(value) => {
                 handleChange("type");
-                set({ type: value });
+                set({ type: value === "__none__" ? "" : value });
               }}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select type" />
+                <SelectValue placeholder="Select type (optional)" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="__none__">Not specified</SelectItem>
                 {activeTypes.map((term) => (
                   <SelectItem key={term.id} value={term.slug}>
                     {term.name}
@@ -173,9 +170,7 @@ export function QuickAddCustomerDialog({
             <FormFieldError message={shouldShow("type") ? errors.type : undefined} />
           </div>
           <div>
-            <Label>
-              Phone <RequiredMark />
-            </Label>
+            <Label>Phone</Label>
             <Input
               value={form.phone}
               onChange={(e) => {
@@ -188,9 +183,7 @@ export function QuickAddCustomerDialog({
             <FormFieldError message={shouldShow("phone") ? errors.phone : undefined} />
           </div>
           <div>
-            <Label>
-              Address <RequiredMark />
-            </Label>
+            <Label>Address</Label>
             <Input
               value={form.address}
               onChange={(e) => {

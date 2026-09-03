@@ -8,7 +8,7 @@ import { inspectionReportSchema } from "@/schemas/serviceRequests.schema";
 const router = Router();
 router.use(authenticate, resolveTenant);
 
-router.get("/:requestId", requireRole("admin", "coordinator", "inspector"), inspectionsController.get);
+router.get("/:requestId", requireRole("admin", "coordinator", "inspector", "estimator", "billing"), inspectionsController.get);
 router.post(
   "/:requestId",
   requireRole("admin", "coordinator", "inspector"),

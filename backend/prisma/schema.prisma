@@ -77,6 +77,14 @@ model TenantSettings {
   lowStockAlerts        Boolean  @default(true) @map("low_stock_alerts")
   autoReserveOnApproval Boolean  @default(true) @map("auto_reserve_on_approval")
   autoGenerateReport    Boolean  @default(true) @map("auto_generate_report")
+  autoAssignInspectorOnCreate           Boolean @default(false) @map("auto_assign_inspector_on_create")
+  autoAssignCoordinatorAfterInspection   Boolean @default(true) @map("auto_assign_coordinator_after_inspection")
+  autoAssignEstimatorAfterInspection     Boolean @default(true) @map("auto_assign_estimator_after_inspection")
+  autoAssignEngineerOnApproval           Boolean @default(false) @map("auto_assign_engineer_on_approval")
+  defaultCoordinatorUserId               String? @map("default_coordinator_user_id")
+  defaultInspectorUserId                 String? @map("default_inspector_user_id")
+  defaultEstimatorUserId                 String? @map("default_estimator_user_id")
+  defaultEngineerUserId                  String? @map("default_engineer_user_id")
   rbacMatrix            Json     @default("{}") @map("rbac_matrix")
   createdAt             DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
@@ -141,6 +149,7 @@ enum UserRole {
   coordinator
   inspector
   estimator
+  sales
   engineer
   inventory
   billing
@@ -211,12 +220,13 @@ model Branch {
 model Customer {
   id             String       @id @default(cuid())
   tenantId       String       @map("tenant_id")
+  reference      String
   name           String
-  type           String
+  type           String       @default("")
   typeOther      String?      @map("type_other")
   contactPerson  String       @map("contact_person")
   email          String
-  phone          String
+  phone          String       @default("")
   address        String       @default("")
   city           String
   country        String       @default("")
@@ -238,6 +248,7 @@ model Customer {
   salesOrders     SalesOrder[]
   referrals       Referral[]
 
+  @@unique([tenantId, reference])
   @@index([tenantId])
   @@index([branchId])
   @@index([tenantId, status])
@@ -375,6 +386,7 @@ model ServiceRequest {
   assignedTo            String?       @map("assigned_to")
   assignedName          String?       @map("assigned_name")
   assignedInspectorId   String?       @map("assigned_inspector_id")
+  assignedEstimatorId   String?       @map("assigned_estimator_id")
   assignedEngineerId    String?       @map("assigned_engineer_id")
   slaDue                DateTime      @map("sla_due")
   createdAt     DateTime      @default(now()) @map("created_at")
@@ -399,6 +411,7 @@ model ServiceRequest {
   @@index([status])
   @@index([assignedTo])
   @@index([assignedInspectorId])
+  @@index([assignedEstimatorId])
   @@index([assignedEngineerId])
   @@map("service_requests")
 }

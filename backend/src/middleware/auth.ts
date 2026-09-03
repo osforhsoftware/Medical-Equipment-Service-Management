@@ -12,6 +12,7 @@ export const STAFF_ROLES = [
   "coordinator",
   "inspector",
   "estimator",
+  "sales",
   "engineer",
   "inventory",
   "billing",

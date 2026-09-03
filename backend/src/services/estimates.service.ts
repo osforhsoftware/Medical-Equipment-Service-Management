@@ -31,11 +31,14 @@ export class EstimatesService {
     return item;
   }
 
-  async create(tenantId: string, actorId: string, data: CreateEstimateData) {
+  async create(tenantId: string, actorId: string, actorRole: string, data: CreateEstimateData) {
     const reference = await generateReference(tenantId, "EST", "estimate");
     const total = (Number(data.laborCost) || 0) + (Number(data.partsCost) || 0);
 
     if (!data.serviceRequestId) {
+      if (actorRole === "estimator") {
+        throw new AppError("Estimate staff can only create quotations for service tickets", 403);
+      }
       const customer = await customersRepository.findById(data.customerId!, tenantId);
       if (!customer) throw new AppError("Customer not found", 404);
 
@@ -63,6 +66,10 @@ export class EstimatesService {
         status: "draft",
         validUntil: new Date(data.validUntil),
       });
+    }
+
+    if (actorRole === "sales") {
+      throw new AppError("Sales staff record product sales from the sales desk, not service estimates", 403);
     }
 
     const sr = await serviceRequestsRepository.findById(data.serviceRequestId, tenantId);

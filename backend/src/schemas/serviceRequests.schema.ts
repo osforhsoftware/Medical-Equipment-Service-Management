@@ -52,6 +52,7 @@ export const updateServiceRequestSchema = z.object({
 
 export const assignServiceRequestSchema = z.object({
   assignedTo: z.string().min(1, "Staff user ID is required"),
+  role: z.enum(["coordinator", "inspector", "estimator", "engineer", "inventory", "billing"]).optional(),
   note: z.string().trim().max(500).optional(),
 });
 
@@ -80,7 +81,7 @@ export const reopenServiceRequestSchema = z.object({
 
 export const approveEstimateSchema = z.object({
   estimateId: z.string().cuid(),
-  engineerId: z.string().cuid(),
+  engineerId: z.string().cuid().optional(),
   scheduledFor: z.coerce.date().optional(),
   note: z.string().trim().max(5000).optional(),
 });

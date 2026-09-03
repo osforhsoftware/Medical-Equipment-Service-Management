@@ -6,6 +6,7 @@ export type Role =
   | "coordinator"
   | "inspector"
   | "estimator"
+  | "sales"
   | "engineer"
   | "inventory"
   | "billing"

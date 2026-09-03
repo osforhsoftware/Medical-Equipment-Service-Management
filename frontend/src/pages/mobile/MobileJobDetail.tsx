@@ -417,7 +417,7 @@ export default function MobileJobDetail() {
               </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Request Reference</dt>
-                <dd className="font-mono text-sm">{job.requestRef}</dd>
+                <dd className="font-mono text-sm">{job.serviceRequestId ? job.requestRef : "Not linked"}</dd>
               </div>
             </dl>
           </CollapsibleSection>

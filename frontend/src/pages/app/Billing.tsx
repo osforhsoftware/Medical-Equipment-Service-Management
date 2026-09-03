@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { SERVICE_BILLING_ROLES } from "@/config/roles";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import { api, type BackendInvoice } from "@/lib/api";
@@ -174,7 +175,7 @@ export default function Billing() {
   ];
 
   return (
-    <RoleGuard roles={["admin", "billing"]}>
+    <RoleGuard roles={SERVICE_BILLING_ROLES}>
       <div className="space-y-6">
         <PageHeader
           title="Billing & Invoicing"

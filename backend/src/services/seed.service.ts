@@ -1,7 +1,9 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "@/db/prisma";
 import { env } from "@/config/env";
+import { deleteInventoryDependencies } from "@/services/databaseCleanup.service";
 import { taxonomyService } from "@/services/taxonomy.service";
+import { generateReference } from "@/utils/reference";
 import {
   DEMO_AUDIT_LOGS,
   DEMO_BRANCHES,
@@ -167,9 +169,11 @@ export class SeedService {
       }
 
       for (const customer of DEMO_CUSTOMERS) {
+        const reference = await generateReference(tenantId, "CUST", "customer");
         const created = await tx.customer.create({
           data: {
             tenantId,
+            reference,
             name: customer.name,
             type: customer.type,
             contactPerson: customer.contactPerson,
@@ -441,6 +445,13 @@ export class SeedService {
       })
     ).map((c) => c.id);
 
+    const demoInventoryIds = (
+      await prisma.inventoryItem.findMany({
+        where: { tenantId, sku: { startsWith: DEMO_PREFIX } },
+        select: { id: true },
+      })
+    ).map((item) => item.id);
+
     await prisma.$transaction(async (tx) => {
       if (demoJobIds.length > 0) {
         await tx.jobActivity.deleteMany({ where: { jobId: { in: demoJobIds } } });
@@ -460,9 +471,22 @@ export class SeedService {
 
       await tx.estimate.deleteMany({ where: { tenantId, reference: { startsWith: DEMO_PREFIX } } });
       await tx.invoice.deleteMany({ where: { tenantId, reference: { startsWith: DEMO_PREFIX } } });
-      await tx.inventoryItem.deleteMany({ where: { tenantId, sku: { startsWith: DEMO_PREFIX } } });
-      await tx.purchaseOrder.deleteMany({ where: { tenantId, reference: { startsWith: DEMO_PREFIX } } });
-      await tx.stockTransfer.deleteMany({ where: { tenantId, reference: { startsWith: DEMO_PREFIX } } });
+
+      if (demoInventoryIds.length > 0) {
+        await deleteInventoryDependencies(tx, tenantId, {
+          inventoryItemIds: demoInventoryIds,
+          purchaseOrderWhere: { tenantId, reference: { startsWith: DEMO_PREFIX } },
+          stockTransferWhere: { tenantId, reference: { startsWith: DEMO_PREFIX } },
+        });
+      } else {
+        await tx.purchaseOrder.deleteMany({
+          where: { tenantId, reference: { startsWith: DEMO_PREFIX } },
+        });
+        await tx.stockTransfer.deleteMany({
+          where: { tenantId, reference: { startsWith: DEMO_PREFIX } },
+        });
+      }
+
       await tx.equipment.deleteMany({ where: { tenantId, assetTag: { startsWith: DEMO_PREFIX } } });
 
       if (demoCustomerIds.length > 0) {

@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Loader2, Printer } from "lucide-react";
 import { ProfessionalDocument } from "@/components/shared/ProfessionalDocument";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { ESTIMATE_READ_ROLES } from "@/config/roles";
 import { Button } from "@/components/ui/button";
 import { ApiError, api, type BackendEstimate } from "@/lib/api";
 import { estimateToDocumentLines } from "@/lib/estimates";
@@ -124,5 +125,5 @@ export default function EstimatePreview() {
   );
 
   if (isPortal) return body;
-  return <RoleGuard roles={["admin", "coordinator", "estimator", "billing", "inspector", "engineer"]}>{body}</RoleGuard>;
+  return <RoleGuard roles={ESTIMATE_READ_ROLES}>{body}</RoleGuard>;
 }

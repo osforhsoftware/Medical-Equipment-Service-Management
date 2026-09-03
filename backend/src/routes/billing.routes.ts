@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { billingController } from "@/controllers/billing.controller";
+import { SERVICE_BILLING_ROLES } from "@/config/apiAccess";
 import { authenticate, requireRole } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
 import { validate } from "@/middleware/validate";
@@ -7,7 +8,7 @@ import { createInvoiceSchema, updateInvoiceSchema } from "@/schemas/billing.sche
 
 const router = Router();
 router.use(authenticate, resolveTenant);
-router.use(requireRole("admin", "billing"));
+router.use(requireRole(...SERVICE_BILLING_ROLES));
 
 router.get("/queue", billingController.getQueue);
 router.get("/jobs/:jobId/context", billingController.getJobContext);

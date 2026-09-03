@@ -162,6 +162,7 @@ export interface BackendBranch {
 export interface BackendCustomer {
   id: string;
   tenantId: string;
+  reference: string;
   name: string;
   type: string;
   typeOther?: string | null;
@@ -183,12 +184,12 @@ export interface BackendCustomer {
 
 export interface CreateCustomerInput {
   name: string;
-  type: string;
+  type?: string;
   typeOther?: string | null;
   contactPerson: string;
   email: string;
-  phone: string;
-  address: string;
+  phone?: string;
+  address?: string;
   city: string;
   country: string;
   licenseGst?: string | null;
@@ -305,12 +306,20 @@ export interface BackendInspectionReport {
   findings: string;
   recommendation: string;
   severity: string;
+  machineCondition?: string | null;
+  errorCodes?: unknown;
+  checklist?: unknown;
+  measurements?: unknown;
+  calibrationStatus?: string | null;
+  technicianRemarks?: string | null;
   reportedBy: string;
   reportedAt: string;
   submittedAt?: string | null;
   version?: number;
+  createdAt?: string;
+  updatedAt?: string;
   recommendations?: BackendInspectionRecommendation[];
-  attachments?: { id: string; fileId: string; caption?: string | null; kind: string; file?: { id: string; originalName: string } }[];
+  attachments?: { id: string; fileId: string; caption?: string | null; kind: string; createdAt?: string; file?: { id: string; originalName: string } }[];
 }
 
 export interface BackendServiceRequest {
@@ -331,7 +340,11 @@ export interface BackendServiceRequest {
   assignedTo: string | null;
   assignedName: string | null;
   assignedInspectorId?: string | null;
+  assignedEstimatorId?: string | null;
   assignedEngineerId?: string | null;
+  assignedInspectorName?: string | null;
+  assignedEstimatorName?: string | null;
+  assignedEngineerName?: string | null;
   slaDue: string;
   createdAt: string;
   updatedAt: string;
@@ -372,6 +385,7 @@ export interface UpdateServiceRequestInput {
 
 export interface AssignServiceRequestInput {
   assignedTo: string;
+  role?: string;
   note?: string;
 }
 
@@ -756,7 +770,11 @@ export interface BackendJobExtra {
 }
 
 export interface CreateJobInput {
-  serviceRequestId: string;
+  serviceRequestId?: string;
+  customerId?: string;
+  equipmentId?: string;
+  type?: string;
+  typeOther?: string | null;
   engineerId: string;
   scheduledFor: string;
   status?: string;
@@ -991,24 +1009,41 @@ export interface BackendSettings {
   tenantId: string;
   companyName: string;
   supportEmail: string;
+  logoFileId?: string | null;
   logoUrl?: string | null;
   defaultTaxRate: number;
   amcRenewalReminders: boolean;
   lowStockAlerts: boolean;
   autoReserveOnApproval: boolean;
   autoGenerateReport: boolean;
+  autoAssignInspectorOnCreate: boolean;
+  autoAssignCoordinatorAfterInspection: boolean;
+  autoAssignEstimatorAfterInspection: boolean;
+  autoAssignEngineerOnApproval: boolean;
+  defaultCoordinatorUserId: string | null;
+  defaultInspectorUserId: string | null;
+  defaultEstimatorUserId: string | null;
+  defaultEngineerUserId: string | null;
   rbacMatrix: Record<string, string[]>;
 }
 
 export interface UpdateSettingsInput {
   companyName?: string;
   supportEmail?: string;
-  logoUrl?: string | null;
+  logoFileId?: string | null;
   defaultTaxRate?: number;
   amcRenewalReminders?: boolean;
   lowStockAlerts?: boolean;
   autoReserveOnApproval?: boolean;
   autoGenerateReport?: boolean;
+  autoAssignInspectorOnCreate?: boolean;
+  autoAssignCoordinatorAfterInspection?: boolean;
+  autoAssignEstimatorAfterInspection?: boolean;
+  autoAssignEngineerOnApproval?: boolean;
+  defaultCoordinatorUserId?: string | null;
+  defaultInspectorUserId?: string | null;
+  defaultEstimatorUserId?: string | null;
+  defaultEngineerUserId?: string | null;
   rbacMatrix?: Record<string, string[]>;
 }
 
@@ -1421,6 +1456,9 @@ export const api = {
   getCustomer: (id: string) =>
     request<BackendCustomer>(`/api/customers/${id}`),
 
+  previewCustomerReference: () =>
+    request<{ reference: string }>("/api/customers/next-reference"),
+
   createCustomer: (data: CreateCustomerInput) =>
     request<BackendCustomer>("/api/customers", {
       method: "POST",
@@ -1733,7 +1771,7 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
-  generateDocument: (kind: "estimate" | "invoice" | "service-report", id: string) =>
+  generateDocument: (kind: "estimate" | "invoice" | "service-report" | "inspection-report", id: string) =>
     request<{ document: { id: string; fileId: string }; file: { id: string }; downloadUrl: string; reference: string }>(
       `/api/domain/documents/${kind}/${id}`,
       { method: "POST", body: JSON.stringify({}) },

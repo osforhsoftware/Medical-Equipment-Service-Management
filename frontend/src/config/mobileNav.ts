@@ -7,6 +7,7 @@ import {
   QrCode,
   Receipt,
   Search,
+  Store,
   User,
   Wrench,
   type LucideIcon,
@@ -27,6 +28,7 @@ export const MOBILE_NAV_TABS: MobileNavTab[] = [
   { id: "jobs", label: "Jobs", icon: Wrench, to: "/app/jobs", module: "Service Jobs" },
   { id: "inspections", label: "Inspect", icon: Search, to: "/app/inspections", module: "Inspections" },
   { id: "estimates", label: "Estimates", icon: FileText, to: "/app/estimates", module: "Estimates" },
+  { id: "sales", label: "Sales", icon: Store, to: "/app/sales", module: "Sales" },
   { id: "inventory", label: "Stock", icon: Boxes, to: "/app/inventory", module: "Inventory Items" },
   { id: "billing", label: "Billing", icon: Receipt, to: "/app/billing", module: "Billing" },
   { id: "tickets", label: "Tickets", icon: ClipboardList, to: "/app/service-tickets", module: "Service Tickets" },
@@ -40,7 +42,8 @@ const MOBILE_NAV_ORDER: Record<Role, string[]> = {
   admin: ["home", "jobs", "alerts", "billing", "profile"],
   coordinator: ["home", "jobs", "tickets", "alerts", "profile"],
   inspector: ["home", "inspections", "scan", "alerts", "profile"],
-  estimator: ["home", "estimates", "tickets", "alerts", "profile"],
+  estimator: ["home", "estimates", "billing", "tickets", "profile"],
+  sales: ["home", "sales", "alerts", "profile"],
   engineer: ["home", "jobs", "scan", "alerts", "profile"],
   inventory: ["home", "inventory", "scan", "alerts", "profile"],
   billing: ["home", "billing", "estimates", "alerts", "profile"],
@@ -87,6 +90,7 @@ export function isMobileTabActive(pathname: string, tabTo: string): boolean {
   if (tabTo === "/app/jobs") return pathname.startsWith("/app/jobs");
   if (tabTo === "/app/inspections") return pathname.startsWith("/app/inspections");
   if (tabTo === "/app/billing") return pathname.startsWith("/app/billing");
+  if (tabTo === "/app/sales") return pathname.startsWith("/app/sales");
   if (tabTo === "/app/notifications") return pathname.startsWith("/app/notifications");
   return pathname.startsWith(tabTo);
 }

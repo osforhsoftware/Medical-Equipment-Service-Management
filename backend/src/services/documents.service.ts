@@ -4,7 +4,7 @@ import { AppError } from "@/middleware/errorHandler";
 import { fileStorageService } from "@/services/fileStorage.service";
 import { BILLING_CHARGE_GROUPS, chargeGroupForType, lineAmount } from "@/utils/invoiceCharges";
 
-type DocumentKind = "estimate" | "invoice" | "service-report";
+type DocumentKind = "estimate" | "invoice" | "service-report" | "inspection-report";
 
 const INK = "#0f172a";
 const MUTED = "#64748b";
@@ -37,6 +37,34 @@ async function toBuffer(doc: PDFKit.PDFDocument): Promise<Buffer> {
 
 function fmtDate(value: Date) {
   return value.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function fmtDateTime(value: Date) {
+  return value.toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+const WORK_DETAILS_MARKER = "\n\nWork details:\n";
+
+function splitInspectionFindings(raw: string) {
+  const idx = raw.indexOf(WORK_DETAILS_MARKER);
+  if (idx >= 0) {
+    return {
+      findings: raw.slice(0, idx).trim(),
+      workDetails: raw.slice(idx + WORK_DETAILS_MARKER.length).trim(),
+    };
+  }
+  return { findings: raw.trim(), workDetails: "" };
+}
+
+function displayValue(value: unknown) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
 }
 
 export class DocumentsService {
@@ -276,6 +304,10 @@ export class DocumentsService {
     const range = doc.bufferedPageRange();
     for (let i = 0; i < range.count; i += 1) {
       doc.switchToPage(range.start + i);
+      // PDFKit auto-adds a page when text is drawn past margin.bottom. The footer
+      // lives in that margin, so drop it for the stamp or two blank pages appear.
+      const bottomMargin = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
       const y = doc.page.height - 40;
       doc.moveTo(LEFT, y).lineTo(RIGHT, y).strokeColor(RULE).stroke();
       doc.fillColor(MUTED).font("Helvetica").fontSize(8);
@@ -288,26 +320,224 @@ export class DocumentsService {
         align: "right",
         lineBreak: false,
       });
+      doc.page.margins.bottom = bottomMargin;
     }
   }
 
   private signatures(doc: PDFKit.PDFDocument, company: string) {
-    if (doc.y > 640) doc.addPage();
-    const y = doc.y + 18;
-    const colW = (WIDTH - 40) / 2;
-    const rightX = LEFT + colW + 40;
+    const blockHeight = 76;
+    this.ensureSpace(doc, blockHeight);
+    const startY = doc.y + 6;
+    const colGap = 40;
+    const colW = (WIDTH - colGap) / 2;
+    const rightX = LEFT + colW + colGap;
+    const lineY = startY + 48;
+
     doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(8);
-    doc.text("AUTHORIZED SIGNATURE", LEFT, y, { width: colW });
-    doc.text("CUSTOMER ACKNOWLEDGEMENT", rightX, y, { width: colW });
-    doc.moveTo(LEFT, y + 44).lineTo(LEFT + colW, y + 44).strokeColor(RULE_STRONG).stroke();
-    doc.moveTo(rightX, y + 44).lineTo(rightX + colW, y + 44).stroke();
+    doc.text("AUTHORIZED SIGNATURE", LEFT, startY, { width: colW, lineBreak: false });
+    doc.text("CUSTOMER ACKNOWLEDGEMENT", rightX, startY, { width: colW, lineBreak: false });
+
+    doc.strokeColor(RULE_STRONG).lineWidth(0.75);
+    doc.moveTo(LEFT, lineY).lineTo(LEFT + colW, lineY).stroke();
+    doc.moveTo(rightX, lineY).lineTo(rightX + colW, lineY).stroke();
+
     doc.fillColor(MUTED).font("Helvetica").fontSize(9);
-    doc.text(company, LEFT, y + 50, { width: colW });
-    doc.text("Customer Signature", rightX, y + 50, { width: colW });
-    doc.y = y + 72;
+    doc.text(company, LEFT, lineY + 6, { width: colW, lineBreak: false });
+    doc.text("Customer Signature", rightX, lineY + 6, { width: colW, lineBreak: false });
+
+    doc.y = lineY + 24;
   }
 
-  async generate(tenantId: string, actorId: string, kind: DocumentKind, entityId: string) {
+  private inspectionSignatures(doc: PDFKit.PDFDocument, inspectorName: string, company: string) {
+    const blockHeight = 76;
+    this.ensureSpace(doc, blockHeight);
+    const startY = doc.y + 6;
+    const colGap = 40;
+    const colW = (WIDTH - colGap) / 2;
+    const rightX = LEFT + colW + colGap;
+    const lineY = startY + 48;
+
+    doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(8);
+    doc.text("INSPECTOR SIGNATURE", LEFT, startY, { width: colW, lineBreak: false });
+    doc.text("APPROVAL SIGNATURE", rightX, startY, { width: colW, lineBreak: false });
+
+    doc.strokeColor(RULE_STRONG).lineWidth(0.75);
+    doc.moveTo(LEFT, lineY).lineTo(LEFT + colW, lineY).stroke();
+    doc.moveTo(rightX, lineY).lineTo(rightX + colW, lineY).stroke();
+
+    doc.fillColor(MUTED).font("Helvetica").fontSize(9);
+    doc.text(inspectorName, LEFT, lineY + 6, { width: colW, lineBreak: false });
+    doc.text(company, rightX, lineY + 6, { width: colW, lineBreak: false });
+
+    doc.y = lineY + 24;
+  }
+
+  private ensureSpace(doc: PDFKit.PDFDocument, needed = 40) {
+    if (doc.y + needed > PAGE_BOTTOM) doc.addPage();
+  }
+
+  private sectionHeading(doc: PDFKit.PDFDocument, title: string) {
+    this.ensureSpace(doc, 36);
+    doc.fillColor(ACCENT).font("Helvetica-Bold").fontSize(9).text(title.toUpperCase(), LEFT, doc.y);
+    doc.moveDown(0.3);
+    doc.moveTo(LEFT, doc.y).lineTo(RIGHT, doc.y).lineWidth(0.5).strokeColor(RULE).stroke();
+    doc.moveDown(0.6);
+    doc.fillColor(INK);
+  }
+
+  private keyValueRows(
+    doc: PDFKit.PDFDocument,
+    rows: Array<{ label: string; value: string }>,
+    columns = 2,
+  ) {
+    const colW = WIDTH / columns;
+    let col = 0;
+    let rowY = doc.y;
+    for (const row of rows) {
+      if (col === 0) {
+        this.ensureSpace(doc, 28);
+        rowY = doc.y;
+      }
+      const x = LEFT + col * colW;
+      doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(7.5).text(row.label.toUpperCase(), x, rowY, {
+        width: colW - 12,
+      });
+      doc.fillColor(INK).font("Helvetica").fontSize(9).text(row.value, x, rowY + 11, {
+        width: colW - 12,
+      });
+      col += 1;
+      if (col >= columns) {
+        col = 0;
+        doc.y = rowY + 30;
+      }
+    }
+    if (col !== 0) doc.y = rowY + 30;
+    doc.moveDown(0.4);
+  }
+
+  private bodyParagraph(doc: PDFKit.PDFDocument, text: string) {
+    this.ensureSpace(doc, 24);
+    doc.fillColor(INK).font("Helvetica").fontSize(9).text(text || " ", {
+      width: WIDTH,
+      align: "left",
+    });
+    doc.moveDown(0.5);
+  }
+
+  private severityBanner(doc: PDFKit.PDFDocument, severity: string) {
+    this.ensureSpace(doc, 34);
+    const colors: Record<string, string> = {
+      low: "#64748b",
+      medium: "#1657a8",
+      high: "#d97706",
+      critical: "#dc2626",
+    };
+    const color = colors[severity.toLowerCase()] ?? INK;
+    doc.save();
+    doc.rect(LEFT, doc.y, WIDTH, 24).fill("#f8fafc");
+    doc.restore();
+    doc.fillColor(color).font("Helvetica-Bold").fontSize(12).text(
+      severity.toUpperCase(),
+      LEFT + 10,
+      doc.y + 7,
+      { width: WIDTH - 20 },
+    );
+    doc.y += 30;
+    doc.fillColor(INK);
+  }
+
+  private async drawInspectionPhotos(
+    doc: PDFKit.PDFDocument,
+    tenantId: string,
+    actorId: string,
+    actorRole: string,
+    attachments: Array<{ fileId: string; caption?: string | null; file?: { originalName: string } }>,
+  ) {
+    if (!attachments.length) return;
+
+    const perRow = 2;
+    const gap = 14;
+    const cellW = (WIDTH - gap * (perRow - 1)) / perRow;
+    const imgH = 120;
+    const captionArea = 28;
+    const rowGap = 12;
+
+    for (let i = 0; i < attachments.length; i += perRow) {
+      const batch = attachments.slice(i, i + perRow);
+      const rowHeight = imgH + captionArea + rowGap;
+      this.ensureSpace(doc, rowHeight);
+      const rowY = doc.y;
+
+      for (let col = 0; col < batch.length; col += 1) {
+        const att = batch[col];
+        const x = LEFT + col * (cellW + gap);
+
+        doc.save();
+        doc.rect(x, rowY, cellW, imgH).strokeColor(RULE).lineWidth(0.5).stroke();
+        doc.restore();
+
+        const padding = 5;
+        try {
+          const { buffer } = await fileStorageService.download(tenantId, att.fileId, actorId, actorRole);
+          doc.image(buffer, x + padding, rowY + padding, {
+            fit: [cellW - padding * 2, imgH - padding * 2],
+            align: "center",
+            valign: "center",
+          });
+        } catch {
+          doc.fillColor(MUTED).font("Helvetica").fontSize(8).text("Image unavailable", x, rowY + imgH / 2 - 4, {
+            width: cellW,
+            align: "center",
+            lineBreak: false,
+          });
+        }
+
+        const caption = att.caption?.trim() || att.file?.originalName || "";
+        doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(6.5).text("COMMENT", x, rowY + imgH + 4, {
+          width: cellW,
+          align: "left",
+          lineBreak: false,
+        });
+        doc.fillColor(MUTED).font("Helvetica").fontSize(7.5).text(caption || "No comment provided", x, rowY + imgH + 13, {
+          width: cellW,
+          align: "left",
+          lineGap: 0,
+        });
+      }
+
+      doc.y = rowY + rowHeight;
+    }
+
+    doc.moveDown(0.2);
+    doc.fillColor(INK);
+  }
+
+  private renderJsonFields(doc: PDFKit.PDFDocument, label: string, value: unknown) {
+    if (!value || (typeof value === "object" && !Array.isArray(value) && !Object.keys(value as object).length)) {
+      return;
+    }
+    this.sectionHeading(doc, label);
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        this.bodyParagraph(doc, typeof item === "string" ? item : JSON.stringify(item));
+      }
+      return;
+    }
+    if (typeof value === "object") {
+      const entries = Object.entries(value as Record<string, unknown>);
+      this.keyValueRows(
+        doc,
+        entries.map(([key, val]) => ({
+          label: key.replace(/_/g, " "),
+          value: displayValue(val),
+        })),
+      );
+      return;
+    }
+    this.bodyParagraph(doc, displayValue(value));
+  }
+
+  async generate(tenantId: string, actorId: string, kind: DocumentKind, entityId: string, actorRole = "admin") {
     const doc = new PDFDocument({
       size: "A4",
       margins: { top: 56, bottom: 56, left: 50, right: 50 },
@@ -402,7 +632,7 @@ export class DocumentsService {
       ]);
       this.signatures(doc, company);
       kindLabel = "Invoice";
-    } else {
+    } else if (kind === "service-report") {
       const job = await prisma.serviceJob.findFirst({
         where: { id: entityId, tenantId },
         include: {
@@ -441,6 +671,130 @@ export class DocumentsService {
         doc.font("Helvetica").text(`Captured: ${job.signature.capturedAt.toLocaleString()}`);
       }
       kindLabel = "Service Report";
+    } else if (kind === "inspection-report") {
+      const sr = await prisma.serviceRequest.findFirst({
+        where: { id: entityId, tenantId },
+        include: {
+          customer: true,
+          equipment: true,
+          equipmentItems: true,
+          inspectionReport: {
+            include: {
+              recommendations: true,
+              attachments: { include: { file: true } },
+            },
+          },
+        },
+      });
+      if (!sr) throw new AppError("Service ticket not found", 404);
+      const report = sr.inspectionReport;
+      if (!report) throw new AppError("Inspection report not found", 404);
+
+      reference = sr.reference;
+      filename = `${reference}-inspection-report.pdf`;
+      const reportStatus = report.submittedAt ? "Submitted" : "Draft";
+      const split = splitInspectionFindings(report.findings);
+      const customer = sr.customer;
+      const siteAddress = [customer?.address, customer?.city, customer?.country].filter(Boolean).join(", ");
+
+      await this.header(doc, tenantId, "Inspection Report", reference);
+      this.keyValueRows(doc, [
+        { label: "Severity", value: report.severity.toUpperCase() },
+        { label: "Inspection date", value: fmtDateTime(report.reportedAt) },
+        { label: "Inspector", value: report.reportedBy },
+        { label: "Status", value: reportStatus },
+      ]);
+
+      this.sectionHeading(doc, "Customer");
+      this.keyValueRows(doc, [
+        { label: "Name", value: displayValue(customer?.name ?? sr.customerName) },
+        { label: "Phone", value: displayValue(customer?.phone) },
+        { label: "Email", value: displayValue(customer?.email) },
+        { label: "Site address", value: displayValue(siteAddress) },
+      ]);
+
+      this.sectionHeading(doc, "Equipment");
+      const equipmentRows: Array<{ label: string; value: string }> = [];
+      if (sr.equipment) {
+        const eq = sr.equipment;
+        equipmentRows.push(
+          { label: "Equipment", value: displayValue(eq.name) },
+          {
+            label: "Brand / Model",
+            value: [displayValue(eq.manufacturer), displayValue(eq.model)].filter(Boolean).join(" · "),
+          },
+          { label: "Serial no.", value: displayValue(eq.serialNumber) },
+          { label: "Asset ID", value: displayValue(eq.assetTag) },
+          { label: "Location", value: displayValue(eq.location) },
+          { label: "Condition", value: displayValue(report.machineCondition ?? eq.condition) },
+        );
+      } else if (sr.equipmentItems.length) {
+        for (const item of sr.equipmentItems) {
+          equipmentRows.push(
+            { label: "Equipment", value: displayValue(item.equipmentName) },
+            { label: "Asset ID", value: displayValue(item.assetTag) },
+          );
+        }
+      } else {
+        equipmentRows.push(
+          { label: "Equipment", value: displayValue(sr.equipmentName) },
+          { label: "Condition", value: displayValue(report.machineCondition) },
+        );
+      }
+      this.keyValueRows(doc, equipmentRows);
+
+      this.sectionHeading(doc, "Inspection Findings");
+      this.bodyParagraph(doc, split.findings);
+
+      if (split.workDetails) {
+        this.sectionHeading(doc, "Work Required");
+        this.bodyParagraph(doc, split.workDetails);
+      }
+
+      this.sectionHeading(doc, "Recommendations");
+      this.bodyParagraph(doc, report.recommendation);
+      if (report.recommendations.length) {
+        this.ensureSpace(doc, 30);
+        doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(8);
+        doc.text("RECOMMENDED PARTS & WORK", LEFT, doc.y);
+        doc.moveDown(0.5);
+        for (const item of report.recommendations) {
+          this.ensureSpace(doc, 20);
+          doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text(
+            `${item.title} · Qty ${Number(item.quantity)} · ${item.priority}`,
+          );
+          if (item.description) {
+            doc.font("Helvetica").fontSize(8.5).fillColor(MUTED).text(item.description);
+          }
+          doc.moveDown(0.4);
+        }
+        doc.fillColor(INK);
+      }
+
+      this.renderJsonFields(doc, "Checklist", report.checklist);
+      this.renderJsonFields(doc, "Measurements", report.measurements);
+      this.renderJsonFields(doc, "Error codes", report.errorCodes);
+      if (report.calibrationStatus) {
+        this.sectionHeading(doc, "Calibration");
+        this.bodyParagraph(doc, report.calibrationStatus);
+      }
+
+      if (report.attachments.length) {
+        const photoBlockHeight = Math.ceil(report.attachments.length / 2) * (120 + 28 + 12) + 24;
+        this.ensureSpace(doc, Math.min(photoBlockHeight, 140));
+        this.sectionHeading(doc, "Inspection Photos");
+        await this.drawInspectionPhotos(doc, tenantId, actorId, actorRole, report.attachments);
+      }
+
+      if (report.technicianRemarks) {
+        this.sectionHeading(doc, "Remarks");
+        this.bodyParagraph(doc, report.technicianRemarks);
+      }
+
+      this.inspectionSignatures(doc, report.reportedBy, company);
+      kindLabel = "Inspection Report";
+    } else {
+      throw new AppError("Unsupported document kind", 400);
     }
 
     this.stampFooters(doc, company, kindLabel, reference);

@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { usersRepository, toSafeUser } from "@/repositories/users.repository";
 import { authRepository } from "@/repositories/auth.repository";
 import { AppError } from "@/middleware/errorHandler";
-import { enrichUserWithRoles, syncUserRoleAssignments } from "@/utils/userRoles";
+import { enrichUserWithRoles, ensureSystemRoles, syncUserRoleAssignments } from "@/utils/userRoles";
 
 function resolveRoleSelection(data: { role?: string; roles?: string[]; primaryRole?: string }) {
   const roles = data.roles?.length ? data.roles : data.role ? [data.role] : undefined;
@@ -16,6 +16,7 @@ function resolveRoleSelection(data: { role?: string; roles?: string[]; primaryRo
 
 export class UsersService {
   async list(tenantId: string, filters?: { role?: string; isActive?: boolean }) {
+    await ensureSystemRoles(tenantId);
     const users = await usersRepository.findAllByTenant(tenantId, filters);
     return Promise.all(users.map((user) => enrichUserWithRoles(user, tenantId)));
   }
@@ -57,6 +58,7 @@ export class UsersService {
     const primaryRole = roleSelection?.primaryRole ?? data.role;
     const roleKeys = roleSelection?.roles ?? [primaryRole];
 
+    await ensureSystemRoles(tenantId);
     const passwordHash = await bcrypt.hash(data.password, 10);
     const user = await usersRepository.create({
       tenantId,
@@ -124,6 +126,7 @@ export class UsersService {
       ...(passwordHash ? { passwordHash } : {}),
     });
 
+    await ensureSystemRoles(tenantId);
     if (roleSelection) {
       await syncUserRoleAssignments(tenantId, id, roleSelection.roles);
     } else if (primaryRole && primaryRole !== existing.role) {

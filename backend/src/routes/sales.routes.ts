@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { salesController } from "@/controllers/sales.controller";
-import { authenticate, requireRole } from "@/middleware/auth";
+import { SALES_DESK_ROLES } from "@/config/apiAccess";
+import { authenticate, requirePermission, requireRole } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
 import { validate } from "@/middleware/validate";
 import { convertSalesQuoteSchema, salesInvoiceSchema, upsertSalesOrderSchema } from "@/schemas/sales.schema";
@@ -8,10 +9,10 @@ import { convertSalesQuoteSchema, salesInvoiceSchema, upsertSalesOrderSchema } f
 const router = Router();
 router.use(authenticate, resolveTenant);
 
-const desk = requireRole("admin", "coordinator", "estimator", "billing", "inventory");
-const write = requireRole("admin", "coordinator", "estimator");
-const fulfill = requireRole("admin", "inventory", "coordinator");
-const bill = requireRole("admin", "billing");
+const desk = requireRole(...SALES_DESK_ROLES);
+const write = requirePermission("sales.write");
+const fulfill = requirePermission("sales.fulfill");
+const bill = requirePermission("sales.bill");
 
 router.get("/desk", desk, salesController.getDesk);
 router.get("/reports", desk, salesController.getReports);

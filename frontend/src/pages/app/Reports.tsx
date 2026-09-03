@@ -31,7 +31,7 @@ const reports = [
 
 export default function Reports() {
   return (
-    <RoleGuard roles={["admin", "billing", "coordinator"]}>
+    <RoleGuard roles={["admin", "billing", "coordinator", "sales"]}>
       <div className="space-y-6">
         <PageHeader
           title="Reports & Analytics"

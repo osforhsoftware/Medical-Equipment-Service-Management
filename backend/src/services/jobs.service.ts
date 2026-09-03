@@ -1,5 +1,6 @@
 import { jobsRepository } from "@/repositories/jobs.repository";
 import { jobActionsRepository } from "@/repositories/jobActions.repository";
+import { customersRepository } from "@/repositories/customers.repository";
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
 import { usersRepository } from "@/repositories/users.repository";
 import { notificationsService } from "@/services/notifications.service";
@@ -20,9 +21,14 @@ import {
 } from "@/services/jobWorkLog.helpers";
 
 const ASSIGNABLE_JOB_ROLES = ["coordinator", "engineer"];
+const jobSyncInflight = new Map<string, Promise<void>>();
 
 type CreateJobData = {
-  serviceRequestId: string;
+  serviceRequestId?: string;
+  customerId?: string;
+  equipmentId?: string;
+  type?: string;
+  typeOther?: string | null;
   engineerId: string;
   scheduledFor: string;
   status?: string;
@@ -76,7 +82,10 @@ export class JobsService {
   ) {
     let engineerId = filters.engineerId;
     if (actorRole === "engineer" && actorId) {
+      await this.syncJobsFromAssignedTickets(tenantId, actorId);
       engineerId = actorId;
+    } else if (actorId && (actorRole === "admin" || actorRole === "coordinator")) {
+      await this.syncMissingJobsForTenant(tenantId, actorId);
     }
     return jobsRepository.findPaginated(tenantId, { ...filters, engineerId });
   }
@@ -84,9 +93,198 @@ export class JobsService {
   async getAll(tenantId: string, actorId?: string, actorRole?: string, status?: string) {
     let engineerId: string | undefined;
     if (actorRole === "engineer" && actorId) {
+      await this.syncJobsFromAssignedTickets(tenantId, actorId);
       engineerId = actorId;
+    } else if (actorId && (actorRole === "admin" || actorRole === "coordinator")) {
+      await this.syncMissingJobsForTenant(tenantId, actorId);
     }
     return jobsRepository.findAll(tenantId, { status, engineerId });
+  }
+
+  /** Create or reassign a job so assigned engineers can see work on Service Jobs. */
+  async ensureJobForAssignedEngineer(
+    tenantId: string,
+    serviceRequestId: string,
+    engineerId: string,
+    actorId: string,
+  ) {
+    const sr = await serviceRequestsRepository.findById(serviceRequestId, tenantId);
+    if (!sr) throw new AppError("Service ticket not found", 404);
+    const engineer = await this.resolveAssignee(engineerId, tenantId);
+
+    return prisma.$transaction(async (tx) => {
+      const estimate = await tx.estimate.findFirst({
+        where: {
+          tenantId,
+          OR: [{ serviceRequestId: sr.id }, { requestRef: sr.reference }],
+          status: { in: ["approved", "converted"] },
+        },
+        orderBy: { revision: "desc" },
+      });
+      let job = await tx.serviceJob.findFirst({
+        where: { tenantId, OR: [{ serviceRequestId: sr.id }, { requestRef: sr.reference }] },
+      });
+
+      if (!job) {
+        const reference = await generateReference(tenantId, "JOB", "serviceJob");
+        job = await tx.serviceJob.create({
+          data: {
+            tenantId,
+            serviceRequestId: sr.id,
+            estimateId: estimate?.id ?? null,
+            customerId: sr.customerId,
+            equipmentId: sr.equipmentId,
+            reference,
+            requestRef: sr.reference,
+            customerName: sr.customerName,
+            equipmentName: (sr.equipmentName ?? "Equipment").split(" (")[0],
+            engineer: engineer.name,
+            engineerId: engineer.id,
+            type: sr.type,
+            typeOther: sr.typeOther,
+            status: "scheduled",
+            scheduledFor: new Date(),
+            progress: 0,
+            activities: {
+              create: { actor: engineer.name, action: "Job scheduled", note: `Assigned to ${engineer.name}` },
+            },
+          },
+        });
+      } else if (job.engineerId !== engineer.id) {
+        await tx.serviceJob.update({
+          where: { id: job.id },
+          data: {
+            engineer: engineer.name,
+            engineerId: engineer.id,
+            estimateId: job.estimateId ?? estimate?.id ?? null,
+          },
+        });
+        await tx.jobActivity.create({
+          data: {
+            jobId: job.id,
+            actor: engineer.name,
+            action: "Engineer assigned",
+            note: `Assigned to ${engineer.name}`,
+          },
+        });
+      }
+
+      await tx.jobAssignment.updateMany({
+        where: { jobId: job.id, role: "engineer", isLead: true, endedAt: null, userId: { not: engineer.id } },
+        data: { endedAt: new Date(), isLead: false },
+      });
+      await tx.jobAssignment.upsert({
+        where: { jobId_userId_role: { jobId: job.id, userId: engineer.id, role: "engineer" } },
+        create: {
+          tenantId,
+          jobId: job.id,
+          userId: engineer.id,
+          role: "engineer",
+          isLead: true,
+          assignedBy: actorId,
+        },
+        update: { isLead: true, endedAt: null, assignedBy: actorId, assignedAt: new Date() },
+      });
+
+      if (estimate) {
+        await tx.stockReservation.updateMany({
+          where: { tenantId, estimateId: estimate.id, jobId: null, status: { in: ["active", "shortage"] } },
+          data: { jobId: job.id },
+        });
+      }
+
+      const nextStatus = resolveTicketEventStatus(sr.status, "jobScheduled");
+      await tx.serviceRequest.update({
+        where: { id: sr.id },
+        data: {
+          status: nextStatus as never,
+          assignedEngineerId: engineer.id,
+          assignedTo: engineer.id,
+          assignedName: engineer.name,
+        },
+      });
+
+      return job;
+    });
+  }
+
+  async syncJobsFromAssignedTickets(tenantId: string, engineerId: string) {
+    const key = `engineer:${tenantId}:${engineerId}`;
+    const pending = jobSyncInflight.get(key);
+    if (pending) return pending;
+    const run = this.runSyncJobsFromAssignedTickets(tenantId, engineerId).finally(() => {
+      jobSyncInflight.delete(key);
+    });
+    jobSyncInflight.set(key, run);
+    return run;
+  }
+
+  private async runSyncJobsFromAssignedTickets(tenantId: string, engineerId: string) {
+    const engineer = await usersRepository.findById(engineerId, tenantId);
+    const tickets = await prisma.serviceRequest.findMany({
+      where: {
+        tenantId,
+        status: {
+          in: ["assigned_engineer", "inProgress", "change_pending_approval", "pending_final_approval"],
+        },
+        OR: [
+          { assignedEngineerId: engineerId },
+          { assignedTo: engineerId },
+          ...(engineer?.name ? [{ assignedName: engineer.name }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    for (const ticket of tickets) {
+      const job = await prisma.serviceJob.findFirst({
+        where: { tenantId, serviceRequestId: ticket.id },
+        select: { engineerId: true },
+      });
+      if (job?.engineerId === engineerId) continue;
+      try {
+        await this.ensureJobForAssignedEngineer(tenantId, ticket.id, engineerId, engineerId);
+      } catch {
+        // Leave the ticket visible elsewhere; do not fail the jobs board.
+      }
+    }
+  }
+
+  async syncMissingJobsForTenant(tenantId: string, actorId: string) {
+    const key = `tenant:${tenantId}`;
+    const pending = jobSyncInflight.get(key);
+    if (pending) return pending;
+    const run = this.runSyncMissingJobsForTenant(tenantId, actorId).finally(() => {
+      jobSyncInflight.delete(key);
+    });
+    jobSyncInflight.set(key, run);
+    return run;
+  }
+
+  private async runSyncMissingJobsForTenant(tenantId: string, actorId: string) {
+    const tickets = await prisma.serviceRequest.findMany({
+      where: {
+        tenantId,
+        status: {
+          in: ["assigned_engineer", "inProgress", "change_pending_approval", "pending_final_approval"],
+        },
+        OR: [{ assignedEngineerId: { not: null } }, { assignedTo: { not: null } }],
+      },
+      select: { id: true, assignedEngineerId: true, assignedTo: true },
+    });
+    for (const ticket of tickets) {
+      const engineerId = ticket.assignedEngineerId ?? ticket.assignedTo;
+      if (!engineerId) continue;
+      const job = await prisma.serviceJob.findFirst({
+        where: { tenantId, serviceRequestId: ticket.id },
+        select: { engineerId: true },
+      });
+      if (job?.engineerId === engineerId) continue;
+      try {
+        await this.ensureJobForAssignedEngineer(tenantId, ticket.id, engineerId, actorId);
+      } catch {
+        // Skip tickets whose assignee is not a job-capable role.
+      }
+    }
   }
 
   private async assertJobAccess(
@@ -116,11 +314,57 @@ export class JobsService {
   }
 
   async create(tenantId: string, data: CreateJobData, actorId: string) {
-    const sr = await serviceRequestsRepository.findById(data.serviceRequestId, tenantId);
-    if (!sr) throw new AppError("Service request not found", 404);
-
     const assignee = await this.resolveAssignee(data.engineerId, tenantId);
     const reference = await generateReference(tenantId, "JOB", "serviceJob");
+    const ticketId = data.serviceRequestId?.trim();
+
+    if (!ticketId) {
+      const customer = await customersRepository.findById(data.customerId!, tenantId);
+      if (!customer) throw new AppError("Customer not found", 404);
+      const equipment = await prisma.equipment.findFirst({
+        where: { id: data.equipmentId!, tenantId, customerId: customer.id },
+      });
+      if (!equipment) throw new AppError("Equipment not found for this customer", 404);
+
+      return prisma.$transaction(async (tx) => {
+        return tx.serviceJob.create({
+          data: {
+            tenantId,
+            serviceRequestId: null,
+            estimateId: null,
+            customerId: customer.id,
+            equipmentId: equipment.id,
+            reference,
+            requestRef: reference,
+            customerName: customer.name,
+            equipmentName: equipment.name,
+            engineer: assignee.name,
+            engineerId: assignee.id,
+            type: (data.type ?? "Repair") as never,
+            typeOther: data.type === "Other" ? data.typeOther ?? null : null,
+            status: (data.status ?? "scheduled") as never,
+            scheduledFor: new Date(data.scheduledFor),
+            progress: data.progress ?? 0,
+            assignments: {
+              create: {
+                tenantId,
+                userId: assignee.id,
+                role: "engineer",
+                isLead: true,
+                assignedBy: actorId,
+              },
+            },
+            activities: {
+              create: { actor: assignee.name, action: "Job scheduled", note: `Assigned to ${assignee.name}` },
+            },
+          },
+        });
+      });
+    }
+
+    const sr = await serviceRequestsRepository.findById(ticketId, tenantId);
+    if (!sr) throw new AppError("Service request not found", 404);
+
     return prisma.$transaction(async (tx) => {
       const estimate = await tx.estimate.findFirst({
         where: {
@@ -173,7 +417,12 @@ export class JobsService {
       });
       await tx.serviceRequest.update({
         where: { id: sr.id },
-        data: { status: resolveTicketEventStatus(sr.status, "jobScheduled") as never },
+        data: {
+          status: resolveTicketEventStatus(sr.status, "jobScheduled") as never,
+          assignedEngineerId: assignee.id,
+          assignedTo: assignee.id,
+          assignedName: assignee.name,
+        },
       });
       return job;
     });
@@ -203,8 +452,6 @@ export class JobsService {
     }
 
     if (data.status === "completed" && existing.status !== "completed") {
-      const sig = await prisma.jobSignature.findUnique({ where: { jobId: id } });
-      if (!sig) throw new AppError("Customer sign-off is required before completing the job", 409);
       const updated = await prisma.$transaction(async (tx) => {
         const job = await tx.serviceJob.findFirst({
           where: { id, tenantId },

@@ -58,6 +58,7 @@ export interface EstimateListParams extends BaseListParams {
   customerId?: string;
   createdFrom?: string;
   createdTo?: string;
+  kind?: "service" | "sales";
 }
 
 export interface InventoryListParams extends BaseListParams {

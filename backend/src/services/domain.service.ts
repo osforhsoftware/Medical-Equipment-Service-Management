@@ -10,6 +10,7 @@ import { generateReference } from "@/utils/reference";
 import { extraChargeType } from "@/utils/invoiceCharges";
 import { ESTIMATE_STAFF_APPROVER_ROLES } from "@/config/apiAccess";
 import { userHasAnyRoleKey } from "@/utils/userRoles";
+import { ticketAssignmentService } from "@/services/ticketAssignment.service";
 
 type Actor = { userId: string; role: string };
 type JsonObject = Record<string, unknown>;
@@ -32,6 +33,24 @@ async function assertJobAccess(tenantId: string, jobId: string, actor: Actor) {
   });
   if (!job) throw new AppError("Job not found or not assigned to this user", 404);
   return job;
+}
+
+async function assignLeadEngineer(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  jobId: string,
+  engineerId: string,
+  assignedBy: string,
+) {
+  await tx.jobAssignment.updateMany({
+    where: { jobId, role: "engineer", isLead: true, endedAt: null, userId: { not: engineerId } },
+    data: { endedAt: new Date(), isLead: false },
+  });
+  await tx.jobAssignment.upsert({
+    where: { jobId_userId_role: { jobId, userId: engineerId, role: "engineer" } },
+    create: { tenantId, jobId, userId: engineerId, role: "engineer", isLead: true, assignedBy },
+    update: { isLead: true, endedAt: null, assignedBy, assignedAt: new Date() },
+  });
 }
 
 export class DomainService {
@@ -241,7 +260,12 @@ export class DomainService {
         throw new AppError("Only administrators and service coordinators can decide estimates", 403);
       }
       if (input.decision === "approved" && isStaffApprover && !input.engineerId && estimate.serviceRequestId) {
-        throw new AppError("engineerId is required when approving an estimate", 422);
+        const defaultEngineer = await ticketAssignmentService.defaultEngineerOnApproval(tenantId);
+        if (defaultEngineer) {
+          input.engineerId = defaultEngineer.id;
+        } else {
+          throw new AppError("engineerId is required when approving an estimate", 422);
+        }
       }
 
       const status = input.decision as "approved" | "rejected" | "revision";
@@ -263,14 +287,24 @@ export class DomainService {
                 ? "estimateRejected"
                 : "estimatePendingApproval";
           const next = resolveTicketEventStatus(sr.status, event);
-          if (next !== normalizeTicketStatus(sr.status)) {
+          const engineer =
+            status === "approved" && input.engineerId
+              ? await tx.user.findFirst({ where: { id: input.engineerId, tenantId, isActive: true } })
+              : null;
+          const assignment =
+            engineer
+              ? {
+                  assignedEngineerId: engineer.id,
+                  assignedTo: engineer.id,
+                  assignedName: engineer.name,
+                }
+              : {};
+          if (next !== normalizeTicketStatus(sr.status) || engineer) {
             await tx.serviceRequest.update({
               where: { id: sr.id },
               data: {
-                status: next as never,
-                ...(status === "approved" && input.engineerId
-                  ? { assignedEngineerId: input.engineerId }
-                  : {}),
+                ...(next !== normalizeTicketStatus(sr.status) ? { status: next as never } : {}),
+                ...assignment,
               },
             });
           }
@@ -385,22 +419,22 @@ export class DomainService {
           }
         }
 
-        // Auto-create job + assign engineer
+        // Create or reassign the service job so the engineer dashboard can see it.
         if (input.engineerId && estimate.serviceRequestId) {
           const sr = await tx.serviceRequest.findFirst({ where: { id: estimate.serviceRequestId, tenantId } });
           const engineer = await tx.user.findFirst({
             where: { id: input.engineerId, tenantId, isActive: true },
           });
           if (!sr || !engineer) throw new AppError("Service ticket or engineer not found", 404);
-          const existingJob = await tx.serviceJob.findFirst({
+          let job = await tx.serviceJob.findFirst({
             where: { tenantId, OR: [{ serviceRequestId: sr.id }, { requestRef: sr.reference }] },
           });
-          if (!existingJob) {
+          if (!job) {
             const reference = await generateReference(tenantId, "JOB", "serviceJob");
             const scheduledFor = input.scheduledFor
               ? new Date(input.scheduledFor)
               : new Date(Date.now() + 24 * 60 * 60 * 1000);
-            const job = await tx.serviceJob.create({
+            job = await tx.serviceJob.create({
               data: {
                 tenantId,
                 serviceRequestId: sr.id,
@@ -418,43 +452,53 @@ export class DomainService {
                 status: "scheduled",
                 scheduledFor,
                 progress: 0,
-                assignments: {
-                  create: {
-                    tenantId,
-                    userId: engineer.id,
-                    role: "engineer",
-                    isLead: true,
-                    assignedBy: actor.userId,
-                  },
-                },
                 activities: {
                   create: {
                     actor: engineer.name,
                     action: "Job scheduled",
-                    note: `Auto-assigned after estimate approval`,
+                    note: "Auto-assigned after estimate approval",
                   },
                 },
               },
             });
-            await tx.stockReservation.updateMany({
-              where: { tenantId, estimateId, jobId: null, status: { in: ["active", "shortage"] } },
-              data: { jobId: job.id },
+          } else if (job.engineerId !== engineer.id) {
+            await tx.serviceJob.update({
+              where: { id: job.id },
+              data: { engineer: engineer.name, engineerId: engineer.id, estimateId },
             });
-            const next = resolveTicketEventStatus(
-              normalizeTicketStatus(sr?.status ?? "pending_approval"),
-              "jobScheduled",
-            );
-            await tx.serviceRequest.update({ where: { id: sr!.id }, data: { status: next as never } });
-            await tx.notification.create({
+            await tx.jobActivity.create({
               data: {
-                tenantId,
-                type: "job",
-                title: "Job assigned",
-                body: `${job.reference} assigned to you`,
-                recipientUserId: engineer.id,
+                jobId: job.id,
+                actor: engineer.name,
+                action: "Engineer assigned",
+                note: "Assigned after estimate approval",
               },
             });
           }
+          await assignLeadEngineer(tx, tenantId, job.id, engineer.id, actor.userId);
+          await tx.stockReservation.updateMany({
+            where: { tenantId, estimateId, jobId: null, status: { in: ["active", "shortage"] } },
+            data: { jobId: job.id },
+          });
+          const next = resolveTicketEventStatus(normalizeTicketStatus(sr.status), "jobScheduled");
+          await tx.serviceRequest.update({
+            where: { id: sr.id },
+            data: {
+              status: next as never,
+              assignedEngineerId: engineer.id,
+              assignedTo: engineer.id,
+              assignedName: engineer.name,
+            },
+          });
+          await tx.notification.create({
+            data: {
+              tenantId,
+              type: "job",
+              title: "Job assigned",
+              body: `${job.reference} assigned to you`,
+              recipientUserId: engineer.id,
+            },
+          });
         }
       }
 

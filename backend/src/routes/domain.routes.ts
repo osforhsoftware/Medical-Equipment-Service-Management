@@ -39,11 +39,13 @@ router.use(authenticate, resolveTenant);
 const operations = requireRole("admin", "coordinator");
 const inventory = requireRole("admin", "inventory");
 const finance = requireRole("admin", "billing");
+const serviceBilling = requireRole("admin", "billing", "estimator");
 const documentRole = (req: Request, res: Response, next: NextFunction) => {
   const permissions: Record<string, string[]> = {
     estimate: ["admin", "coordinator", "estimator", "billing"],
-    invoice: ["admin", "billing"],
+    invoice: ["admin", "billing", "estimator", "sales"],
     "service-report": ["admin", "coordinator", "engineer"],
+    "inspection-report": ["admin", "coordinator", "inspector", "estimator", "billing"],
   };
   return requireRole(...(permissions[req.params.kind] ?? []))(req, res, next);
 };
@@ -82,8 +84,8 @@ router.get("/purchase-returns", inventory, c.purchaseReturns);
 router.post("/purchase-returns", inventory, validate(createPurchaseReturnSchema), c.purchaseReturnCreate);
 router.get("/purchase-returns/:id", inventory, c.purchaseReturnById);
 
-router.post("/invoices/from-job", finance, validate(invoiceFromJobSchema), c.invoiceFromJob);
-router.post("/invoices/:id/payments", finance, validate(paymentSchema), c.payment);
+router.post("/invoices/from-job", serviceBilling, validate(invoiceFromJobSchema), c.invoiceFromJob);
+router.post("/invoices/:id/payments", requireRole("admin", "billing", "estimator", "sales"), validate(paymentSchema), c.payment);
 router.post("/documents/:kind/:id", documentRole, c.documentGenerate);
 router.post("/service-tickets/:id/finish", requireRole("admin", "coordinator", "billing"), c.finishTicket);
 

@@ -428,12 +428,17 @@
 
 .professional-document .doc-kind {
   margin: 0;
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0.12em;
+  line-height: 1.1;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--doc-ink);
+}
+
+.inspection-report-document .doc-kind {
+  font-size: 16px;
+  letter-spacing: 0.08em;
 }
 
 .professional-document .doc-reference {
@@ -664,6 +669,209 @@
   color: var(--doc-muted);
 }
 
+.inspection-report-document .doc-inspection-section {
+  margin-top: 18px;
+}
+
+.inspection-report-document .doc-section-heading {
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--doc-rule);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--doc-ink);
+}
+
+.inspection-report-document .doc-section-body-wrap {
+  margin-top: 2px;
+}
+
+.inspection-report-document .doc-info-grid {
+  display: grid;
+  gap: 10px 20px;
+  margin: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inspection-report-document .doc-info-item {
+  min-width: 0;
+}
+
+.inspection-report-document .doc-field-label {
+  margin: 0;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--doc-label);
+}
+
+.inspection-report-document .doc-field-value {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--doc-ink);
+  overflow-wrap: anywhere;
+}
+
+.inspection-report-document .doc-text-block {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--doc-muted);
+}
+
+.inspection-report-document .doc-report-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin: 4px 0 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--doc-rule);
+  border-radius: 8px;
+  background: var(--doc-wash);
+}
+
+.inspection-report-document .doc-report-summary-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.inspection-report-document .doc-report-summary-meta {
+  display: grid;
+  gap: 8px 20px;
+  margin: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.inspection-report-document .doc-report-summary-meta > div {
+  min-width: 0;
+}
+
+.inspection-report-document .doc-report-summary-meta dt {
+  margin: 0;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--doc-label);
+}
+
+.inspection-report-document .doc-report-summary-meta dd {
+  margin: 3px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--doc-ink);
+}
+
+.inspection-report-document .doc-simple-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.inspection-report-document .doc-simple-table th {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--doc-label);
+  background: var(--doc-wash);
+  border-bottom: 1px solid var(--doc-rule);
+}
+
+.inspection-report-document .doc-simple-table td {
+  padding: 9px 10px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--doc-rule);
+  color: var(--doc-ink);
+}
+
+.inspection-report-document .doc-photo-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inspection-report-document .doc-photo-cell {
+  margin: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.inspection-report-document .doc-photo-frame {
+  display: block;
+  width: 100%;
+  height: 180px;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid var(--doc-rule);
+  border-radius: 8px;
+  background: var(--doc-wash);
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
+.inspection-report-document .doc-photo-thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center center;
+}
+
+.inspection-report-document .doc-photo-caption-label {
+  margin: 6px 0 0;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--doc-label);
+}
+
+.inspection-report-document .doc-photo-caption {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--doc-ink);
+  overflow-wrap: anywhere;
+}
+
+.inspection-report-document .doc-photo-meta {
+  margin: 2px 0 0;
+  font-size: 10px;
+  color: var(--doc-muted);
+}
+
+.inspection-report-document .inspection-doc-sheet {
+  min-height: auto;
+  display: block;
+}
+
+.inspection-report-document .inspection-doc-footer {
+  margin-top: 28px;
+}
+
+@media (max-width: 640px) {
+  .inspection-report-document .doc-info-grid,
+  .inspection-report-document .doc-report-summary-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .inspection-report-document .doc-photo-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .professional-document .doc-footer {
   display: flex;
   justify-content: space-between;
@@ -764,8 +972,10 @@
   }
 
   .professional-document .doc-sheet {
-    min-height: 0;
-    padding: 6mm 0 10mm;
+    display: block !important;
+    min-height: 0 !important;
+    height: auto !important;
+    padding: 6mm 0 8mm;
   }
 
   .professional-document .doc-header {
@@ -793,14 +1003,49 @@
     page-break-inside: avoid;
   }
 
+  .inspection-report-document .inspection-doc-sheet {
+    display: block !important;
+    min-height: 0 !important;
+  }
+
+  .inspection-report-document .doc-photo-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .inspection-report-document .doc-photo-frame {
+    height: 140px;
+  }
+
+  .inspection-report-document .doc-inspection-section {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
+  .inspection-report-document .doc-signatures {
+    display: none !important;
+  }
+
+  .inspection-report-document .doc-photo-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .professional-document .doc-footer {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    margin-top: 0;
-    padding: 6px 0 0;
+    position: static !important;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    width: 100%;
+    height: auto !important;
+    min-height: 0 !important;
+    margin-top: 16px;
+    padding: 8px 0 0;
     background: #fff;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .professional-document .doc-page::after {

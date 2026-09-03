@@ -12,7 +12,8 @@
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
     "prisma:reset": "prisma migrate reset --force",
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "ts-node prisma/seed.ts",
+    "db:clean": "ts-node -r tsconfig-paths/register prisma/clean.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.14.0",

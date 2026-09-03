@@ -1,13 +1,16 @@
 import { prisma } from "@/db/prisma";
 import { notificationsService } from "@/services/notifications.service";
+import { jobsService } from "@/services/jobs.service";
+import type { Prisma } from "@prisma/client";
 
-const CLOSED_REQUEST_STATUSES = ["completed", "invoiced"] as const;
+const CLOSED_REQUEST_STATUSES = ["completed", "invoiced", "closed", "finished"] as const;
 
 type StaffRole =
   | "admin"
   | "coordinator"
   | "inspector"
   | "estimator"
+  | "sales"
   | "engineer"
   | "inventory"
   | "billing";
@@ -67,9 +70,30 @@ function mapJobStatus(status: string) {
   return status;
 }
 
+function assignedJobWhere(userId: string): Prisma.ServiceJobWhereInput {
+  return {
+    OR: [
+      { engineerId: userId },
+      { assignments: { some: { userId, endedAt: null } } },
+    ],
+  };
+}
+
+const ENGINEER_TICKET_STATUSES = [
+  "assigned_engineer",
+  "inProgress",
+  "change_pending_approval",
+  "pending_final_approval",
+] as const;
+
 export class DashboardService {
   async getOverview(tenantId: string, userId: string, role: string) {
     const staffRole = (role as StaffRole) || "admin";
+    if (staffRole === "engineer") {
+      await jobsService.syncJobsFromAssignedTickets(tenantId, userId);
+    } else if (staffRole === "admin" || staffRole === "coordinator") {
+      await jobsService.syncMissingJobsForTenant(tenantId, userId);
+    }
 
     const requestWhere = { tenantId };
     const inventoryWhere = { tenantId };
@@ -190,8 +214,8 @@ export class DashboardService {
       prisma.serviceRequest.findMany({
         where: {
           ...requestWhere,
-          assignedTo: userId,
           status: { notIn: [...CLOSED_REQUEST_STATUSES] },
+          ...this.assignedWorkWhere(staffRole, userId),
         },
         orderBy: [{ slaDue: "asc" }, { updatedAt: "desc" }],
         take: 12,
@@ -199,7 +223,7 @@ export class DashboardService {
       prisma.serviceJob.findMany({
         where: {
           ...jobScope,
-          engineerId: userId,
+          ...assignedJobWhere(userId),
           status: { not: "completed" },
         },
         orderBy: [{ scheduledFor: "asc" }, { updatedAt: "desc" }],
@@ -208,7 +232,7 @@ export class DashboardService {
       prisma.serviceJob.count({
         where: {
           ...jobScope,
-          ...(staffRole === "engineer" ? { engineerId: userId } : {}),
+          ...(staffRole === "engineer" ? assignedJobWhere(userId) : {}),
           status: "completed",
           updatedAt: { gte: mtdStart },
         },
@@ -216,7 +240,7 @@ export class DashboardService {
       prisma.serviceRequest.count({
         where: {
           ...requestWhere,
-          ...(this.isAssigneeScoped(staffRole) ? { assignedTo: userId } : {}),
+          ...this.assignedWorkWhere(staffRole, userId),
           status: { notIn: [...CLOSED_REQUEST_STATUSES] },
           slaDue: { gte: todayStart, lte: todayEnd },
         },
@@ -224,7 +248,7 @@ export class DashboardService {
       prisma.serviceRequest.count({
         where: {
           ...requestWhere,
-          ...(this.isAssigneeScoped(staffRole) ? { assignedTo: userId } : {}),
+          ...this.assignedWorkWhere(staffRole, userId),
           status: { notIn: [...CLOSED_REQUEST_STATUSES] },
           slaDue: { lt: todayStart },
         },
@@ -287,10 +311,10 @@ export class DashboardService {
 
     const inspectionQueue = myAssignedRequests.filter((r) => r.status === "inspection");
     const estimateQueueRequests = myAssignedRequests.filter((r) =>
-      ["estimate", "approval"].includes(r.status),
+      ["estimate", "approval", "pending_approval"].includes(r.status),
     );
     const serviceQueue = myAssignedRequests.filter((r) =>
-      ["inProgress", "new"].includes(r.status),
+      ["inProgress", "new", ...ENGINEER_TICKET_STATUSES].includes(r.status),
     );
 
     const personal = this.buildPersonalStats({
@@ -329,15 +353,23 @@ export class DashboardService {
     });
 
     const roleQueues = {
-      newAssigned: myAssignedRequests.filter((r) => r.status === "new").length,
+      newAssigned:
+        staffRole === "engineer"
+          ? myJobs.filter((j) => j.status === "scheduled").length
+              || myAssignedRequests.filter((r) => r.status === "assigned_engineer" || r.status === "new").length
+          : myAssignedRequests.filter((r) => r.status === "new").length,
       inspection: inspectionQueue.length,
       estimatePending: myAssignedRequests.filter((r) => r.status === "estimate").length + pendingEstimates,
-      waitingApproval: myAssignedRequests.filter((r) => r.status === "approval").length + sentEstimates,
-      servicePending: serviceQueue.length + myJobs.filter((j) => j.status !== "completed").length,
+      waitingApproval: myAssignedRequests.filter((r) => r.status === "approval" || r.status === "pending_approval").length + sentEstimates,
+      servicePending:
+        staffRole === "engineer"
+          ? myJobs.filter((j) => j.status !== "completed").length
+              || serviceQueue.length
+          : serviceQueue.length + myJobs.filter((j) => j.status !== "completed").length,
       completed: completedJobsMonth,
     };
 
-    const showFinance = staffRole === "admin" || staffRole === "billing" || staffRole === "coordinator";
+    const showFinance = staffRole === "admin" || staffRole === "billing" || staffRole === "coordinator" || staffRole === "sales";
     const showCompanyOps = staffRole === "admin" || staffRole === "coordinator";
     const showInventoryAlerts = staffRole === "admin" || staffRole === "inventory" || staffRole === "engineer";
 
@@ -375,7 +407,7 @@ export class DashboardService {
         status: mapJobStatus(j.status),
         scheduledFor: j.scheduledFor.toISOString(),
         progress: j.progress,
-        href: "/app/jobs",
+        href: `/app/jobs/${j.id}`,
       })),
       upcomingJobs: myJobsUpcoming.map((j) => ({
         id: j.id,
@@ -385,7 +417,7 @@ export class DashboardService {
         status: mapJobStatus(j.status),
         scheduledFor: j.scheduledFor.toISOString(),
         progress: j.progress,
-        href: "/app/jobs",
+        href: `/app/jobs/${j.id}`,
       })),
       trends: {
         openRequests: undefined,
@@ -422,6 +454,23 @@ export class DashboardService {
         canUpdateJobStatus: staffRole === "engineer" || staffRole === "admin" || staffRole === "coordinator",
       },
     };
+  }
+
+  private assignedWorkWhere(role: StaffRole, userId: string): Prisma.ServiceRequestWhereInput {
+    if (role === "admin" || role === "coordinator") return {};
+    if (role === "inspector") {
+      return { OR: [{ assignedInspectorId: userId }, { assignedTo: userId }] };
+    }
+    if (role === "estimator") {
+      return { OR: [{ assignedEstimatorId: userId }, { assignedTo: userId }] };
+    }
+    if (role === "engineer") {
+      return { OR: [{ assignedEngineerId: userId }, { assignedTo: userId }] };
+    }
+    if (this.isAssigneeScoped(role)) {
+      return { assignedTo: userId };
+    }
+    return {};
   }
 
   private isAssigneeScoped(role: StaffRole) {
@@ -477,6 +526,14 @@ export class DashboardService {
           assignedOpen: input.pendingEstimates + input.sentEstimates,
           pendingApprovals: input.sentEstimates,
           completedThisMonth: input.approvedEstimates,
+        };
+      case "sales":
+        return {
+          ...base,
+          assignedOpen: input.pendingInvoices,
+          overdue: input.overdueInvoices,
+          pendingApprovals: input.pendingInvoices,
+          completedThisMonth: input.revenueMtd,
         };
       case "billing":
         return {
@@ -605,7 +662,7 @@ export class DashboardService {
       status: mapJobStatus(j.status),
       dueAt: j.scheduledFor.toISOString(),
       progress: j.progress,
-      href: "/app/jobs",
+      href: `/app/jobs/${j.id}`,
     });
 
     switch (input.role) {
@@ -618,6 +675,7 @@ export class DashboardService {
         const estimates = await prisma.estimate.findMany({
           where: {
             tenantId: input.tenantId,
+            serviceRequestId: { not: null },
             status: { in: ["draft", "revision", "sent"] },
           },
           orderBy: { updatedAt: "desc" },
@@ -638,10 +696,30 @@ export class DashboardService {
         return input.estimateQueueRequests.map((r) => requestItem(r, "/app/estimates"));
       }
 
-      case "engineer":
-        return input.myJobs.length > 0
-          ? input.myJobs.map(jobItem)
-          : input.serviceQueue.map((r) => requestItem(r));
+      case "sales": {
+        const orders = await prisma.salesOrder.findMany({
+          where: {
+            tenantId: input.tenantId,
+            OR: [{ deliveryStatus: { not: "delivered" } }, { paymentStatus: { not: "paid" } }],
+          },
+          orderBy: { updatedAt: "desc" },
+          take: 10,
+        });
+        return orders.map((order) => ({
+          id: order.id,
+          kind: "invoice" as const,
+          reference: order.reference,
+          title: order.customerName,
+          subtitle: `${order.salespersonName} · ${order.deliveryStatus}`,
+          status: order.paymentStatus,
+          href: "/app/sales",
+        }));
+      }
+
+      case "engineer": {
+        if (input.myJobs.length > 0) return input.myJobs.map(jobItem);
+        return input.serviceQueue.map((r) => requestItem(r, "/app/jobs"));
+      }
 
       case "billing": {
         const invoices = await prisma.invoice.findMany({

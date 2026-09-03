@@ -11,6 +11,7 @@ import {
   RecordDetailLayout,
 } from "@/components/shared/RecordDetailLayout";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { ESTIMATE_READ_ROLES, ESTIMATE_WRITE_ROLES, SALES_WRITE_ROLES } from "@/config/roles";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -62,7 +63,8 @@ export default function EstimateDetail() {
     schema: decisionSchema,
   });
   const canApprove = hasRole(["admin", "coordinator"]);
-  const canBuild = hasRole(["admin", "coordinator", "estimator"]);
+  const canBuild = hasRole(ESTIMATE_WRITE_ROLES);
+  const canSell = hasRole(SALES_WRITE_ROLES);
   const isSalesQuote = Boolean(estimate && !estimate.serviceRequestId);
 
   const load = useCallback(async () => {
@@ -147,7 +149,7 @@ export default function EstimateDetail() {
   }));
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "estimator", "billing", "inspector", "engineer"]}>
+    <RoleGuard roles={ESTIMATE_READ_ROLES}>
       <RecordDetailLayout
         backTo="/app/estimates"
         backLabel="Estimates"
@@ -173,14 +175,14 @@ export default function EstimateDetail() {
                 <Eye className="mr-1 h-4 w-4" /> Preview
               </Link>
             </Button>
-            {canBuild && isSalesQuote && canEditEstimate(estimate.status) ? (
+            {canSell && isSalesQuote && canEditEstimate(estimate.status) ? (
               <Button variant="outline" asChild>
                 <Link to={`/app/estimates/new?customerId=${estimate.customerId ?? ""}`}>
                   <FilePenLine className="mr-1 h-4 w-4" /> Edit quotation
                 </Link>
               </Button>
             ) : null}
-            {canBuild && isSalesQuote && estimate.status === "approved" ? (
+            {canSell && isSalesQuote && estimate.status === "approved" ? (
               <Button variant="brand" disabled={saving} onClick={() => void convertToOrder()}>
                 <ShoppingCart className="mr-1 h-4 w-4" /> Convert to sales order
               </Button>

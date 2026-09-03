@@ -2,6 +2,7 @@ import { customersRepository, type CustomerListFilters } from "@/repositories/cu
 import { taxonomyService } from "@/services/taxonomy.service";
 import { AppError } from "@/middleware/errorHandler";
 import { getDefaultBranchId } from "@/utils/defaultBranch";
+import { generateReference } from "@/utils/reference";
 import type { PaginatedResult } from "@/types";
 import type { Customer } from "@prisma/client";
 
@@ -16,22 +17,33 @@ export class CustomersService {
     return customer;
   }
 
+  async previewReference(tenantId: string) {
+    const reference = await generateReference(tenantId, "CUST", "customer");
+    return { reference };
+  }
+
   async create(tenantId: string, data: {
-    name: string; type: string; typeOther?: string | null; contactPerson: string; email?: string;
-    phone: string; address: string; city: string; country: string; licenseGst?: string | null;
+    name: string; type?: string; typeOther?: string | null; contactPerson: string; email?: string;
+    phone?: string; address?: string; city: string; country: string; licenseGst?: string | null;
     note?: string | null;
     branchId?: string; status?: string;
   }) {
-    const type = await taxonomyService.resolveSlug(tenantId, "customer_type", data.type);
+    const typeValue = data.type?.trim() ?? "";
+    const type = typeValue
+      ? await taxonomyService.resolveSlug(tenantId, "customer_type", typeValue)
+      : "";
     const branchId = data.branchId || await getDefaultBranchId(tenantId);
     const licenseGst = data.licenseGst?.trim() || null;
     const note = data.note?.trim() || null;
+    const reference = await generateReference(tenantId, "CUST", "customer");
     return customersRepository.create(tenantId, {
       ...data,
+      reference,
       email: data.email?.trim() ?? "",
       type,
       typeOther: data.typeOther?.trim() || null,
-      address: data.address.trim(),
+      phone: data.phone?.trim() ?? "",
+      address: data.address?.trim() ?? "",
       city: data.city?.trim() ?? "",
       country: data.country?.trim() ?? "",
       licenseGst,
@@ -44,13 +56,12 @@ export class CustomersService {
     const existing = await this.getById(id, tenantId);
     const next = { ...data };
     if (typeof next.type === "string") {
-      next.type = await taxonomyService.resolveSlug(
-        tenantId,
-        "customer_type",
-        next.type,
-        existing.type,
-      );
+      const typeValue = next.type.trim();
+      next.type = typeValue
+        ? await taxonomyService.resolveSlug(tenantId, "customer_type", typeValue, existing.type)
+        : "";
     }
+    if (typeof next.phone === "string") next.phone = next.phone.trim();
     if (typeof next.address === "string") next.address = next.address.trim();
     if (typeof next.city === "string") next.city = next.city.trim();
     if (typeof next.country === "string") next.country = next.country.trim();

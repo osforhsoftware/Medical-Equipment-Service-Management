@@ -19,6 +19,13 @@ export class CustomersController {
     } catch (err) { next(err); }
   }
 
+  async previewReference(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await customersService.previewReference(req.tenantId!);
+      res.json(success("Next customer reference", data));
+    } catch (err) { next(err); }
+  }
+
   async getById(req: Request, res: Response, next: NextFunction) {
     try {
       const data = await customersService.getById(req.params.id, req.tenantId!);

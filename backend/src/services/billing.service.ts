@@ -11,7 +11,7 @@ export const BILLING_CHECKLIST = [
   { key: "partsConsumptionRecorded", label: "Parts Consumption Recorded" },
   { key: "labourRecorded", label: "Labour Recorded" },
   { key: "serviceReportUploaded", label: "Service Report Uploaded (optional)" },
-  { key: "customerSignatureAvailable", label: "Customer Signature Available" },
+  { key: "customerSignatureAvailable", label: "Customer Signature Available (optional)" },
   { key: "equipmentReturned", label: "Equipment Returned" },
   { key: "warrantyUpdated", label: "Warranty Updated" },
   { key: "stockAdjusted", label: "Stock Adjusted" },
@@ -95,6 +95,7 @@ export function computeVerificationChecklist(job: {
   stockMovements?: unknown[];
   reservations?: { status: string; quantity: number; consumed: number; released: number }[];
   estimate?: { status: string; lineItems: { type: string }[] } | null;
+  serviceRequestId?: string | null;
   serviceRequest?: {
     inspectionReport: unknown | null;
     status: string;
@@ -105,6 +106,7 @@ export function computeVerificationChecklist(job: {
   const workLogs = job.workLogs ?? [];
   const stockMovements = job.stockMovements ?? [];
   const reservations = job.reservations ?? [];
+  const ticketLinked = Boolean(job.serviceRequestId ?? job.serviceRequest);
   const hasPartsInEstimate = (estimate?.lineItems ?? []).some(
     (l) => l.type === "part" || l.type === "parts",
   );
@@ -118,8 +120,8 @@ export function computeVerificationChecklist(job: {
 
   const checks: Record<string, boolean> = {
     engineerReportSubmitted: workLogs.length > 0,
-    inspectionCompleted: !!job.serviceRequest?.inspectionReport,
-    customerApprovalAvailable: estimate?.status === "approved",
+    inspectionCompleted: !ticketLinked || !!job.serviceRequest?.inspectionReport,
+    customerApprovalAvailable: !ticketLinked || estimate?.status === "approved",
     partsConsumptionRecorded: !hasPartsInEstimate || stockMovements.length > 0,
     labourRecorded: !hasLabourInEstimate || workLogs.length > 0,
     serviceReportUploaded: !!job.serviceReportDoc,
@@ -129,7 +131,8 @@ export function computeVerificationChecklist(job: {
     stockAdjusted: stockOk,
   };
 
-  const requiredKeys = BILLING_CHECKLIST.map((item) => item.key).filter((key) => key !== "serviceReportUploaded");
+  const optionalKeys = new Set(["serviceReportUploaded", "customerSignatureAvailable"]);
+  const requiredKeys = BILLING_CHECKLIST.map((item) => item.key).filter((key) => !optionalKeys.has(key));
   const allPassed = requiredKeys.every((key) => checks[key]);
   return { checks, allPassed, items: BILLING_CHECKLIST.map((item) => ({ ...item, passed: checks[item.key] })) };
 }

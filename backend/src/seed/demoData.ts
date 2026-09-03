@@ -28,6 +28,7 @@ export const DEMO_USERS = [
   { username: "coordinator", name: "Priya Nair", email: "coordinator@mesms.io", role: "coordinator" as const, branchKey: "b1", avatarColor: "174 62% 47%" },
   { username: "inspector", name: "Daniel Cruz", email: "inspector@mesms.io", role: "inspector" as const, branchKey: "b1", avatarColor: "38 92% 50%" },
   { username: "estimator", name: "Sara Lin", email: "estimator@mesms.io", role: "estimator" as const, branchKey: "b2", avatarColor: "265 70% 55%" },
+  { username: "sales", name: "Noah Adler", email: "sales@mesms.io", role: "sales" as const, branchKey: "b1", avatarColor: "25 85% 45%" },
   { username: "engineer", name: "Marcus Bell", email: "engineer@mesms.io", role: "engineer" as const, branchKey: "b1", avatarColor: "152 62% 40%" },
   { username: "inventory", name: "Hana Kim", email: "inventory@mesms.io", role: "inventory" as const, branchKey: "b2", avatarColor: "200 80% 45%" },
   { username: "billing", name: "Leo Garcia", email: "billing@mesms.io", role: "billing" as const, branchKey: "b1", avatarColor: "20 85% 55%" },

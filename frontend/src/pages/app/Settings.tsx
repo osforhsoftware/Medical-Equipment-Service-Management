@@ -26,7 +26,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { type DemoSeedStatus } from "@/lib/api";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { type DemoSeedStatus, type BackendUser } from "@/lib/api";
 import { useSettings } from "@/context/SettingsContext";
 import { RBAC_MODULES, RBAC_ROLES, buildDefaultRbacMatrix } from "@/config/defaultRbac";
 import { navItems } from "@/config/nav";
@@ -57,6 +58,12 @@ const AUTOMATION_KEYS = [
   { key: "autoGenerateReport" as const, title: "Auto-generate service report", desc: "Create PDF report on job completion" },
 ];
 
+const NONE = "__none__";
+
+function staffForRole(users: BackendUser[], role: Role) {
+  return users.filter((user) => user.role === role || user.roles?.includes(role));
+}
+
 const orgSchema = z.object({
   companyName: fieldRules.requiredString("Company name"),
   supportEmail: fieldRules.email(true),
@@ -77,6 +84,16 @@ export default function Settings() {
   const [savingOrg, setSavingOrg] = useState(false);
   const [savingRbac, setSavingRbac] = useState(false);
   const [togglingKey, setTogglingKey] = useState<string | null>(null);
+  const [staffUsers, setStaffUsers] = useState<BackendUser[]>([]);
+  const [autoAssignInspectorOnCreate, setAutoAssignInspectorOnCreate] = useState(false);
+  const [autoAssignCoordinatorAfterInspection, setAutoAssignCoordinatorAfterInspection] = useState(true);
+  const [autoAssignEstimatorAfterInspection, setAutoAssignEstimatorAfterInspection] = useState(true);
+  const [autoAssignEngineerOnApproval, setAutoAssignEngineerOnApproval] = useState(false);
+  const [defaultCoordinatorUserId, setDefaultCoordinatorUserId] = useState(NONE);
+  const [defaultInspectorUserId, setDefaultInspectorUserId] = useState(NONE);
+  const [defaultEstimatorUserId, setDefaultEstimatorUserId] = useState(NONE);
+  const [defaultEngineerUserId, setDefaultEngineerUserId] = useState(NONE);
+  const [savingAssignment, setSavingAssignment] = useState(false);
   const [demoStatus, setDemoStatus] = useState<DemoSeedStatus | null>(null);
   const [loadingDemo, setLoadingDemo] = useState(true);
   const [seedingDemo, setSeedingDemo] = useState(false);
@@ -110,6 +127,9 @@ export default function Settings() {
 
   useEffect(() => {
     void loadDemoStatus();
+    void api.listUsers({ isActive: true })
+      .then(setStaffUsers)
+      .catch(() => setStaffUsers([]));
   }, []);
 
   const handleSeedDemo = async () => {
@@ -162,24 +182,32 @@ export default function Settings() {
         ]),
       ),
     );
+    setAutoAssignInspectorOnCreate(settings.autoAssignInspectorOnCreate ?? false);
+    setAutoAssignCoordinatorAfterInspection(settings.autoAssignCoordinatorAfterInspection ?? true);
+    setAutoAssignEstimatorAfterInspection(settings.autoAssignEstimatorAfterInspection ?? true);
+    setAutoAssignEngineerOnApproval(settings.autoAssignEngineerOnApproval ?? false);
+    setDefaultCoordinatorUserId(settings.defaultCoordinatorUserId ?? NONE);
+    setDefaultInspectorUserId(settings.defaultInspectorUserId ?? NONE);
+    setDefaultEstimatorUserId(settings.defaultEstimatorUserId ?? NONE);
+    setDefaultEngineerUserId(settings.defaultEngineerUserId ?? NONE);
   }, [settings]);
 
   const saveOrganization = async () => {
     if (!validateOrg(orgValues(), undefined, orgRef.current)) return;
     setSavingOrg(true);
     try {
-      let nextLogoUrl = logoUrl.trim() || null;
+      let nextLogoFileId: string | undefined;
       if (logoFile) {
         const uploaded = await api.uploadFile(logoFile);
-        nextLogoUrl = api.fileDownloadUrl(uploaded.id);
+        nextLogoFileId = uploaded.id;
       }
       const updated = await api.updateSettings({
         companyName: companyName.trim(),
         supportEmail: supportEmail.trim(),
-        logoUrl: nextLogoUrl,
+        ...(nextLogoFileId ? { logoFileId: nextLogoFileId } : {}),
         defaultTaxRate: Number(defaultTaxRate) || 0,
       });
-      if (nextLogoUrl && updated.logoUrl !== nextLogoUrl) {
+      if (nextLogoFileId && updated.logoFileId !== nextLogoFileId) {
         throw new Error("The server did not persist the tenant logo setting.");
       }
       updateLocal(updated);
@@ -205,6 +233,30 @@ export default function Settings() {
       toast.apiError(err, { fallback: "Unable to save setting" });
     } finally {
       setTogglingKey(null);
+    }
+  };
+
+  const saveAssignment = async () => {
+    setSavingAssignment(true);
+    try {
+      const updated = await api.updateSettings({
+        autoAssignInspectorOnCreate,
+        autoAssignCoordinatorAfterInspection,
+        autoAssignEstimatorAfterInspection,
+        autoAssignEngineerOnApproval,
+        defaultCoordinatorUserId: defaultCoordinatorUserId === NONE ? null : defaultCoordinatorUserId,
+        defaultInspectorUserId: defaultInspectorUserId === NONE ? null : defaultInspectorUserId,
+        defaultEstimatorUserId: defaultEstimatorUserId === NONE ? null : defaultEstimatorUserId,
+        defaultEngineerUserId: defaultEngineerUserId === NONE ? null : defaultEngineerUserId,
+      });
+      updateLocal(updated);
+      toast.success("Assignment settings saved", {
+        description: "Auto-assign staff will be used on the next inspection, estimate, and job step.",
+      });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to save assignment settings" });
+    } finally {
+      setSavingAssignment(false);
     }
   };
 
@@ -271,7 +323,7 @@ export default function Settings() {
                   </div>
                   <div className="grid flex-1 gap-2">
                     <Label htmlFor="tenant-logo">Tenant logo</Label>
-                    <Input id="tenant-logo" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)} />
+                    <Input id="tenant-logo" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)} />
                     <p className="text-xs text-muted-foreground">Used on estimates, invoices and branded service documents.</p>
                   </div>
                 </div>
@@ -361,6 +413,68 @@ export default function Settings() {
                 />
               </div>
             ))}
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-base">Service auto-assignment</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                After inspection is submitted, tickets move to Estimate and can be routed automatically to a fixed coordinator and estimate staff. After the estimate is sent, approval continues as usual.
+              </p>
+            </div>
+            <Button size="sm" disabled={savingAssignment} onClick={() => void saveAssignment()}>
+              {savingAssignment ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Save assignment
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-1">
+            {([
+              { key: "autoAssignInspectorOnCreate", title: "Auto-assign inspection technician on new ticket", desc: "Use the default inspection technician when a ticket is created without an assignee", value: autoAssignInspectorOnCreate, set: setAutoAssignInspectorOnCreate },
+              { key: "autoAssignCoordinatorAfterInspection", title: "Notify / route to service coordinator after inspection", desc: "When inspection is submitted, notify the default service coordinator so they can review and assign work", value: autoAssignCoordinatorAfterInspection, set: setAutoAssignCoordinatorAfterInspection },
+              { key: "autoAssignEstimatorAfterInspection", title: "Auto-assign estimate staff after inspection", desc: "When inspection is submitted, assign the default estimate staff and move the ticket to Estimate", value: autoAssignEstimatorAfterInspection, set: setAutoAssignEstimatorAfterInspection },
+              { key: "autoAssignEngineerOnApproval", title: "Auto-assign service engineer on estimate approval", desc: "If no engineer is picked at approval, use the default service engineer", value: autoAssignEngineerOnApproval, set: setAutoAssignEngineerOnApproval },
+            ] as const).map((item) => (
+              <div key={item.key} className="flex items-center justify-between border-b border-border py-3">
+                <div>
+                  <p className="text-sm font-medium">{item.title}</p>
+                  <p className="text-xs text-muted-foreground">{item.desc}</p>
+                </div>
+                <Switch checked={item.value} onCheckedChange={item.set} />
+              </div>
+            ))}
+            <div className="grid gap-4 pt-4 sm:grid-cols-2">
+              {([
+                { label: "Default service coordinator", value: defaultCoordinatorUserId, set: setDefaultCoordinatorUserId, role: "coordinator" as const },
+                { label: "Default inspection technician", value: defaultInspectorUserId, set: setDefaultInspectorUserId, role: "inspector" as const },
+                { label: "Default estimate staff", value: defaultEstimatorUserId, set: setDefaultEstimatorUserId, role: "estimator" as const },
+                { label: "Default service engineer", value: defaultEngineerUserId, set: setDefaultEngineerUserId, role: "engineer" as const },
+              ]).map((field) => {
+                const options = staffForRole(staffUsers, field.role);
+                return (
+                  <div key={field.role} className="grid gap-2">
+                    <Label>{field.label}</Label>
+                    <Select value={field.value} onValueChange={field.set}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={options.length ? "Select staff" : "No staff for this role"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>None</SelectItem>
+                        {options.map((user) => (
+                          <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {options.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        No active {roleLabels[field.role]} accounts. Add one in Users first.
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
           </CardContent>
         </Card>
 

@@ -44,11 +44,11 @@ import { activeTerms, termLabel } from "@/lib/taxonomy";
 const customerSchema = z
   .object({
     name: fieldRules.requiredString("Customer name"),
-    type: fieldRules.selectRequired("a customer type"),
+    type: fieldRules.optionalString(),
     contactPerson: fieldRules.optionalString(),
     email: fieldRules.email(false),
-    phone: fieldRules.phone(true),
-    address: fieldRules.requiredString("Site address"),
+    phone: fieldRules.phone(false),
+    address: fieldRules.optionalString(),
     city: fieldRules.optionalString(),
     country: fieldRules.optionalString(),
     licenseGst: fieldRules.optionalString(),
@@ -132,6 +132,8 @@ export default function Customers() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [nextReference, setNextReference] = useState("");
+  const [loadingReference, setLoadingReference] = useState(false);
   const [saving, setSaving] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -152,12 +154,21 @@ export default function Customers() {
   const loadCustomers = () => void queryClient.invalidateQueries({ queryKey: ["customers"] });
 
   const typeFilterOptions = typeTerms.map((t) => ({ label: t.name, value: t.slug }));
-  const defaultType = activeTypes.find((t) => t.slug === "Hospital")?.slug ?? activeTypes[0]?.slug ?? "";
 
-  const openCreate = () => {
-    setForm({ ...emptyForm, type: defaultType });
+  const openCreate = async () => {
+    setForm({ ...emptyForm });
+    setNextReference("");
     resetValidation();
     setDialogOpen(true);
+    setLoadingReference(true);
+    try {
+      const { reference } = await api.previewCustomerReference();
+      setNextReference(reference);
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to generate customer ID" });
+    } finally {
+      setLoadingReference(false);
+    }
   };
 
   const saveCustomer = async () => {
@@ -165,10 +176,10 @@ export default function Customers() {
 
     setSaving(true);
     try {
-      await api.createCustomer({
+      const created = await api.createCustomer({
         name: form.name.trim(),
-        type: form.type,
-        contactPerson: form.contactPerson.trim(),
+        type: form.type.trim(),
+        contactPerson: form.contactPerson.trim() || form.name.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
         address: form.address.trim(),
@@ -179,7 +190,7 @@ export default function Customers() {
         status: form.status,
       });
       toast.success("Customer created successfully", {
-        description: `${form.name.trim()} was added successfully.`,
+        description: `${created.reference} · ${created.name}`,
       });
       setDialogOpen(false);
       resetValidation();
@@ -194,6 +205,11 @@ export default function Customers() {
   };
 
   const columns: Column<BackendCustomer>[] = [
+    {
+      key: "reference",
+      header: "Customer ID",
+      render: (c) => <span className="font-mono text-xs text-muted-foreground">{c.reference}</span>,
+    },
     {
       key: "name",
       header: "Customer",
@@ -307,6 +323,18 @@ export default function Customers() {
             </DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="customer-reference">Customer ID</Label>
+              <Input
+                id="customer-reference"
+                readOnly
+                value={loadingReference ? "Generating…" : nextReference}
+                className="bg-muted font-mono text-muted-foreground"
+              />
+              <p className="text-xs text-muted-foreground">
+                Auto-generated unique code assigned when you save.
+              </p>
+            </div>
             <div className="grid gap-2" data-field="name">
               <Label htmlFor="customer-name" className={shouldShow("name") ? "text-destructive" : undefined}>
                 Customer name
@@ -320,7 +348,7 @@ export default function Customers() {
                   setForm(next);
                   handleChange("name", next);
                 }}
-                onBlur={() => handleBlur("name", form)}
+                onBlur={(e) => handleBlur("name", { ...form, name: e.target.value })}
                 aria-invalid={shouldShow("name") || undefined}
                 aria-describedby={shouldShow("name") ? "name-error" : undefined}
                 className={cn(shouldShow("name") && "border-destructive focus-visible:ring-destructive")}
@@ -333,7 +361,6 @@ export default function Customers() {
                 <div className="flex items-center justify-between gap-2">
                   <Label className={shouldShow("type") ? "text-destructive" : undefined}>
                     Type
-                    <RequiredMark />
                   </Label>
                   {canManageMasterData ? (
                     <Link to="/app/master-data?type=customer_type" className="text-xs text-primary hover:underline">
@@ -342,9 +369,9 @@ export default function Customers() {
                   ) : null}
                 </div>
                 <Select
-                  value={form.type}
+                  value={form.type || "__none__"}
                   onValueChange={(value) => {
-                    const next = { ...form, type: value };
+                    const next = { ...form, type: value === "__none__" ? "" : value };
                     setForm(next);
                     clearError("type");
                     handleChange("type", next);
@@ -355,9 +382,10 @@ export default function Customers() {
                     className={cn(shouldShow("type") && "border-destructive focus:ring-destructive")}
                     aria-invalid={shouldShow("type") || undefined}
                   >
-                    <SelectValue placeholder="Select type" />
+                    <SelectValue placeholder="Select type (optional)" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__none__">Not specified</SelectItem>
                     {activeTypes.map((t) => (
                       <SelectItem key={t.id} value={t.slug}>
                         {t.name}
@@ -411,7 +439,6 @@ export default function Customers() {
               <div className="grid gap-2" data-field="phone">
                 <Label htmlFor="phone" className={shouldShow("phone") ? "text-destructive" : undefined}>
                   Phone
-                  <RequiredMark />
                 </Label>
                 <Input
                   id="phone"
@@ -432,7 +459,6 @@ export default function Customers() {
             <div className="grid gap-2" data-field="address">
               <Label htmlFor="site-address" className={shouldShow("address") ? "text-destructive" : undefined}>
                 Site address
-                <RequiredMark />
               </Label>
               <Input
                 id="site-address"

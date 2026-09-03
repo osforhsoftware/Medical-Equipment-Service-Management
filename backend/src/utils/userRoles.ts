@@ -1,9 +1,36 @@
 import { prisma } from "@/db/prisma";
 import type { User } from "@prisma/client";
+import { ALL_ROLES } from "@/config/apiAccess";
 import { AppError } from "@/middleware/errorHandler";
 import { toSafeUser, type SafeUser } from "@/repositories/users.repository";
+import { getRoleLabel } from "@/utils/roleLabels";
 
 export type EnrichedUser = SafeUser & { roles: string[] };
+
+export async function ensureSystemRoles(tenantId: string): Promise<void> {
+  const existing = await prisma.role.findMany({
+    where: { tenantId },
+    select: { key: true },
+  });
+  const have = new Set(existing.map((role) => role.key));
+  const missing = ALL_ROLES.filter((key) => !have.has(key));
+  if (missing.length) {
+    await prisma.role.createMany({
+      data: missing.map((key) => ({
+        tenantId,
+        key,
+        name: getRoleLabel(key),
+        isSystem: true,
+        permissions: {},
+      })),
+    });
+  }
+
+  await prisma.role.updateMany({
+    where: { tenantId, key: "estimator", isSystem: true },
+    data: { name: getRoleLabel("estimator") },
+  });
+}
 
 export async function collectUserRoleKeys(
   userId: string,
@@ -79,4 +106,17 @@ export async function userHasAnyRoleKey(
     },
   });
   return !!match;
+}
+
+export async function findActiveStaffWithRole(
+  tenantId: string,
+  userId: string,
+  role: string,
+) {
+  const user = await prisma.user.findFirst({
+    where: { id: userId, tenantId, isActive: true },
+  });
+  if (!user) return null;
+  const allowed = await userHasAnyRoleKey(user.id, tenantId, user.role, [role]);
+  return allowed ? user : null;
 }
