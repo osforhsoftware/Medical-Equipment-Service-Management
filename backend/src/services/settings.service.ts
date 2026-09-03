@@ -9,6 +9,9 @@ type UpdateSettingsData = {
   companyName?: string;
   logoFileId?: string | null;
   supportEmail?: string;
+  companyAddress?: string | null;
+  companyPhone?: string | null;
+  companyWebsite?: string | null;
   defaultTaxRate?: number;
   amcRenewalReminders?: boolean;
   lowStockAlerts?: boolean;
@@ -79,6 +82,9 @@ export class SettingsService {
       logoFileId: settings.logoFileId,
       logoUrl: settings.logoFileId ? `/api/files/${settings.logoFileId}/download` : null,
       supportEmail: settings.supportEmail,
+      companyAddress: settings.companyAddress,
+      companyPhone: settings.companyPhone,
+      companyWebsite: settings.companyWebsite,
       defaultTaxRate: Number(settings.defaultTaxRate),
       amcRenewalReminders: settings.amcRenewalReminders,
       lowStockAlerts: settings.lowStockAlerts,
@@ -120,6 +126,9 @@ export class SettingsService {
       }
     }
     if (data.supportEmail !== undefined) updatePayload.supportEmail = data.supportEmail;
+    if (data.companyAddress !== undefined) updatePayload.companyAddress = data.companyAddress;
+    if (data.companyPhone !== undefined) updatePayload.companyPhone = data.companyPhone;
+    if (data.companyWebsite !== undefined) updatePayload.companyWebsite = data.companyWebsite;
     if (data.defaultTaxRate !== undefined) updatePayload.defaultTaxRate = data.defaultTaxRate;
     if (data.amcRenewalReminders !== undefined) updatePayload.amcRenewalReminders = data.amcRenewalReminders;
     if (data.lowStockAlerts !== undefined) updatePayload.lowStockAlerts = data.lowStockAlerts;

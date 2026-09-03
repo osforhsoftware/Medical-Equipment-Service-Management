@@ -77,6 +77,9 @@ export default function Settings() {
   const { settings, loading, refresh, updateLocal } = useSettings();
   const [companyName, setCompanyName] = useState("");
   const [supportEmail, setSupportEmail] = useState("");
+  const [companyAddress, setCompanyAddress] = useState("");
+  const [companyPhone, setCompanyPhone] = useState("");
+  const [companyWebsite, setCompanyWebsite] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [defaultTaxRate, setDefaultTaxRate] = useState("8");
@@ -172,6 +175,9 @@ export default function Settings() {
     if (!settings) return;
     setCompanyName(settings.companyName);
     setSupportEmail(settings.supportEmail);
+    setCompanyAddress(settings.companyAddress ?? "");
+    setCompanyPhone(settings.companyPhone ?? "");
+    setCompanyWebsite(settings.companyWebsite ?? "");
     setLogoUrl(settings.logoUrl ?? "");
     setDefaultTaxRate(String(settings.defaultTaxRate));
     setRbacMatrix(
@@ -204,6 +210,9 @@ export default function Settings() {
       const updated = await api.updateSettings({
         companyName: companyName.trim(),
         supportEmail: supportEmail.trim(),
+        companyAddress: companyAddress.trim() || null,
+        companyPhone: companyPhone.trim() || null,
+        companyWebsite: companyWebsite.trim() || null,
         ...(nextLogoFileId ? { logoFileId: nextLogoFileId } : {}),
         defaultTaxRate: Number(defaultTaxRate) || 0,
       });
@@ -391,6 +400,34 @@ export default function Settings() {
                     onBlur={() => handleOrgBlur("defaultTaxRate", orgValues())}
                   />
                   {orgShouldShow("defaultTaxRate") && <FormFieldError field="defaultTaxRate" message={orgErrors.defaultTaxRate} />}
+                </div>
+                <div className="grid gap-2 sm:col-span-2">
+                  <Label htmlFor="company-address">Company address</Label>
+                  <Input
+                    id="company-address"
+                    value={companyAddress}
+                    onChange={(e) => setCompanyAddress(e.target.value)}
+                    placeholder="Shown on invoices and estimates"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="company-phone">Company phone</Label>
+                  <Input
+                    id="company-phone"
+                    value={companyPhone}
+                    onChange={(e) => setCompanyPhone(e.target.value)}
+                    placeholder="Mob: 98XXXXXXXX"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="company-website">Website</Label>
+                  <Input
+                    id="company-website"
+                    value={companyWebsite}
+                    onChange={(e) => setCompanyWebsite(e.target.value)}
+                    placeholder="www.example.com"
+                  />
+                  <p className="text-xs text-muted-foreground">Printed on sale and service invoices with your logo and contact details.</p>
                 </div>
               </div>
             </form>

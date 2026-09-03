@@ -75,6 +75,19 @@ export class JobsController {
     } catch (err) { next(err); }
   }
 
+  async saveWorkReport(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await jobsService.saveWorkReport(
+        req.params.id,
+        req.tenantId!,
+        req.user!.userId,
+        req.user!.role,
+        req.body,
+      );
+      res.json(success("Work report saved", data));
+    } catch (err) { next(err); }
+  }
+
   async requestParts(req: Request, res: Response, next: NextFunction) {
     try {
       const data = await jobsService.requestParts(

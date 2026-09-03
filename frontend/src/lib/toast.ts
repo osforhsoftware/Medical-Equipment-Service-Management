@@ -106,6 +106,8 @@ export function getApiErrorMessage(
   if (error instanceof ApiError) {
     const validation = error.errors?.filter(Boolean).join(", ");
     switch (error.status) {
+      case 0:
+        return error.message || "Cannot reach the backend. Start it with npm run dev in the backend folder.";
       case 400:
         return validation || error.message || "Invalid request. Please check your input.";
       case 401:

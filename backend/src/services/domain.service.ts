@@ -210,6 +210,21 @@ export class DomainService {
             await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
           }
         }
+      } else if (
+        estimate.serviceRequestId &&
+        (nextStatus === "revision" || nextStatus === "draft")
+      ) {
+        // Heal stuck tickets that stayed on approval after a prior revision request.
+        const sr = await tx.serviceRequest.findFirst({ where: { id: estimate.serviceRequestId, tenantId } });
+        if (sr) {
+          const current = normalizeTicketStatus(sr.status);
+          if (current === "pending_approval") {
+            const next = resolveTicketEventStatus(sr.status, "estimateRevisionRequested");
+            if (next !== normalizeTicketStatus(sr.status)) {
+              await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
+            }
+          }
+        }
       }
       return tx.estimate.findUniqueOrThrow({
         where: { id: estimateId },
@@ -285,7 +300,7 @@ export class DomainService {
               ? "estimateApproved"
               : status === "rejected"
                 ? "estimateRejected"
-                : "estimatePendingApproval";
+                : "estimateRevisionRequested";
           const next = resolveTicketEventStatus(sr.status, event);
           const engineer =
             status === "approved" && input.engineerId
@@ -447,7 +462,7 @@ export class DomainService {
                 equipmentName: (sr.equipmentName ?? "Equipment").split(" (")[0],
                 engineer: engineer.name,
                 engineerId: engineer.id,
-                type: sr.type,
+                type: sr.type ?? "Other",
                 typeOther: sr.typeOther,
                 status: "scheduled",
                 scheduledFor,
@@ -1200,6 +1215,13 @@ export class DomainService {
             action: fullyPaid ? "Payment received — service paid in full" : "Partial payment received",
             note: `${input.method}${input.reference ? ` · ${input.reference}` : ""} · ${money(input.amount).toString()}`,
           },
+        });
+      }
+
+      if (invoice.salesOrderId) {
+        await tx.salesOrder.update({
+          where: { id: invoice.salesOrderId },
+          data: { paymentStatus: fullyPaid ? "paid" : "partial" },
         });
       }
 

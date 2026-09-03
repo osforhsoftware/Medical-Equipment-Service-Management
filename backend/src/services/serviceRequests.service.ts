@@ -25,10 +25,10 @@ type CreateServiceRequestData = {
   customerId: string;
   equipmentId?: string;
   equipmentIds?: string[];
-  type: string;
+  type?: string;
   typeOther?: string | null;
   priority: string;
-  description: string;
+  description?: string;
   assignedTo?: string;
   assignedName?: string;
   slaDue?: string;
@@ -46,6 +46,19 @@ type UpdateServiceRequestData = {
 type ServiceRequestRecord = Awaited<ReturnType<typeof serviceRequestsRepository.findById>>;
 
 export class ServiceRequestsService {
+  /**
+   * Statuses where field work is done (or ticket is closed). Equipment may accept a new ticket.
+   * Matches Kanban "Completed" + post-job workflow (`pending_final_approval`).
+   */
+  private static readonly INACTIVE_TICKET_STATUSES = [
+    "pending_final_approval",
+    "completed",
+    "pending_invoice",
+    "invoiced",
+    "closed",
+    "finished",
+  ] as const;
+
   private async assertNoActiveTicketForEquipment(
     tenantId: string,
     equipmentIds: string[],
@@ -55,7 +68,7 @@ export class ServiceRequestsService {
     const existing = await prisma.serviceRequest.findFirst({
       where: {
         tenantId,
-        status: { notIn: ["closed", "finished"] as never[] },
+        status: { notIn: [...ServiceRequestsService.INACTIVE_TICKET_STATUSES] as never[] },
         OR: [
           { equipmentId: { in: equipmentIds } },
           { equipmentItems: { some: { equipmentId: { in: equipmentIds } } } },
@@ -78,7 +91,7 @@ export class ServiceRequestsService {
       "Selected equipment";
 
     throw new AppError(
-      `${equipmentLabel} already has an active service ticket (${existing.reference}). Close the existing ticket before creating another one.`,
+      `${equipmentLabel} already has an active service ticket (${existing.reference}). Complete or close the existing ticket before creating another one.`,
       409,
     );
   }
@@ -239,7 +252,7 @@ export class ServiceRequestsService {
     filters: import("@/repositories/serviceRequests.repository").ServiceRequestListFilters,
   ) {
     const assignedToFilter =
-      actorRole === "engineer"
+      actorRole === "engineer" || actorRole === "inspector"
         ? undefined
         : ASSIGNMENT_SCOPED_ROLES.includes(actorRole)
           ? actorId
@@ -247,6 +260,7 @@ export class ServiceRequestsService {
     const { data, total } = await serviceRequestsRepository.findPaginated(tenantId, {
       ...filters,
       assignedTo: assignedToFilter,
+      inspectorId: actorRole === "inspector" ? actorId : undefined,
       estimatorId: actorRole === "estimator" ? actorId : undefined,
       engineerId: actorRole === "engineer" ? actorId : undefined,
     });
@@ -260,9 +274,10 @@ export class ServiceRequestsService {
     statuses: string[],
     filters?: { overdue?: boolean; priority?: string; assignee?: string; search?: string },
   ) {
-    const assignedTo = actorRole === "engineer" ? undefined : ASSIGNMENT_SCOPED_ROLES.includes(actorRole) ? actorId : undefined;
+    const assignedTo = actorRole === "engineer" || actorRole === "inspector" ? undefined : ASSIGNMENT_SCOPED_ROLES.includes(actorRole) ? actorId : undefined;
     return serviceRequestsRepository.countByStatus(tenantId, {
       assignedTo,
+      inspectorId: actorRole === "inspector" ? actorId : undefined,
       estimatorId: actorRole === "estimator" ? actorId : undefined,
       engineerId: actorRole === "engineer" ? actorId : undefined,
       priority: filters?.priority,
@@ -274,7 +289,7 @@ export class ServiceRequestsService {
 
   async getAll(tenantId: string, actorId: string, actorRole: string, filters?: { status?: string }) {
     const assignedToFilter =
-      actorRole === "engineer"
+      actorRole === "engineer" || actorRole === "inspector"
         ? undefined
         : ASSIGNMENT_SCOPED_ROLES.includes(actorRole)
           ? actorId
@@ -282,6 +297,7 @@ export class ServiceRequestsService {
     const rows = await serviceRequestsRepository.findAll(tenantId, {
       ...filters,
       assignedTo: assignedToFilter,
+      inspectorId: actorRole === "inspector" ? actorId : undefined,
       estimatorId: actorRole === "estimator" ? actorId : undefined,
       engineerId: actorRole === "engineer" ? actorId : undefined,
     });
@@ -366,8 +382,9 @@ export class ServiceRequestsService {
       }
     }
 
-    const typeOther = data.type === "Other" ? data.typeOther?.trim() || null : null;
-    const typeLabel = typeOther ? `Other (${typeOther})` : data.type;
+    const type = data.type?.trim() ? data.type : null;
+    const typeOther = type === "Other" ? data.typeOther?.trim() || null : null;
+    const typeLabel = typeOther ? `Other (${typeOther})` : type;
 
     const sr = await serviceRequestsRepository.create(tenantId, {
       reference,
@@ -376,10 +393,10 @@ export class ServiceRequestsService {
       equipmentId: primaryEquipId,
       equipmentName: primaryEquipName,
       branchId,
-      type: data.type as never,
+      type: type as never,
       typeOther,
       priority: data.priority as never,
-      description: data.description,
+      description: data.description?.trim() ?? "",
       createdBy,
       assignedTo: data.assignedTo,
       assignedName: data.assignedName,
@@ -396,7 +413,7 @@ export class ServiceRequestsService {
       sr.id,
       createdBy,
       "Service ticket created",
-      `Type: ${typeLabel}, Priority: ${data.priority}`,
+      `Type: ${typeLabel ?? "unspecified"}, Priority: ${data.priority}`,
     );
 
     if (data.assignedTo) {
@@ -480,7 +497,9 @@ export class ServiceRequestsService {
     }
     if (assignmentRole === "estimator") {
       updateData.assignedEstimatorId = assignee.id;
-      if (normalizeTicketStatus(existing.status) === "inspection") {
+      const status = normalizeTicketStatus(existing.status);
+      // After inspection, assignment moves the ticket into the estimate staff queue.
+      if (status === "inspection") {
         updateData.status = "estimate";
       }
     }

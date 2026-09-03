@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 export const createInventorySchema = z.object({
-  sku: z.string().min(2, "SKU is required").max(64),
+  sku: z.string().trim().max(64).optional(),
   name: z.string().min(2, "Name is required").max(200),
-  category: z.string().min(1, "Category is required").max(80),
-  subcategory: z.string().min(1, "Subcategory is required").max(80),
+  category: z.string().max(80).optional(),
+  subcategory: z.string().max(80).optional().nullable(),
   description: z.string().max(5000).optional().nullable(),
   branchId: z.string().min(1).optional(),
   inStock: z.coerce.number().int().min(0).optional().default(0),

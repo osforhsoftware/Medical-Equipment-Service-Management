@@ -5,7 +5,7 @@ import { MobileHeader } from "@/components/mobile/MobileHeader";
 import { MobileSearchBar } from "@/components/mobile/MobileSearchBar";
 import { FilterPills } from "@/components/mobile/FilterPills";
 import { WorkflowStatusChip } from "@/components/mobile/WorkflowStatusChip";
-import { useMobilePullRefresh, useMobileUnreadCount } from "@/components/mobile/MobileLayout";
+import { useMobilePullRefresh, useMobileUnreadCount } from "@/hooks/useMobilePullRefresh";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { SERVICE_BILLING_ROLES } from "@/config/roles";
 import { ApiError, api, type BillingQueueKey, type BillingQueueRow } from "@/lib/api";

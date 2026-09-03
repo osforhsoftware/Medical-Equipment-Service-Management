@@ -18,11 +18,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoRow, ChargeBreakdown, downloadInvoicePdf, normalizeInvoiceLineDescription } from "@/components/billing/billing-ui";
-import { InvoiceLineEditor, newBillingLine } from "@/components/billing/InvoiceLineEditor";
-import { ApiError, api, type BackendCatalogItem, type BackendInventoryItem, type BackendInvoice, type BillingJobContext, type InvoiceLineInput } from "@/lib/api";
-import { summarizeChargeGroups } from "@/lib/billingCharges";
+import { InvoiceLineEditor } from "@/components/billing/InvoiceLineEditor";
+import { ApiError, api, type BackendCatalogItem, type BackendCustomer, type BackendInventoryItem, type BackendInvoice, type BillingJobContext, type InvoiceLineInput } from "@/lib/api";
+import { newBillingLine, summarizeChargeGroups } from "@/lib/billingCharges";
 import { PAYMENT_METHOD_OPTIONS } from "@/lib/fixedOptions";
-import { formatCurrency, formatDateTime } from "@/lib/format";
+import { formatCurrency, formatDate, formatDateTime, formatServiceStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 const newLine = (): InvoiceLineInput => newBillingLine("product");
@@ -97,6 +97,7 @@ export default function BillingInvoiceDetail() {
   const { invoiceId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [invoice, setInvoice] = useState<BackendInvoice | null>(null);
+  const [customer, setCustomer] = useState<BackendCustomer | null>(null);
   const [context, setContext] = useState<BillingJobContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -125,6 +126,15 @@ export default function BillingInvoiceDetail() {
     try {
       const inv = await api.getInvoice(invoiceId);
       setInvoice(inv);
+      setCustomer(null);
+      setContext(null);
+      if (inv.customerId) {
+        try {
+          setCustomer(await api.getCustomer(inv.customerId));
+        } catch {
+          setCustomer(null);
+        }
+      }
       if (inv.jobId) {
         setContext(await api.getBillingJobContext(inv.jobId));
       }
@@ -282,6 +292,36 @@ export default function BillingInvoiceDetail() {
     }))),
     [lines],
   );
+
+  const isSaleInvoice = Boolean(invoice?.salesOrderId) || Boolean(invoice && !invoice.jobId);
+  const customerAddress = customer
+    ? [customer.address, customer.city, customer.country].filter(Boolean).join(", ")
+    : undefined;
+  const invoiceDetailRows = useMemo(() => {
+    if (!invoice) return [];
+    if (isSaleInvoice) {
+      return [
+        { label: "Sale", value: invoice.jobRef || "—" },
+        { label: "Status", value: invoice.status },
+        { label: "Due date", value: formatDate(invoice.dueAt) },
+      ];
+    }
+    return [
+      ...(context?.job.equipmentName
+        ? [{ label: "Equipment", value: context.job.equipmentName }]
+        : []),
+      ...(context?.job.equipment?.location
+        ? [{ label: "Location", value: context.job.equipment.location }]
+        : []),
+      { label: "Job", value: invoice.jobRef || "—" },
+      {
+        label: "Status",
+        value: context?.job.status
+          ? formatServiceStatus(context.job.status)
+          : invoice.status,
+      },
+    ];
+  }, [invoice, isSaleInvoice, context]);
 
   const printInvoice = () => {
     window.print();
@@ -479,15 +519,20 @@ export default function BillingInvoiceDetail() {
                               kind="Invoice"
                               reference={invoice.reference}
                               customerName={invoice.customerName}
+                              customerAddress={customerAddress}
+                              customerPhone={customer?.phone || undefined}
+                              customerEmail={customer?.email || undefined}
                               equipmentName={context?.job.equipmentName}
                               issueDate={invoice.issuedAt}
                               validOrDueLabel="Due date"
                               validOrDueDate={editDueAt}
                               ticketRef={invoice.jobRef}
+                              detailsHeading={isSaleInvoice ? "Sale details" : "Project details"}
+                              detailRows={invoiceDetailRows}
                               lines={lines}
                               notes={context?.job.serviceRequest?.description ? `Service: ${context.job.serviceRequest.description}` : undefined}
                               hideToolbar
-                              showSignature
+                              showFooter={false}
                             />
                           ) : (
                             <p className="p-10 text-center text-muted-foreground">Add at least one line item.</p>
@@ -685,15 +730,20 @@ export default function BillingInvoiceDetail() {
                     kind="Invoice"
                     reference={invoice.reference}
                     customerName={invoice.customerName}
+                    customerAddress={customerAddress}
+                    customerPhone={customer?.phone || undefined}
+                    customerEmail={customer?.email || undefined}
                     equipmentName={context?.job.equipmentName}
                     issueDate={invoice.issuedAt}
                     validOrDueLabel="Due date"
                     validOrDueDate={invoice.dueAt}
                     ticketRef={invoice.jobRef}
+                    detailsHeading={isSaleInvoice ? "Sale details" : "Project details"}
+                    detailRows={invoiceDetailRows}
                     lines={lines}
                     notes={context?.job.serviceRequest?.description ? `Service: ${context.job.serviceRequest.description}` : undefined}
                     hideToolbar
-                    showSignature
+                    showFooter={false}
                   />
                 ) : (
                   <p className="p-10 text-center text-muted-foreground">No line items on this invoice.</p>

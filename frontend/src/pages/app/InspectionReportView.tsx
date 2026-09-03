@@ -86,7 +86,7 @@ export default function InspectionReportView() {
       <div className="print-preview-page min-h-[70vh] space-y-4">
         <div className="no-print flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <Button variant="ghost" size="sm" className="-ml-2 w-fit text-muted-foreground" asChild>
-            <Link to={`/app/inspections/${id}`}>
+            <Link to={`/app/inspections/${id}${searchParams.get("from") === "history" ? "?from=history" : ""}`}>
               <ArrowLeft className="mr-1 h-4 w-4" /> Back to inspection
             </Link>
           </Button>
@@ -139,7 +139,9 @@ export default function InspectionReportView() {
               </Button>
             ) : (
               <Button className="mt-4" variant="outline" asChild>
-                <Link to="/app/inspections">Back to inspections</Link>
+                <Link to={searchParams.get("from") === "history" ? "/app/inspections?view=history" : "/app/inspections"}>
+                  Back to inspections
+                </Link>
               </Button>
             )}
           </div>

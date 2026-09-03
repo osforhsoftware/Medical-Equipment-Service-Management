@@ -42,6 +42,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
 import { api,
   type DashboardData,
   type DashboardQueueItem,
@@ -51,13 +52,15 @@ import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { TICKET_CREATE_ROLES } from "@/config/roles";
+import { userCanAccessPath } from "@/lib/userRoles";
 
 const JOB_STATUS_ACTIONS = [
   { value: "scheduled", label: "Assigned" },
   { value: "inProgress", label: "In Progress" },
   { value: "partsPending", label: "Waiting for Spare Parts" },
-  { value: "review", label: "Waiting for Customer" },
-  { value: "completed", label: "Completed" },
+  { value: "review", label: "Submit for Review" },
+  { value: "completed", label: "Approve & Complete" },
 ] as const;
 
 type QuickAction = { label: string; to: string; icon: LucideIcon };
@@ -123,6 +126,7 @@ function roleQuickActions(role: Role): QuickAction[] {
       return [
         { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList },
         { label: "Jobs", to: "/app/jobs", icon: Wrench },
+        { label: "Sales", to: "/app/sales", icon: ShoppingCart },
         { label: "Inventory", to: "/app/inventory", icon: Package },
         { label: "Billing", to: "/app/billing", icon: Receipt },
         { label: "Users", to: "/app/users", icon: UserCheck },
@@ -248,7 +252,8 @@ function QueueRow({
 }
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
+  const { rbacMatrix } = useSettings();
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -274,7 +279,11 @@ export default function Dashboard() {
   }, [loadDashboard]);
 
   const cards = useMemo(() => (data ? overviewCards(role, data) : []), [data, role]);
-  const actions = useMemo(() => roleQuickActions(role), [role]);
+  const actions = useMemo(() => {
+    if (!user) return [];
+    return roleQuickActions(role).filter((action) => userCanAccessPath(user, action.to, rbacMatrix));
+  }, [role, user, rbacMatrix]);
+  const canCreateTicket = hasRole(TICKET_CREATE_ROLES);
 
   const updateJobStatus = async (jobId: string, status: string) => {
     setUpdatingJobId(jobId);
@@ -336,8 +345,8 @@ export default function Dashboard() {
         title={`Welcome back, ${user.name.split(" ")[0]}`}
         description={`${roleLabels[role]} · role-based work overview`}
         actions={
-          role === "admin" || role === "coordinator" ? (
-            <Button onClick={() => navigate("/app/service-requests")} variant="brand">
+          canCreateTicket ? (
+            <Button onClick={() => navigate("/app/service-tickets")} variant="brand">
               New Service Ticket
             </Button>
           ) : (
@@ -419,7 +428,13 @@ export default function Dashboard() {
                   actions={
                     canUpdateJobStatus && item.kind === "job" ? (
                       <div className="flex max-w-[11rem] flex-col gap-1">
-                        {JOB_STATUS_ACTIONS.filter((s) => formatJobStatus(s.value) !== item.status).slice(0, 3).map((s) => (
+                        {JOB_STATUS_ACTIONS.filter(
+                          (s) =>
+                            s.value !== "completed" &&
+                            formatJobStatus(s.value) !== item.status,
+                        )
+                          .slice(0, 3)
+                          .map((s) => (
                           <Button
                             key={s.value}
                             size="sm"
@@ -445,6 +460,7 @@ export default function Dashboard() {
 
         {/* Quick actions + notifications */}
         <div className="space-y-6">
+          {actions.length > 0 ? (
           <Card className="shadow-card">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Quick Actions</CardTitle>
@@ -463,6 +479,7 @@ export default function Dashboard() {
               ))}
             </CardContent>
           </Card>
+          ) : null}
 
           <Card className="shadow-card">
             <CardHeader className="flex flex-row items-center justify-between pb-3">

@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { useAuth } from "@/context/AuthContext";
+import { JOB_CREATE_ROLES } from "@/config/roles";
 import { api, type BackendUser } from "@/lib/api";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
 import { formatJobStatus, todayInputValue, toApiJobStatus } from "@/lib/format";
@@ -148,7 +149,7 @@ function JobColumn({ status, label }: { status: string; label: string }) {
 
 export default function Jobs() {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const [assignableStaff, setAssignableStaff] = useState<BackendUser[]>([]);
   const [loadingStaff, setLoadingStaff] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -161,8 +162,8 @@ export default function Jobs() {
     schema: scheduleSchema,
   });
 
-  const isEngineer = user?.role === "engineer";
-  const canCreate = user?.role === "admin" || user?.role === "coordinator";
+  const isEngineer = hasRole(["engineer"]) && !hasRole(["admin", "coordinator"]);
+  const canCreate = hasRole(JOB_CREATE_ROLES);
 
   const requestsQuery = useQuery({
     queryKey: ["service-requests", "job-eligible"],

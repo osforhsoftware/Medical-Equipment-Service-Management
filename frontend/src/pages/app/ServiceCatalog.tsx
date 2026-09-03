@@ -18,6 +18,8 @@ import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import { api, type BackendCatalogItem, type CatalogItemInput } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
 import { toast } from "@/lib/toast";
+import { useAuth } from "@/context/AuthContext";
+import { CATALOG_WRITE_ROLES } from "@/config/roles";
 
 const catalogSchema = z.object({
   code: fieldRules.requiredString("Code"),
@@ -45,6 +47,8 @@ const blank: CatalogItemInput = {
 };
 
 export default function ServiceCatalog() {
+  const { hasRole } = useAuth();
+  const canManage = hasRole(CATALOG_WRITE_ROLES);
   const queryClient = useQueryClient();
   const catalogQuery = useQuery({
     queryKey: ["service-catalog"],
@@ -71,6 +75,7 @@ export default function ServiceCatalog() {
   });
 
   const edit = (item?: BackendCatalogItem) => {
+    if (!canManage) return;
     setEditing(item ?? null);
     setForm(item ? {
       branchId: item.branchId,
@@ -114,16 +119,36 @@ export default function ServiceCatalog() {
     { key: "unitPrice", header: "Rate", render: (item) => <span className="font-medium">{formatCurrency(item.unitPrice)}</span> },
     { key: "taxRate", header: "Tax", render: (item) => <span>{Number(item.taxRate)}%</span> },
     { key: "isActive", header: "Status", render: (item) => <StatusBadge status={item.isActive ? "active" : "inactive"} /> },
-    { key: "actions" as keyof BackendCatalogItem, header: "", render: (item) => <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); edit(item); }}><Pencil className="h-4 w-4" /></Button> },
+    ...(canManage
+      ? [{
+          key: "actions" as keyof BackendCatalogItem,
+          header: "",
+          render: (item: BackendCatalogItem) => (
+            <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); edit(item); }}>
+              <Pencil className="h-4 w-4" />
+            </Button>
+          ),
+        } satisfies Column<BackendCatalogItem>]
+      : []),
   ];
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Service Catalog" description="Reusable services, labor rates and tax defaults for estimates." actions={<Button variant="brand" onClick={() => edit()}><Plus className="mr-1 h-4 w-4" /> Add service</Button>} />
+      <PageHeader
+        title="Service Catalog"
+        description="Reusable services, labor rates and tax defaults for estimates."
+        actions={
+          canManage ? (
+            <Button variant="brand" onClick={() => edit()}>
+              <Plus className="mr-1 h-4 w-4" /> Add service
+            </Button>
+          ) : undefined
+        }
+      />
       {catalogQuery.isLoading ? <div className="flex justify-center gap-2 py-16 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /> Loading catalog…</div> : (
         <DataTable data={items} columns={columns} searchKeys={["code", "name", "category"]} searchPlaceholder="Search services…" emptyMessage="No catalog services yet." />
       )}
-      <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) resetValidation(); setOpen(isOpen); }}>
+      <Dialog open={canManage && open} onOpenChange={(isOpen) => { if (!isOpen) resetValidation(); setOpen(isOpen); }}>
         <DialogContent ref={dialogRef} className="sm:max-w-lg">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Wrench className="h-5 w-5" /> {editing ? "Edit service" : "Add service"}</DialogTitle></DialogHeader>
           <form

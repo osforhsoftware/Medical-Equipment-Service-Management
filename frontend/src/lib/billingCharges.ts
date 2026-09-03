@@ -18,6 +18,17 @@ export const BILLING_ADD_LINE_TYPES = [
   { value: "other", label: "Other Charge" },
 ] as const;
 
+export function newBillingLine(type: string = "product") {
+  return {
+    type,
+    description: "",
+    quantity: 1,
+    unitPrice: 0,
+    taxRate: 0,
+    discount: 0,
+  };
+}
+
 export const ENGINEER_EXTRA_TYPES = [
   { value: "product", label: "Product" },
   { value: "equipment", label: "Equipment" },

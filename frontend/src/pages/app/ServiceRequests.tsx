@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { Plus, AlertCircle, ChevronDown, Loader2, X } from "lucide-react";
+import { Plus, ChevronDown, Loader2, X } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -30,6 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAuth } from "@/context/AuthContext";
+import { TICKET_CREATE_ROLES } from "@/config/roles";
 import {
   api,
   type BackendUser,
@@ -39,7 +40,8 @@ import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
 import { toast } from "@/lib/toast";
 
-function formatServiceType(type: string, typeOther?: string | null) {
+function formatServiceType(type?: string | null, typeOther?: string | null) {
+  if (!type) return "—";
   return formatFixedOption(SERVICE_TYPE_OPTIONS, type, typeOther);
 }
 
@@ -82,10 +84,10 @@ const ASSIGNABLE_ROLES: Role[] = ["coordinator", "inspector", "estimator", "engi
 
 const schema = z.object({
   customerId: z.string().min(1, "Select a customer"),
-  type: z.string().min(1, "Select a type"),
+  type: z.string().optional(),
   typeOther: z.string().optional(),
   priority: z.string().min(1, "Select priority"),
-  description: z.string().trim().min(1, "Description is required").max(500),
+  description: z.string().trim().max(500),
 }).superRefine((data, ctx) => {
   if (data.type === "Other" && !data.typeOther?.trim()) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["typeOther"], message: "Please specify the service type" });
@@ -239,18 +241,20 @@ export default function ServiceRequests() {
     schema,
   });
 
-  const canCreate = hasRole(["coordinator", "admin"]);
+  const canCreate = hasRole(TICKET_CREATE_ROLES);
 
   const customersQuery = useQuery({
     queryKey: ["customers", "options"],
     queryFn: () => api.listCustomersOptions(),
     staleTime: 60_000,
+    enabled: open,
   });
 
   const equipmentQuery = useQuery({
     queryKey: ["equipment", "options", form.customerId],
     queryFn: () => api.listEquipmentOptions(form.customerId ? { customerId: form.customerId } : undefined),
     staleTime: 60_000,
+    enabled: open,
   });
 
   const countsQuery = useQuery({
@@ -306,7 +310,7 @@ export default function ServiceRequests() {
     try {
       await api.createServiceRequest({
         customerId: parsed.data.customerId,
-        type: parsed.data.type,
+        type: parsed.data.type || undefined,
         typeOther: parsed.data.type === "Other" ? parsed.data.typeOther?.trim() || null : null,
         priority: parsed.data.priority,
         description: parsed.data.description,
@@ -357,11 +361,7 @@ export default function ServiceRequests() {
             >
               <Plus className="mr-1 h-4 w-4" /> New Ticket
             </Button>
-          ) : (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <AlertCircle className="h-3.5 w-3.5" /> Only coordinators create requests
-            </span>
-          )
+          ) : undefined
         }
       />
 
@@ -484,10 +484,9 @@ export default function ServiceRequests() {
               <div className="grid gap-2" data-field="type">
                 <Label className={shouldShow("type") ? "text-destructive" : undefined}>
                   Type
-                  <RequiredMark />
                 </Label>
                 <Select
-                  value={form.type}
+                  value={form.type || undefined}
                   onValueChange={(v) => {
                     const next = { ...form, type: v, typeOther: v === "Other" ? form.typeOther : "" };
                     setForm(next);
@@ -567,7 +566,6 @@ export default function ServiceRequests() {
             <div className="grid gap-2" data-field="description">
               <Label className={shouldShow("description") ? "text-destructive" : undefined}>
                 Description
-                <RequiredMark />
               </Label>
               <Textarea
                 id="description"

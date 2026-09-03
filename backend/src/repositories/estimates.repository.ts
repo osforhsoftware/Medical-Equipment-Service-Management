@@ -35,6 +35,7 @@ function buildWhere(tenantId: string, filters: Omit<EstimateListFilters, "skip" 
           OR: [
             { salespersonId: filters.estimatorId },
             { revisions: { some: { createdBy: filters.estimatorId } } },
+            { serviceRequest: { assignedEstimatorId: filters.estimatorId } },
           ],
         }
       : {}),

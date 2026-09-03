@@ -7,7 +7,7 @@ import { MobileSearchBar } from "@/components/mobile/MobileSearchBar";
 import { FilterPills } from "@/components/mobile/FilterPills";
 import { ServiceJobCard, type ServiceJobCardData } from "@/components/mobile/ServiceJobCard";
 import { WorkflowTimeline } from "@/components/mobile/WorkflowTimeline";
-import { useMobilePullRefresh, useMobileUnreadCount } from "@/components/mobile/MobileLayout";
+import { useMobilePullRefresh, useMobileUnreadCount } from "@/hooks/useMobilePullRefresh";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";

@@ -76,3 +76,16 @@ export const navItems: NavItem[] = [
 ];
 
 export const navGroups = ["Overview", "Sales", "Operations", "Supply Chain", "Contracts & Finance", "Insights", "Administration"];
+
+/** Map a staff app path to the RBAC module label that guards it. */
+export function navModuleForPath(pathname: string): string | undefined {
+  if (pathname === "/app" || pathname === "/app/") return "Dashboard";
+  const normalized = pathname.startsWith("/app/service-requests")
+    ? pathname.replace(/^\/app\/service-requests/, "/app/service-tickets")
+    : pathname;
+  const match = navItems
+    .filter((item) => item.to !== "/app")
+    .sort((a, b) => b.to.length - a.to.length)
+    .find((item) => normalized === item.to || normalized.startsWith(`${item.to}/`));
+  return match?.label;
+}

@@ -13,6 +13,7 @@ import { useListingUrlState } from "@/hooks/useListingUrlState";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { EMPTY_PAGINATION_META } from "@/lib/listing";
 import { useAuth } from "@/context/AuthContext";
+import { CUSTOMER_READ_ROLES } from "@/config/roles";
 import { termLabel } from "@/lib/taxonomy";
 
 function formatDate(value: string | null | undefined) {
@@ -29,6 +30,7 @@ export default function EquipmentPage() {
   const queryClient = useQueryClient();
   const { hasRole } = useAuth();
   const canManage = hasRole(["admin", "coordinator", "inventory"]);
+  const canReadCustomers = hasRole(CUSTOMER_READ_ROLES);
   const {
     search,
     setSearch,
@@ -55,6 +57,7 @@ export default function EquipmentPage() {
     queryKey: ["customers", "options"],
     queryFn: () => api.listCustomersOptions(),
     staleTime: 60_000,
+    enabled: canReadCustomers,
   });
 
   const categoriesQuery = useQuery({
@@ -178,7 +181,7 @@ export default function EquipmentPage() {
           canManage ? (
             <Button
               onClick={openCreate}
-              disabled={customers.length === 0}
+              disabled={canReadCustomers && customersQuery.isSuccess && customers.length === 0}
               variant="brand"
             >
               <Plus className="mr-1 h-4 w-4" /> Add Equipment

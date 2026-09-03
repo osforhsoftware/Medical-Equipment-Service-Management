@@ -69,7 +69,7 @@ export default function Sales() {
       <div className="space-y-6">
         <PageHeader
           title="Sales floor"
-          description="Product sales, sale reports, and sale billing. Service estimates stay with Estimate Staff."
+          description="Product sales, sale reports, and sale billing. Service-ticket estimates stay with Estimate Staff."
           actions={
             canBuild ? (
               <Button variant="brand" onClick={() => setSaleOpen(true)}>
@@ -87,7 +87,7 @@ export default function Sales() {
             <div className="min-w-0 flex-1">
               <p className="font-semibold">Product sales desk</p>
               <p className="text-sm text-muted-foreground">
-                Add sold items, review product sale reports, then create the sale invoice from the order.
+                Add sold parts, service amounts, and other charges, then create the customer sale invoice. Service-ticket billing stays under Billing.
               </p>
             </div>
             {canBuild ? (
@@ -287,7 +287,7 @@ export default function Sales() {
             </div>
             {canBill ? (
               <p className="text-xs text-muted-foreground">
-                Create sale invoices from each order. Service-ticket invoices are billed separately under Billing.
+                Create sale invoices from each order and record customer payments here. Service-ticket invoices are billed separately under Billing.
               </p>
             ) : null}
           </TabsContent>

@@ -250,7 +250,7 @@ export class SeedService {
             equipmentId: equipmentIds[sr.equipmentKey],
             equipmentName: sr.equipmentName,
             branchId: branchIds[sr.branchKey],
-            type: sr.type,
+            type: sr.type ?? "Other",
             priority: sr.priority,
             status: sr.status,
             description: sr.description,

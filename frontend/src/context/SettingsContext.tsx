@@ -1,5 +1,6 @@
 // @refresh reset
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createHmrContext } from "@/context/hmrContext";
 import { useAuth } from "@/context/AuthContext";
 import { api, ApiError, type BackendSettings } from "@/lib/api";
 import { buildDefaultRbacMatrix } from "@/config/defaultRbac";
@@ -14,7 +15,7 @@ interface SettingsState {
   updateLocal: (next: BackendSettings) => void;
 }
 
-const SettingsContext = createContext<SettingsState | undefined>(undefined);
+const SettingsContext = createHmrContext<SettingsState>("__MESMS_SETTINGS_CONTEXT__");
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();

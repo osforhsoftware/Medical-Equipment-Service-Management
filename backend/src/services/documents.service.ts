@@ -2,7 +2,7 @@ import PDFDocument from "pdfkit";
 import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
 import { fileStorageService } from "@/services/fileStorage.service";
-import { BILLING_CHARGE_GROUPS, chargeGroupForType, lineAmount } from "@/utils/invoiceCharges";
+import { BILLING_CHARGE_GROUPS, chargeGroupForType } from "@/utils/invoiceCharges";
 
 type DocumentKind = "estimate" | "invoice" | "service-report" | "inspection-report";
 
@@ -11,7 +11,6 @@ const MUTED = "#64748b";
 const LABEL = "#94a3b8";
 const RULE = "#e2e8f0";
 const RULE_STRONG = "#cbd5e1";
-const WASH = "#f8fafc";
 const ACCENT = "#1657a8";
 const LEFT = 50;
 const RIGHT = 545;
@@ -19,10 +18,17 @@ const WIDTH = RIGHT - LEFT;
 const PAGE_BOTTOM = 730;
 
 function money(value: unknown) {
-  return `Rs ${Number(value ?? 0).toLocaleString("en-IN", {
+  return `Rs. ${Number(value ?? 0).toLocaleString("en-IN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+}
+
+function qtyMoney(value: unknown) {
+  return Number(value ?? 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 async function toBuffer(doc: PDFKit.PDFDocument): Promise<Buffer> {
@@ -73,6 +79,7 @@ export class DocumentsService {
     tenantId: string,
     title: string,
     reference: string,
+    meta?: Array<{ label: string; value: string }>,
   ) {
     const [tenant, settings] = await Promise.all([
       prisma.tenant.findUnique({ where: { id: tenantId } }),
@@ -88,88 +95,122 @@ export class DocumentsService {
           "system",
           "admin",
         );
-        doc.image(buffer, LEFT, 58, { fit: [44, 44] });
+        doc.image(buffer, LEFT, 48, { fit: [48, 48] });
         logoDrawn = true;
       } catch {
         // Keep the document valid if an old logo file is unavailable.
       }
     }
 
-    const headerTop = 58;
-    const headerH = 44;
-    const textX = logoDrawn ? LEFT + 56 : LEFT;
+    const headerTop = 48;
+    const textX = logoDrawn ? LEFT + 60 : LEFT;
     const name = tenant?.name ?? "MESMS";
-    doc.fillColor(INK).font("Helvetica-Bold").fontSize(14).text(name, textX, headerTop + 6, {
-      width: 248,
-      lineBreak: false,
-    });
-    doc.font("Helvetica").fontSize(9).fillColor(MUTED).text(settings?.supportEmail ?? "", textX, headerTop + 26, {
-      width: 248,
-      lineBreak: false,
-    });
+    const contactLines = [
+      displayValue(settings?.companyAddress),
+      settings?.companyPhone ? `Mob: ${settings.companyPhone}` : "",
+      displayValue(settings?.supportEmail),
+      displayValue(settings?.companyWebsite),
+    ].filter(Boolean);
 
-    doc.fillColor(INK).font("Helvetica-Bold").fontSize(16).text(title.toUpperCase(), 330, headerTop + 4, {
+    doc.fillColor(INK).font("Helvetica-Bold").fontSize(13).text(name.toUpperCase(), textX, headerTop, {
+      width: 260,
+    });
+    let contactY = headerTop + 18;
+    doc.font("Helvetica").fontSize(9).fillColor(MUTED);
+    for (const line of contactLines) {
+      doc.text(line, textX, contactY, { width: 260, lineBreak: false });
+      contactY += 12;
+    }
+    if (!contactLines.length && settings?.supportEmail) {
+      doc.text(settings.supportEmail, textX, contactY, { width: 260, lineBreak: false });
+      contactY += 12;
+    }
+
+    const metaRows = meta?.length
+      ? meta
+      : [
+          { label: `${title} No`, value: reference },
+        ];
+
+    doc.fillColor(INK).font("Helvetica-Bold").fontSize(24).text(title.toUpperCase(), 330, headerTop, {
       width: WIDTH - 280,
       align: "right",
       lineBreak: false,
     });
-    doc.fillColor(INK).font("Helvetica-Bold").fontSize(11).text(reference, 330, headerTop + 26, {
-      width: WIDTH - 280,
-      align: "right",
-      lineBreak: false,
-    });
-    const ruleY = headerTop + headerH + 14;
+    let metaY = headerTop + 32;
+    for (const row of metaRows) {
+      doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text(`${row.label}:`, 360, metaY, {
+        width: 78,
+        lineBreak: false,
+      });
+      doc.font("Helvetica").fontSize(9).text(row.value, 438, metaY, {
+        width: RIGHT - 438,
+        align: "right",
+        lineBreak: false,
+      });
+      metaY += 14;
+    }
+
+    const ruleY = Math.max(contactY, metaY) + 10;
     doc.moveTo(LEFT, ruleY).lineTo(RIGHT, ruleY).lineWidth(1).strokeColor(RULE).stroke();
-    doc.moveTo(LEFT, ruleY).lineTo(LEFT + 56, ruleY).lineWidth(2).strokeColor(ACCENT).stroke();
     doc.lineWidth(1);
-    doc.y = ruleY + 20;
+    doc.y = ruleY + 14;
   }
 
   private partyAndMeta(
     doc: PDFKit.PDFDocument,
     billTo: { name: string; lines?: string[] },
     meta: Array<{ label: string; value: string }>,
+    options?: { detailsHeading?: string },
   ) {
     const top = doc.y;
-    const colW = WIDTH / 2;
+    const midX = LEFT + WIDTH / 2;
+    const colW = WIDTH / 2 - 12;
 
-    doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(8).text("BILL TO", LEFT, top);
-    doc.fillColor(INK).font("Helvetica-Bold").fontSize(12).text(billTo.name, LEFT, top + 14, {
-      width: colW - 16,
+    doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text("BILL TO", LEFT, top);
+    doc.fillColor(INK).font("Helvetica-Bold").fontSize(11).text(billTo.name, LEFT, top + 14, {
+      width: colW,
     });
     doc.font("Helvetica").fontSize(9).fillColor(MUTED);
-    let ly = top + 32;
+    let ly = top + 30;
     for (const line of billTo.lines ?? []) {
-      doc.text(line, LEFT, ly, { width: colW - 16 });
-      ly += 13;
+      doc.text(line, LEFT, ly, { width: colW });
+      ly += 12;
     }
 
-    let my = top;
+    const detailsHeading = (options?.detailsHeading ?? "PROJECT DETAILS").toUpperCase();
+    doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text(detailsHeading, midX + 12, top);
+    let my = top + 14;
     for (const row of meta) {
-      doc.fillColor(LABEL).font("Helvetica").fontSize(8).text(row.label.toUpperCase(), LEFT + colW, my + 1, {
-        width: 92,
+      doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text(`${row.label}:`, midX + 12, my, {
+        width: 72,
+        lineBreak: false,
       });
-      doc.fillColor(INK).font("Helvetica-Bold").fontSize(10).text(row.value, LEFT + colW + 96, my, {
-        width: colW - 96,
+      doc.fillColor(MUTED).font("Helvetica").fontSize(9).text(row.value, midX + 84, my, {
+        width: colW - 72,
       });
-      my += 16;
+      my += 14;
     }
 
-    doc.y = Math.max(ly, my) + 18;
+    const bottom = Math.max(ly, my) + 10;
+    doc.moveTo(midX, top - 2).lineTo(midX, bottom).strokeColor(RULE).stroke();
+    doc.moveTo(LEFT, bottom).lineTo(RIGHT, bottom).strokeColor(RULE).stroke();
+    doc.y = bottom + 16;
   }
 
   private drawTableHeader(doc: PDFKit.PDFDocument, y: number) {
-    doc.save();
-    doc.rect(LEFT, y, WIDTH, 22).fill(WASH);
-    doc.restore();
-    doc.fillColor(MUTED).font("Helvetica-Bold").fontSize(8);
-    doc.text("#", LEFT, y + 7, { width: 18 });
-    doc.text("DESCRIPTION", LEFT + 22, y + 7, { width: 198 });
-    doc.text("QTY", 292, y + 7, { width: 36, align: "center" });
-    doc.text("RATE", 332, y + 7, { width: 70, align: "right" });
-    doc.text("TAX", 406, y + 7, { width: 40, align: "center" });
-    doc.text("AMOUNT", 450, y + 7, { width: 87, align: "right" });
-    doc.moveTo(LEFT, y + 22).lineTo(RIGHT, y + 22).strokeColor(RULE).stroke();
+    doc.rect(LEFT, y, WIDTH, 22).strokeColor(RULE).stroke();
+    doc.fillColor(INK).font("Helvetica-Bold").fontSize(8);
+    doc.text("Sl. No.", LEFT + 4, y + 7, { width: 36, align: "center" });
+    doc.text("Description", LEFT + 44, y + 7, { width: 178 });
+    doc.text("Price", 286, y + 7, { width: 68, align: "right" });
+    doc.text("Discount", 358, y + 7, { width: 62, align: "right" });
+    doc.text("Qty", 424, y + 7, { width: 36, align: "center" });
+    doc.text("Amount", 464, y + 7, { width: 73, align: "right" });
+    const cols = [LEFT + 40, LEFT + 230, 354, 422, 460];
+    for (const x of cols) {
+      doc.moveTo(x, y).lineTo(x, y + 22).strokeColor(RULE).stroke();
+    }
     return y + 22;
   }
 
@@ -181,6 +222,7 @@ export class DocumentsService {
       unitPrice: unknown;
       lineTotal: unknown;
       taxRate?: unknown;
+      discount?: unknown;
     }>,
   ) {
     let y = this.drawTableHeader(doc, doc.y);
@@ -188,26 +230,37 @@ export class DocumentsService {
     lines.forEach((line, index) => {
       const desc = line.description || "—";
       doc.font("Helvetica").fontSize(9);
-      const descH = doc.heightOfString(desc, { width: 198 });
+      const descH = doc.heightOfString(desc, { width: 178 });
       const rowH = Math.max(26, descH + 12);
       if (y + rowH > PAGE_BOTTOM) {
         doc.addPage();
         y = this.drawTableHeader(doc, 48);
       }
-      doc.fillColor(MUTED).font("Helvetica").fontSize(9).text(String(index + 1), LEFT, y + 8, { width: 18 });
-      doc.fillColor(INK).text(desc, LEFT + 22, y + 8, { width: 198 });
-      doc.text(String(Number(line.quantity)), 292, y + 8, { width: 36, align: "center" });
-      doc.text(money(line.unitPrice), 332, y + 8, { width: 70, align: "right" });
-      doc.fillColor(MUTED).text(`${Number(line.taxRate ?? 0)}%`, 406, y + 8, { width: 40, align: "center" });
-      doc.fillColor(INK).font("Helvetica-Bold").text(money(line.lineTotal), 450, y + 8, {
-        width: 87,
+      doc.rect(LEFT, y, WIDTH, rowH).strokeColor(RULE).stroke();
+      const cols = [LEFT + 40, LEFT + 230, 354, 422, 460];
+      for (const x of cols) {
+        doc.moveTo(x, y).lineTo(x, y + rowH).strokeColor(RULE).stroke();
+      }
+      doc.fillColor(INK).font("Helvetica").fontSize(9).text(String(index + 1), LEFT + 4, y + 8, {
+        width: 36,
+        align: "center",
+      });
+      doc.text(desc, LEFT + 44, y + 8, { width: 178 });
+      const net = Math.max(
+        0,
+        Number(line.quantity ?? 0) * Number(line.unitPrice ?? 0) - Number(line.discount ?? 0),
+      );
+      doc.text(money(line.unitPrice), 286, y + 8, { width: 68, align: "right" });
+      doc.text(money(line.discount ?? 0), 358, y + 8, { width: 62, align: "right" });
+      doc.text(qtyMoney(line.quantity), 424, y + 8, { width: 36, align: "center" });
+      doc.font("Helvetica-Bold").text(money(net), 464, y + 8, {
+        width: 73,
         align: "right",
       });
       y += rowH;
-      doc.moveTo(LEFT, y).lineTo(RIGHT, y).strokeColor(RULE).stroke();
     });
 
-    doc.y = y + 18;
+    doc.y = y + 16;
     doc.fillColor(INK);
   }
 
@@ -240,10 +293,8 @@ export class DocumentsService {
         doc.addPage();
         y = this.drawTableHeader(doc, 48);
       }
-      doc.save();
-      doc.rect(LEFT, y, WIDTH, 20).fill("#eef4fb");
-      doc.restore();
-      doc.fillColor(ACCENT).font("Helvetica-Bold").fontSize(8).text(group.label.toUpperCase(), LEFT + 8, y + 6, {
+      doc.rect(LEFT, y, WIDTH, 20).strokeColor(RULE).stroke();
+      doc.fillColor(MUTED).font("Helvetica-Bold").fontSize(8).text(group.label.toUpperCase(), LEFT + 8, y + 6, {
         width: WIDTH - 16,
       });
       y += 20;
@@ -251,27 +302,38 @@ export class DocumentsService {
         index += 1;
         const desc = line.description || "—";
         doc.font("Helvetica").fontSize(9);
-        const descH = doc.heightOfString(desc, { width: 198 });
+        const descH = doc.heightOfString(desc, { width: 178 });
         const rowH = Math.max(26, descH + 12);
         if (y + rowH > PAGE_BOTTOM) {
           doc.addPage();
           y = this.drawTableHeader(doc, 48);
         }
-        doc.fillColor(MUTED).font("Helvetica").fontSize(9).text(String(index), LEFT, y + 8, { width: 18 });
-        doc.fillColor(INK).text(desc, LEFT + 22, y + 8, { width: 198 });
-        doc.text(String(Number(line.quantity)), 292, y + 8, { width: 36, align: "center" });
-        doc.text(money(line.unitPrice), 332, y + 8, { width: 70, align: "right" });
-        doc.fillColor(MUTED).text(`${Number(line.taxRate ?? 0)}%`, 406, y + 8, { width: 40, align: "center" });
-        doc.fillColor(INK).font("Helvetica-Bold").text(money(line.lineTotal), 450, y + 8, {
-          width: 87,
+        doc.rect(LEFT, y, WIDTH, rowH).strokeColor(RULE).stroke();
+        const cols = [LEFT + 40, LEFT + 230, 354, 422, 460];
+        for (const x of cols) {
+          doc.moveTo(x, y).lineTo(x, y + rowH).strokeColor(RULE).stroke();
+        }
+        const net = Math.max(
+          0,
+          Number(line.quantity ?? 0) * Number(line.unitPrice ?? 0) - Number(line.discount ?? 0),
+        );
+        doc.fillColor(INK).font("Helvetica").fontSize(9).text(String(index), LEFT + 4, y + 8, {
+          width: 36,
+          align: "center",
+        });
+        doc.text(desc, LEFT + 44, y + 8, { width: 178 });
+        doc.text(money(line.unitPrice), 286, y + 8, { width: 68, align: "right" });
+        doc.text(money(line.discount ?? 0), 358, y + 8, { width: 62, align: "right" });
+        doc.text(qtyMoney(line.quantity), 424, y + 8, { width: 36, align: "center" });
+        doc.font("Helvetica-Bold").text(money(net), 464, y + 8, {
+          width: 73,
           align: "right",
         });
         y += rowH;
-        doc.moveTo(LEFT, y).lineTo(RIGHT, y).strokeColor(RULE).stroke();
       }
     }
 
-    doc.y = y + 18;
+    doc.y = y + 16;
     doc.fillColor(INK);
   }
 
@@ -279,25 +341,32 @@ export class DocumentsService {
     doc: PDFKit.PDFDocument,
     rows: Array<{ label: string; value: string; emphasis?: boolean }>,
   ) {
-    const boxW = 220;
+    const boxW = 230;
     const x = RIGHT - boxW;
     let y = doc.y;
+    const boxTop = y;
+    let contentH = 12;
+    for (const row of rows) {
+      contentH += row.emphasis ? 26 : 16;
+    }
+    doc.rect(x, boxTop, boxW, contentH).strokeColor(RULE).stroke();
+    y = boxTop + 10;
     for (const row of rows) {
       if (row.emphasis) {
-        y += 4;
-        doc.moveTo(x, y).lineTo(RIGHT, y).strokeColor(RULE_STRONG).stroke();
-        y += 10;
+        y += 2;
+        doc.moveTo(x + 10, y).lineTo(RIGHT - 10, y).strokeColor(RULE).stroke();
+        y += 8;
         doc.fillColor(INK).font("Helvetica-Bold").fontSize(11);
-        doc.text(row.label, x, y, { width: 80 });
-        doc.fontSize(13).text(row.value, x + 80, y - 1, { width: boxW - 80, align: "right" });
-        y += 22;
+        doc.text(row.label, x + 12, y, { width: 90 });
+        doc.fontSize(12).text(row.value, x + 100, y - 1, { width: boxW - 112, align: "right" });
+        y += 18;
       } else {
-        doc.fillColor(MUTED).font("Helvetica").fontSize(9).text(row.label, x, y, { width: 80 });
-        doc.fillColor(INK).font("Helvetica").text(row.value, x + 80, y, { width: boxW - 80, align: "right" });
+        doc.fillColor(INK).font("Helvetica").fontSize(9).text(row.label, x + 12, y, { width: 90 });
+        doc.text(row.value, x + 100, y, { width: boxW - 112, align: "right" });
         y += 16;
       }
     }
-    doc.y = y + 10;
+    doc.y = boxTop + contentH + 12;
   }
 
   private stampFooters(doc: PDFKit.PDFDocument, company: string, kindLabel: string, reference: string) {
@@ -554,30 +623,43 @@ export class DocumentsService {
     if (kind === "estimate") {
       const estimate = await prisma.estimate.findFirst({
         where: { id: entityId, tenantId },
-        include: { lineItems: true },
+        include: { lineItems: true, customer: true },
       });
       if (!estimate) throw new AppError("Estimate not found", 404);
       reference = estimate.reference;
       filename = `${reference}.pdf`;
-      await this.header(doc, tenantId, "Estimate", reference);
+      const customer = estimate.customer;
+      const billLines = [
+        [customer?.address, customer?.city, customer?.country].filter(Boolean).join(", "),
+        customer?.phone || "",
+        customer?.email || "",
+      ].filter(Boolean);
+      await this.header(doc, tenantId, "Estimate", reference, [
+        { label: "Estimate No", value: reference },
+        { label: "Date", value: fmtDate(estimate.createdAt) },
+        { label: "Project code", value: estimate.requestRef || "—" },
+      ]);
       this.partyAndMeta(
         doc,
         {
           name: estimate.customerName,
-          lines: estimate.equipmentName ? [`Equipment: ${estimate.equipmentName}`] : [],
+          lines: billLines,
         },
         [
-          { label: "Issue date", value: fmtDate(estimate.createdAt) },
+          ...(estimate.equipmentName ? [{ label: "Equipment", value: estimate.equipmentName }] : []),
           { label: "Valid until", value: fmtDate(estimate.validUntil) },
-          { label: "Reference", value: estimate.requestRef || "—" },
+          { label: "Status", value: estimate.status },
         ],
+        { detailsHeading: "PROJECT DETAILS" },
       );
       this.drawLines(doc, estimate.lineItems);
+      const taxRates = [...new Set(estimate.lineItems.map((line) => Number(line.taxRate ?? 0)))];
+      const taxLabel = taxRates.length === 1 && taxRates[0] > 0 ? `GST (${taxRates[0]}%)` : "Tax";
       this.totals(doc, [
         { label: "Subtotal", value: money(estimate.subtotal) },
         ...(Number(estimate.discount) > 0 ? [{ label: "Discount", value: `-${money(estimate.discount)}` }] : []),
-        { label: "Tax", value: money(estimate.tax) },
-        { label: "Total", value: money(estimate.total), emphasis: true },
+        { label: taxLabel, value: money(estimate.tax) },
+        { label: "Grand Total", value: money(estimate.total), emphasis: true },
       ]);
       if (estimate.terms) {
         doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(8).text("TERMS & CONDITIONS");
@@ -589,48 +671,67 @@ export class DocumentsService {
     } else if (kind === "invoice") {
       const invoice = await prisma.invoice.findFirst({
         where: { id: entityId, tenantId },
-        include: { lineItems: true, payments: true },
+        include: {
+          lineItems: true,
+          payments: true,
+          customer: true,
+          salesOrder: true,
+          job: { include: { equipment: true, serviceRequest: true } },
+        },
       });
       if (!invoice) throw new AppError("Invoice not found", 404);
       reference = invoice.reference;
       filename = `${reference}.pdf`;
       invoiceId = invoice.id;
-      await this.header(doc, tenantId, "Invoice", reference);
+      const isSale = Boolean(invoice.salesOrderId);
+      const customer = invoice.customer;
+      const billLines = [
+        [customer?.address, customer?.city, customer?.country].filter(Boolean).join(", "),
+        customer?.phone || "",
+        customer?.email || "",
+      ].filter(Boolean);
+      const codeLabel = isSale ? "Sale code" : "Project code";
+      await this.header(doc, tenantId, "Invoice", reference, [
+        { label: "Invoice No", value: reference },
+        { label: "Date", value: fmtDate(invoice.issuedAt) },
+        { label: codeLabel, value: invoice.jobRef || "—" },
+      ]);
+      const detailRows = isSale
+        ? [
+            { label: "Sale", value: invoice.salesOrder?.reference || invoice.jobRef || "—" },
+            { label: "Status", value: invoice.status },
+            { label: "Due date", value: fmtDate(invoice.dueAt) },
+          ]
+        : [
+            ...(invoice.job?.equipmentName
+              ? [{ label: "Equipment", value: invoice.job.equipmentName }]
+              : []),
+            ...(invoice.job?.equipment?.location
+              ? [{ label: "Location", value: invoice.job.equipment.location }]
+              : []),
+            { label: "Job", value: invoice.jobRef || "—" },
+            { label: "Status", value: invoice.status },
+          ];
       this.partyAndMeta(
         doc,
-        { name: invoice.customerName },
-        [
-          { label: "Issue date", value: fmtDate(invoice.issuedAt) },
-          { label: "Due date", value: fmtDate(invoice.dueAt) },
-          { label: "Job", value: invoice.jobRef || "—" },
-        ],
+        { name: invoice.customerName, lines: billLines },
+        detailRows,
+        { detailsHeading: isSale ? "SALE DETAILS" : "PROJECT DETAILS" },
       );
       this.drawGroupedLines(doc, invoice.lineItems);
-      const groupTotals = BILLING_CHARGE_GROUPS.map((group) => ({
-        label: group.label,
-        value: money(
-          invoice.lineItems
-            .filter((line) => chargeGroupForType(line.type).key === group.key)
-            .reduce((sum, line) => sum + lineAmount({
-              type: line.type,
-              quantity: Number(line.quantity),
-              unitPrice: Number(line.unitPrice),
-              discount: Number(line.discount),
-              taxRate: Number(line.taxRate),
-              lineTotal: Number(line.lineTotal),
-            }), 0),
-        ),
-        amount: invoice.lineItems
-          .filter((line) => chargeGroupForType(line.type).key === group.key)
-          .reduce((sum, line) => sum + Number(line.lineTotal), 0),
-      })).filter((row) => row.amount > 0);
+      const taxRates = [...new Set(invoice.lineItems.map((line) => Number(line.taxRate ?? 0)))];
+      const taxLabel = taxRates.length === 1 && taxRates[0] > 0 ? `GST (${taxRates[0]}%)` : "Tax";
       this.totals(doc, [
-        ...groupTotals.map((row) => ({ label: row.label, value: row.value })),
-        { label: "Final Amount", value: money(invoice.total), emphasis: true },
-        { label: "Paid", value: money(invoice.paidTotal) },
-        { label: "Balance", value: money(invoice.balanceDue) },
+        { label: "Subtotal", value: money(invoice.amount) },
+        { label: taxLabel, value: money(invoice.tax) },
+        { label: "Grand Total", value: money(invoice.total), emphasis: true },
+        ...(Number(invoice.paidTotal) > 0
+          ? [
+              { label: "Paid", value: money(invoice.paidTotal) },
+              { label: "Balance", value: money(invoice.balanceDue) },
+            ]
+          : []),
       ]);
-      this.signatures(doc, company);
       kindLabel = "Invoice";
     } else if (kind === "service-report") {
       const job = await prisma.serviceJob.findFirst({
@@ -797,7 +898,9 @@ export class DocumentsService {
       throw new AppError("Unsupported document kind", 400);
     }
 
-    this.stampFooters(doc, company, kindLabel, reference);
+    if (kind !== "invoice") {
+      this.stampFooters(doc, company, kindLabel, reference);
+    }
     const buffer = await toBuffer(doc);
     const file = await fileStorageService.saveBuffer(tenantId, actorId, {
       buffer,

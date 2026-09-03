@@ -1,7 +1,8 @@
 // @refresh reset
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createHmrContext } from "@/context/hmrContext";
 import type { AppUser, Role } from "@/data/types";
-import { api, ApiError, getStoredUser, setStoredUser, type BackendUser } from "@/lib/api";
+import { api, getStoredUser, setStoredUser, type BackendUser } from "@/lib/api";
 import { userHasAnyRole } from "@/lib/userRoles";
 
 interface AuthState {
@@ -13,7 +14,7 @@ interface AuthState {
   refreshUser: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthState | undefined>(undefined);
+const AuthContext = createHmrContext<AuthState>("__MESMS_AUTH_CONTEXT__");
 
 function mapUser(user: BackendUser): AppUser {
   return {

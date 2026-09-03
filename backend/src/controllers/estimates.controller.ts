@@ -2,21 +2,34 @@ import { type Request, type Response, type NextFunction } from "express";
 import { estimatesService } from "@/services/estimates.service";
 import { parseEstimateListQuery, sendPaginatedList } from "@/utils/listQuery";
 import { success } from "@/utils/response";
+import { userHasAnyRoleKey } from "@/utils/userRoles";
 
 export class EstimatesController {
   async getAll(req: Request, res: Response, next: NextFunction) {
     try {
       const query = parseEstimateListQuery(req);
+      const isEstimatorOnly = await userHasAnyRoleKey(
+        req.user!.userId,
+        req.tenantId!,
+        req.user!.role,
+        ["estimator"],
+      );
+      const isBroadViewer = await userHasAnyRoleKey(
+        req.user!.userId,
+        req.tenantId!,
+        req.user!.role,
+        ["admin", "coordinator"],
+      );
       const { data, total } = await estimatesService.getPaginated(req.tenantId!, {
         status: query.status,
-        estimatorId: req.user!.role === "estimator" ? req.user!.userId : undefined,
+        estimatorId: isEstimatorOnly && !isBroadViewer ? req.user!.userId : undefined,
         search: query.search,
         customerId: query.customerId,
         createdFrom: query.createdFrom,
         createdTo: query.createdTo,
         kind: query.kind === "sales" || query.kind === "service"
           ? query.kind
-          : req.user!.role === "estimator"
+          : isEstimatorOnly && !isBroadViewer
             ? "service"
             : req.user!.role === "sales"
               ? "sales"

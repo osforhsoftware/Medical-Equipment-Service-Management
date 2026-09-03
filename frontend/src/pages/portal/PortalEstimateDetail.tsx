@@ -92,47 +92,53 @@ export default function PortalEstimateDetail() {
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             {estimate.equipmentName} · {formatCurrency(estimate.total)}
-          </p>
-        </div>
-        <Button variant="outline" asChild>
-          <Link to={`/portal/estimates/${estimate.id}/preview`}>
-            <Eye className="mr-1 h-4 w-4" /> View document
-          </Link>
-        </Button>
-      </div>
+                                                                                                                                                                                                                                              </p>
+                                                                                                                                                                                                                                            </div>
+                                                                                                                                                                                                                                            <Button variant="outline" asChild>
+                                                                                                                                                                                                                                              <Link to={`/portal/estimates/${estimate.id}/preview`}>
+                                                                                                                                                                                                                                                <Eye className="mr-1 h-4 w-4" /> View document
+                                                                                                                                                                                                                                              </Link>
+                                                                                                                                                                                                                                            </Button>
+                                                                                                                                                                                                                                          </div>
 
-      <div className="print-area overflow-visible rounded-lg border border-border bg-card">
-          <ProfessionalDocument
-            kind="Estimate"
-            reference={estimate.reference}
-            customerName={estimate.customerName}
-            equipmentName={estimate.equipmentName}
-            issueDate={estimate.createdAt}
-            validOrDueLabel="Valid until"
-            validOrDueDate={estimate.validUntil}
-            ticketRef={estimate.requestRef}
-            lines={estimateToDocumentLines(estimate)}
-            discount={Number(estimate.discount ?? 0)}
-            notes={estimate.notes ?? undefined}
-            terms={estimate.terms ?? undefined}
-            hideToolbar
-            showSignature
-          />
-      </div>
+                                                                                                                                                                                                                                          <div className="print-area overflow-visible rounded-lg border border-border bg-card">
+                                                                                                                                                                                                                                              <ProfessionalDocument
+                                                                                                                                                                                                                                                kind="Estimate"
+                                                                                                                                                                                                                                                reference={estimate.reference}
+                                                                                                                                                                                                                                                customerName={estimate.customerName}
+                                                                                                                                                                                                                                                equipmentName={estimate.equipmentName}
+                                                                                                                                                                                                                                                issueDate={estimate.createdAt}
+                                                                                                                                                                                                                                                validOrDueLabel="Valid until"
+                                                                                                                                                                                                                                                validOrDueDate={estimate.validUntil}
+                                                                                                                                                                                                                                                ticketRef={estimate.requestRef}
+                                                                                                                                                                                                                                                detailsHeading="Project details"
+                                                                                                                                                                                                                                                detailRows={[
+                                                                                                                                                                                                                                                  { label: "Equipment", value: estimate.equipmentName },
+                                                                                                                                                                                                                                                  { label: "Ticket", value: estimate.requestRef },
+                                                                                                                                                                                                                                                  { label: "Status", value: estimate.status },
+                                                                                                                                                                                                                                                ]}
+                                                                                                                                                                                                                                                lines={estimateToDocumentLines(estimate)}
+                                                                                                                                                                                                                                                discount={Number(estimate.discount ?? 0)}
+                                                                                                                                                                                                                                                notes={estimate.notes ?? undefined}
+                                                                                                                                                                                                                                                terms={estimate.terms ?? undefined}
+                                                                                                                                                                                                                                                hideToolbar
+                                                                                                                                                                                                                                                showSignature
+                                                                                                                                                                                                                                              />
+                                                                                                                                                                                                                                          </div>
 
-      {actionable ? (
-        <section className="space-y-3 rounded-lg border border-border bg-card p-4">
-          <h2 className="section-title">Your response</h2>
-          <div className="grid gap-2">
-            <Label htmlFor="portal-note">Note</Label>
-            <Textarea id="portal-note" value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Optional comment" />
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button disabled={saving} className="bg-success text-success-foreground hover:bg-success/90" onClick={() => void act("approved")}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-              Approve Estimate
-            </Button>
-            <Button disabled={saving} variant="outline" onClick={() => void act("revision")}>
+                                                                                                                                                                                                                                          {actionable ? (
+                                                                                                                                                                                                                                            <section className="space-y-3 rounded-lg border border-border bg-card p-4">
+                                                                                                                                                                                                                                              <h2 className="section-title">Your response</h2>
+                                                                                                                                                                                                                                              <div className="grid gap-2">
+                                                                                                                                                                                                                                                <Label htmlFor="portal-note">Note</Label>
+                                                                                                                                                                                                                                                <Textarea id="portal-note" value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Optional comment" />
+                                                                                                                                                                                                                                              </div>
+                                                                                                                                                                                                                                              <div className="flex flex-col gap-2 sm:flex-row">
+                                                                                                                                                                                                                                                <Button disabled={saving} className="bg-success text-success-foreground hover:bg-success/90" onClick={() => void act("approved")}>
+                                                                                                                                                                                                                                                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                                                                                                                                                                                                                                                  Approve Estimate
+                                                                                                                                                                                                                                                </Button>
+                                                                                                                                                                                                                                                <Button disabled={saving} variant="outline" onClick={() => void act("revision")}>
               <MessageSquare className="h-4 w-4" /> Request Revision
             </Button>
             <Button disabled={saving} variant="destructive" onClick={() => void act("rejected")}>

@@ -12,7 +12,7 @@ import type {
 } from "@/lib/listing";
 import { buildListQuery, EMPTY_PAGINATION_META } from "@/lib/listing";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "";
+const API_BASE = import.meta.env.DEV ? "" : (import.meta.env.VITE_API_URL ?? "");
 
 const USER_KEY = "mesms.user";
 
@@ -37,6 +37,43 @@ export class ApiError extends Error {
   }
 }
 
+const UNREACHABLE_MESSAGE =
+  "Cannot reach the backend. Keep it running with npm run dev in the backend folder (port 4000), then try again.";
+
+async function parseResponse<T>(response: Response): Promise<ApiResponse<T>> {
+  if (response.status === 204) {
+    return { success: true, message: "OK" } as ApiResponse<T>;
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    throw new ApiError(
+      response.ok ? UNREACHABLE_MESSAGE : `Server error (${response.status})`,
+      response.status || 502,
+    );
+  }
+  try {
+    return (await response.json()) as ApiResponse<T>;
+  } catch {
+    throw new ApiError("The backend returned an invalid response.", response.status || 502);
+  }
+}
+
+async function rawFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  const headers: HeadersInit = {
+    ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+    ...(options.headers ?? {}),
+  };
+  try {
+    return await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+  } catch {
+    throw new ApiError(UNREACHABLE_MESSAGE, 0);
+  }
+}
+
 export function getStoredUser<T>(): T | null {
   const raw = localStorage.getItem(USER_KEY);
   if (!raw) return null;
@@ -54,22 +91,13 @@ export function setStoredUser<T>(user: T | null) {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers: HeadersInit = {
-    ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-    ...(options.headers ?? {}),
-  };
-
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
+  const response = await rawFetch(path, options);
 
   if (response.status === 204) {
     return undefined as T;
   }
 
-  const json = (await response.json()) as ApiResponse<T>;
+  const json = await parseResponse<T>(response);
 
   if (!response.ok || !json.success) {
     throw new ApiError(json.message || "Request failed", response.status, json.errors);
@@ -79,18 +107,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 async function requestPaginated<T>(path: string, options: RequestInit = {}): Promise<PaginatedResult<T>> {
-  const headers: HeadersInit = {
-    ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-    ...(options.headers ?? {}),
-  };
-
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
-
-  const json = (await response.json()) as ApiResponse<T[]>;
+  const response = await rawFetch(path, options);
+  const json = await parseResponse<T[]>(response);
 
   if (!response.ok || !json.success) {
     throw new ApiError(json.message || "Request failed", response.status, json.errors);
@@ -331,7 +349,7 @@ export interface BackendServiceRequest {
   equipmentId: string | null;
   equipmentName: string | null;
   branchId: string;
-  type: string;
+  type: string | null;
   typeOther?: string | null;
   priority: string;
   status: string;
@@ -365,7 +383,7 @@ export interface CreateServiceRequestInput {
   customerId: string;
   equipmentId?: string;
   equipmentIds?: string[];
-  type: string;
+  type?: string;
   typeOther?: string | null;
   priority: string;
   description: string;
@@ -464,6 +482,7 @@ export interface BackendInvoice {
   customerId?: string | null;
   serviceRequestId?: string | null;
   estimateId?: string | null;
+  salesOrderId?: string | null;
   jobId?: string | null;
   reference: string;
   customerName: string;
@@ -841,10 +860,10 @@ export interface BackendInventoryItem {
 }
 
 export interface CreateInventoryInput {
-  sku: string;
+  sku?: string;
   name: string;
-  category: string;
-  subcategory: string;
+  category?: string;
+  subcategory?: string | null;
   description?: string | null;
   branchId?: string;
   inStock?: number;
@@ -1009,6 +1028,9 @@ export interface BackendSettings {
   tenantId: string;
   companyName: string;
   supportEmail: string;
+  companyAddress?: string | null;
+  companyPhone?: string | null;
+  companyWebsite?: string | null;
   logoFileId?: string | null;
   logoUrl?: string | null;
   defaultTaxRate: number;
@@ -1030,6 +1052,9 @@ export interface BackendSettings {
 export interface UpdateSettingsInput {
   companyName?: string;
   supportEmail?: string;
+  companyAddress?: string | null;
+  companyPhone?: string | null;
+  companyWebsite?: string | null;
   logoFileId?: string | null;
   defaultTaxRate?: number;
   amcRenewalReminders?: boolean;
@@ -1161,6 +1186,7 @@ export interface BackendSalesOrderLine {
   taxRate: number;
   lineTotal: number;
   inventoryItemId?: string | null;
+  catalogItemId?: string | null;
 }
 
 export interface BackendSalesOrder {
@@ -1190,6 +1216,9 @@ export interface BackendSalesOrder {
 export interface SalesReportsData {
   dailySales: number;
   monthlySales: number;
+  invoiced?: number;
+  collected?: number;
+  outstandingTotal?: number;
   productWise: { name: string; quantity: number; amount: number }[];
   sparePartsSales: { name: string; quantity: number; amount: number }[];
   equipmentSales: { name: string; quantity: number; amount: number }[];
@@ -1207,6 +1236,9 @@ export interface DashboardData {
     lowStockItems: number;
     revenueMtd: number;
     revenueMtdLabel: string;
+    saleRevenueMtd?: number;
+    serviceRevenueMtd?: number;
+    otherRevenueMtd?: number;
     expiringAmc: number;
     unassignedRequests: number;
     pendingEstimates: number;
@@ -1241,7 +1273,7 @@ export interface DashboardData {
     activeJobs?: DashboardTrend;
     revenue?: DashboardTrend;
   };
-  revenueTrend: { month: string; revenue: number; jobs: number }[];
+  revenueTrend: { month: string; revenue: number; saleRevenue?: number; serviceRevenue?: number; jobs: number }[];
   jobsByType: { type: string; count: number }[];
   activeJobs: {
     id: string;
@@ -1687,6 +1719,20 @@ export const api = {
     request<{ job: BackendServiceJob }>(`/api/jobs/${id}/photos`, {
       method: "POST",
       body: JSON.stringify({ photos }),
+    }),
+
+  saveJobWorkReport: (
+    id: string,
+    data: {
+      workPerformed: string;
+      testingResult?: string | null;
+      calibrationResult?: string | null;
+      recommendation?: string | null;
+    },
+  ) =>
+    request<{ job: BackendServiceJob; workLog: BackendJobWorkLog }>(`/api/jobs/${id}/work-report`, {
+      method: "PUT",
+      body: JSON.stringify(data),
     }),
 
   requestJobParts: (id: string, notes: string) =>

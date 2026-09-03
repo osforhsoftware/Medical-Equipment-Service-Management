@@ -13,7 +13,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { MobileHeader } from "@/components/mobile/MobileHeader";
-import { useMobileUnreadCount } from "@/components/mobile/MobileLayout";
+import { useMobileUnreadCount } from "@/hooks/useMobilePullRefresh";
 import { useAuth } from "@/context/AuthContext";
 import { roleLabels } from "@/data/mock";
 import { cn } from "@/lib/utils";

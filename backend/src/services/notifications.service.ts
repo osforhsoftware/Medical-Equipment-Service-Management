@@ -115,11 +115,19 @@ export class NotificationsService {
   }
 
   async notifyJobUpdated(tenantId: string, reference: string, status: string) {
-    const label = status === "inProgress" ? "In Progress" : status.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase());
+    const label =
+      status === "inProgress"
+        ? "In Progress"
+        : status === "review"
+          ? "Review (awaiting approval)"
+          : status.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase());
     await notificationsRepository.create(tenantId, {
       type: "job",
-      title: "Job updated",
-      body: `${reference} moved to ${label}.`,
+      title: status === "review" ? "Job ready for review" : "Job updated",
+      body:
+        status === "review"
+          ? `${reference} was submitted for coordinator/admin approval.`
+          : `${reference} moved to ${label}.`,
       recipientRole: "coordinator",
     });
   }

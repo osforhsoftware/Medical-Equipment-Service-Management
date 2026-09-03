@@ -187,18 +187,32 @@ export function BillingEngineerExtras({ context }: { context: BillingJobContext 
   );
 }
 
-export function BillingServiceContext({ context }: { context: BillingJobContext }) {
-  return (
-    <div className="space-y-4">
-      <Section title="Customer & equipment">
-        <InfoRow label="Customer" value={context.job.customerName} />
-        <InfoRow label="Hospital / Org" value={context.job.serviceRequest?.customerName ?? context.job.customerName} />
-        <InfoRow label="Equipment" value={context.job.equipmentName} />
-        <InfoRow label="Serial number" value={context.job.equipment?.serialNumber ?? "—"} />
-        <InfoRow label="Engineer" value={context.job.engineer} />
-        <InfoRow label="Service request" value={context.job.requestRef} />
-      </Section>
+export function BillingJobFacts({ context }: { context: BillingJobContext }) {
+  const facts = [
+    { label: "Customer", value: context.job.customerName },
+    { label: "Equipment", value: context.job.equipmentName },
+    { label: "Serial number", value: context.job.equipment?.serialNumber ?? "—" },
+    { label: "Engineer", value: context.job.engineer },
+    { label: "Service request", value: context.job.requestRef },
+  ];
 
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      {facts.map((fact) => (
+        <div key={fact.label} className="min-w-0 rounded-md bg-muted/40 px-3 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{fact.label}</p>
+          <p className="mt-0.5 truncate text-sm font-medium" title={String(fact.value ?? "")}>
+            {fact.value || "—"}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function BillingServiceNotes({ context }: { context: BillingJobContext }) {
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
       <Section title="Complaint">
         <p className="text-sm text-muted-foreground">{context.job.serviceRequest?.description ?? "—"}</p>
       </Section>
@@ -234,9 +248,20 @@ export function BillingServiceContext({ context }: { context: BillingJobContext 
         )}
       </Section>
 
-      <Section title="Service timeline">
-        <BillingTimeline events={context.job.serviceRequest?.timelineEvents ?? []} />
-      </Section>
+      <div className="lg:col-span-2">
+        <Section title="Service timeline">
+          <BillingTimeline events={context.job.serviceRequest?.timelineEvents ?? []} />
+        </Section>
+      </div>
+    </div>
+  );
+}
+
+export function BillingServiceContext({ context }: { context: BillingJobContext }) {
+  return (
+    <div className="space-y-4">
+      <BillingJobFacts context={context} />
+      <BillingServiceNotes context={context} />
     </div>
   );
 }

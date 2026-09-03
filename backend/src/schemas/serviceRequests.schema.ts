@@ -23,10 +23,13 @@ export const createServiceRequestSchema = z
     customerId: z.string().min(1, "Customer is required"),
     equipmentId: z.string().optional(),
     equipmentIds: z.array(z.string()).optional(),
-    type: z.enum(["Repair", "Maintenance", "Calibration", "Inspection", "Installation", "Other"]),
+    type: z.preprocess(
+      (value) => (value === "" || value == null ? undefined : value),
+      z.enum(["Repair", "Maintenance", "Calibration", "Inspection", "Installation", "Other"]).optional(),
+    ),
     typeOther: z.string().trim().max(100).optional().nullable(),
     priority: z.enum(["low", "medium", "high", "critical"]),
-    description: z.string().trim().min(1, "Description is required").max(500),
+    description: z.string().trim().max(500).optional().default(""),
     assignedTo: z.string().min(1).optional(),
     assignedName: z.string().optional(),
     slaDue: z.string().optional(),
@@ -46,7 +49,7 @@ export const updateServiceRequestSchema = z.object({
   priority: z.enum(["low", "medium", "high", "critical"]).optional(),
   assignedTo: z.string().nullable().optional(),
   assignedName: z.string().nullable().optional(),
-  description: z.string().trim().min(1).max(500).optional(),
+  description: z.string().trim().max(500).optional(),
   timelineNote: z.string().trim().max(1000).optional(),
 });
 

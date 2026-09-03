@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { RefreshCw, Search } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -11,19 +12,56 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { InspectionCard } from "@/components/inspections/InspectionCard";
 import { InspectionReportPanel } from "@/components/inspections/InspectionReportPanel";
 import { useInspectionReportEditor } from "@/components/inspections/useInspectionReportEditor";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { api, type BackendServiceRequest } from "@/lib/api";
-import { formatServiceStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
-type StatusFilter = "all" | "new" | "inspection" | "estimate";
+type ViewMode = "queue" | "history";
+type StatusFilter =
+  | "all"
+  | "new"
+  | "inspection"
+  | "estimate"
+  | "pending_approval"
+  | "assigned_engineer"
+  | "pending_invoice"
+  | "invoiced"
+  | "closed";
 type SeverityFilter = "all" | "low" | "medium" | "high" | "critical";
-type SummaryKey = "awaiting" | "inInspection" | "reportsFiled" | "critical";
+type SummaryKey = "awaiting" | "inInspection" | "reportsFiled" | "critical" | "high" | "closed";
+
+const QUEUE_STATUSES = "new,inspection,estimate";
+const HISTORY_STATUSES = [
+  "estimate",
+  "pending_approval",
+  "assigned_engineer",
+  "change_pending_approval",
+  "pending_final_approval",
+  "pending_invoice",
+  "invoiced",
+  "closed",
+  "approval",
+  "inProgress",
+  "completed",
+  "finished",
+].join(",");
+
+const CLOSED_STATUSES = new Set(["closed", "finished", "completed", "invoiced"]);
+
+function matchesStatusFilter(status: string, filter: StatusFilter) {
+  if (filter === "all") return true;
+  if (filter === status) return true;
+  if (filter === "pending_approval" && status === "approval") return true;
+  if (filter === "assigned_engineer" && status === "inProgress") return true;
+  if (filter === "closed" && CLOSED_STATUSES.has(status)) return true;
+  return false;
+}
 
 function equipmentLabel(task: BackendServiceRequest) {
   if (task.equipmentItems?.length) {
@@ -34,6 +72,8 @@ function equipmentLabel(task: BackendServiceRequest) {
 
 export default function Inspections() {
   const isMobile = useIsMobile();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view: ViewMode = searchParams.get("view") === "history" ? "history" : "queue";
   const [requests, setRequests] = useState<BackendServiceRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -45,23 +85,34 @@ export default function Inspections() {
   const [summaryFilter, setSummaryFilter] = useState<SummaryKey | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
+  const setView = (next: ViewMode) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === "history") params.set("view", "history");
+    else params.delete("view");
+    setSearchParams(params, { replace: true });
+    setStatusFilter("all");
+    setSummaryFilter(null);
+  };
+
   const loadRequests = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
     try {
       const result = await api.listServiceRequests({
-        statuses: "new,inspection,estimate",
+        statuses: view === "history" ? HISTORY_STATUSES : QUEUE_STATUSES,
         limit: 100,
         page: 1,
       });
-      setRequests(result.data);
+      setRequests(
+        view === "history" ? result.data.filter((row) => Boolean(row.inspectionReport)) : result.data,
+      );
     } catch (err) {
       setLoadError(true);
       toast.apiError(err, { fallback: "Failed to load inspections" });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [view]);
 
   useEffect(() => {
     void loadRequests();
@@ -76,26 +127,28 @@ export default function Inspections() {
   }, [requests]);
 
   const stats = useMemo(() => {
-    const awaiting = requests.filter((r) => formatServiceStatus(r.status) === "new").length;
-    const inInspection = requests.filter((r) => formatServiceStatus(r.status) === "inspection").length;
+    const awaiting = requests.filter((r) => r.status === "new").length;
+    const inInspection = requests.filter((r) => r.status === "inspection").length;
     const reportsFiled = requests.filter((r) => Boolean(r.inspectionReport)).length;
     const critical = requests.filter((r) => r.inspectionReport?.severity === "critical" || r.priority === "critical").length;
-    return { awaiting, inInspection, reportsFiled, critical };
+    const high = requests.filter((r) => r.inspectionReport?.severity === "high" || r.priority === "high").length;
+    const closed = requests.filter((r) => CLOSED_STATUSES.has(r.status)).length;
+    return { awaiting, inInspection, reportsFiled, critical, high, closed };
   }, [requests]);
 
   const filteredRequests = useMemo(() => {
     const q = search.trim().toLowerCase();
     return requests.filter((r) => {
-      const status = formatServiceStatus(r.status);
-
-      if (summaryFilter === "awaiting" && status !== "new") return false;
-      if (summaryFilter === "inInspection" && status !== "inspection") return false;
+      if (summaryFilter === "awaiting" && r.status !== "new") return false;
+      if (summaryFilter === "inInspection" && r.status !== "inspection") return false;
       if (summaryFilter === "reportsFiled" && !r.inspectionReport) return false;
       if (summaryFilter === "critical" && !(r.inspectionReport?.severity === "critical" || r.priority === "critical")) {
         return false;
       }
+      if (summaryFilter === "high" && !(r.inspectionReport?.severity === "high" || r.priority === "high")) return false;
+      if (summaryFilter === "closed" && !CLOSED_STATUSES.has(r.status)) return false;
 
-      if (statusFilter !== "all" && status !== statusFilter) return false;
+      if (!matchesStatusFilter(r.status, statusFilter)) return false;
 
       if (severityFilter !== "all") {
         const sev = r.inspectionReport?.severity;
@@ -127,12 +180,53 @@ export default function Inspections() {
     setSummaryFilter((prev) => (prev === key ? null : key));
   };
 
-  const summaryItems: { key: SummaryKey; label: string; value: number }[] = [
-    { key: "awaiting", label: "Awaiting", value: stats.awaiting },
-    { key: "inInspection", label: "In Inspection", value: stats.inInspection },
-    { key: "reportsFiled", label: "Reports Filed", value: stats.reportsFiled },
-    { key: "critical", label: "Critical", value: stats.critical },
-  ];
+  const summaryItems: { key: SummaryKey; label: string; value: number }[] =
+    view === "history"
+      ? [
+          { key: "reportsFiled", label: "Reports", value: stats.reportsFiled },
+          { key: "critical", label: "Critical", value: stats.critical },
+          { key: "high", label: "High", value: stats.high },
+          { key: "closed", label: "Closed", value: stats.closed },
+        ]
+      : [
+          { key: "awaiting", label: "Awaiting", value: stats.awaiting },
+          { key: "inInspection", label: "In Inspection", value: stats.inInspection },
+          { key: "reportsFiled", label: "Reports Filed", value: stats.reportsFiled },
+          { key: "critical", label: "Critical", value: stats.critical },
+        ];
+
+  const viewTabs = (
+    <Tabs value={view} onValueChange={(value) => setView(value as ViewMode)}>
+      <TabsList className={cn(isMobile && "grid h-11 w-full grid-cols-2 rounded-xl")}>
+        <TabsTrigger value="queue" className={cn(isMobile && "rounded-lg")}>
+          Queue
+        </TabsTrigger>
+        <TabsTrigger value="history" className={cn(isMobile && "rounded-lg")}>
+          History
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
+  );
+
+  const renderStatusOptions = () =>
+    view === "history" ? (
+      <>
+        <SelectItem value="all">All statuses</SelectItem>
+        <SelectItem value="estimate">Estimate</SelectItem>
+        <SelectItem value="pending_approval">Pending approval</SelectItem>
+        <SelectItem value="assigned_engineer">Assigned engineer</SelectItem>
+        <SelectItem value="pending_invoice">Pending invoice</SelectItem>
+        <SelectItem value="invoiced">Invoiced</SelectItem>
+        <SelectItem value="closed">Closed</SelectItem>
+      </>
+    ) : (
+      <>
+        <SelectItem value="all">All statuses</SelectItem>
+        <SelectItem value="new">New</SelectItem>
+        <SelectItem value="inspection">Inspection</SelectItem>
+        <SelectItem value="estimate">Estimate</SelectItem>
+      </>
+    );
 
   return (
     <RoleGuard roles={["admin", "coordinator", "inspector"]}>
@@ -140,13 +234,21 @@ export default function Inspections() {
         {!isMobile ? (
           <PageHeader
             title="Inspections"
-            description="Findings, severity, and inspection reports."
+            description={
+              view === "history"
+                ? "Filed inspection reports and completed inspection history."
+                : "Findings, severity, and inspection reports."
+            }
             actions={
               <div className="text-right">
                 <p className="text-sm font-semibold tabular-nums text-foreground">
-                  {awaitingCount} awaiting inspection
+                  {view === "history"
+                    ? `${stats.reportsFiled} filed report${stats.reportsFiled === 1 ? "" : "s"}`
+                    : `${awaitingCount} awaiting inspection`}
                 </p>
-                <p className="text-xs text-muted-foreground">Queue · new & in inspection</p>
+                <p className="text-xs text-muted-foreground">
+                  {view === "history" ? "History · completed inspections" : "Queue · new & in inspection"}
+                </p>
               </div>
             }
           />
@@ -156,17 +258,19 @@ export default function Inspections() {
               <div>
                 <h1 className="page-title">Inspections</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Capture findings and assess severity.
+                  {view === "history" ? "Review filed inspection reports." : "Capture findings and assess severity."}
                 </p>
               </div>
               {!loading ? (
                 <span className="shrink-0 rounded-full border border-border/60 bg-card px-2.5 py-1 text-xs font-semibold tabular-nums text-foreground">
-                  {awaitingCount}
+                  {view === "history" ? stats.reportsFiled : awaitingCount}
                 </span>
               ) : null}
             </div>
           </div>
         )}
+
+        {viewTabs}
 
         {!loading && !loadError ? (
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
@@ -222,10 +326,7 @@ export default function Inspections() {
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  <SelectItem value="new">New</SelectItem>
-                  <SelectItem value="inspection">Inspection</SelectItem>
-                  <SelectItem value="estimate">Estimate</SelectItem>
+                  {renderStatusOptions()}
                 </SelectContent>
               </Select>
               <Select value={severityFilter} onValueChange={(v) => setSeverityFilter(v as SeverityFilter)}>
@@ -264,10 +365,7 @@ export default function Inspections() {
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="new">New</SelectItem>
-                <SelectItem value="inspection">Inspection</SelectItem>
-                <SelectItem value="estimate">Estimate</SelectItem>
+                {renderStatusOptions()}
               </SelectContent>
             </Select>
             <Select value={severityFilter} onValueChange={(v) => setSeverityFilter(v as SeverityFilter)}>
@@ -324,12 +422,16 @@ export default function Inspections() {
           <div className="rounded-xl border border-border/60 bg-card px-6 py-12 text-center">
             <p className="text-sm font-medium text-foreground">
               {requests.length === 0
-                ? "No requests awaiting inspection"
+                ? view === "history"
+                  ? "No inspection history yet"
+                  : "No requests awaiting inspection"
                 : "No inspections match your filters"}
             </p>
             <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
               {requests.length === 0
-                ? "All inspection requests have been handled. New requests will appear here when they are ready."
+                ? view === "history"
+                  ? "Filed reports will appear here after an inspection is submitted and the ticket moves forward."
+                  : "All inspection requests have been handled. Switch to History to review completed inspections."
                 : "Try adjusting search or filters to see more results."}
             </p>
             <Button type="button" variant="outline" className="mt-4" onClick={() => void loadRequests()}>
@@ -344,6 +446,7 @@ export default function Inspections() {
                 key={task.id}
                 task={task}
                 mobile={isMobile}
+                mode={view}
                 onInspect={(t) => void editor.startInspection(t)}
               />
             ))}

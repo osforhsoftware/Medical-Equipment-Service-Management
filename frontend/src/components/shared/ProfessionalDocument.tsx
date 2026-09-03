@@ -17,23 +17,33 @@ export interface DocumentLine {
   taxRate?: number;
 }
 
+export interface DocumentDetailRow {
+  label: string;
+  value: string;
+}
+
 interface ProfessionalDocumentProps {
   kind: "Estimate" | "Invoice" | "Service Report";
   reference: string;
   customerName: string;
   customerAddress?: string;
   customerPhone?: string;
+  customerEmail?: string;
   equipmentName?: string;
   issueDate: string;
   validOrDueLabel?: string;
   validOrDueDate?: string;
   ticketRef?: string;
+  /** Right column under BILL TO — e.g. PROJECT DETAILS / SALE DETAILS */
+  detailsHeading?: string;
+  detailRows?: DocumentDetailRow[];
   lines?: DocumentLine[];
   discount?: number;
   notes?: string;
   terms?: string;
   hideToolbar?: boolean;
   showSignature?: boolean;
+  showFooter?: boolean;
   children?: ReactNode;
   className?: string;
 }
@@ -49,23 +59,40 @@ function termParagraphs(terms: string) {
     .filter(Boolean);
 }
 
+function qtyDisplay(value: number) {
+  return Number(value).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function dominantTaxRate(lines: DocumentLine[]) {
+  const rates = [...new Set(lines.map((line) => Number(line.taxRate ?? 0)))];
+  if (rates.length === 1 && rates[0] > 0) return rates[0];
+  return null;
+}
+
 export function ProfessionalDocument({
   kind,
   reference,
   customerName,
   customerAddress,
   customerPhone,
+  customerEmail,
   equipmentName,
   issueDate,
   validOrDueLabel,
   validOrDueDate,
   ticketRef,
+  detailsHeading,
+  detailRows,
   lines = [],
   discount = 0,
   notes,
   terms,
   hideToolbar,
   showSignature,
+  showFooter = true,
   children,
   className,
 }: ProfessionalDocumentProps) {
@@ -75,6 +102,24 @@ export function ProfessionalDocument({
   const tax = lines.reduce((sum, line) => sum + lineNet(line) * ((line.taxRate ?? 0) / 100), 0);
   const total = Math.max(0, subtotal - discount) + tax;
   const termParts = terms ? termParagraphs(terms) : [];
+  const taxRate = dominantTaxRate(lines);
+  const taxLabel = taxRate != null ? `GST (${taxRate}%)` : "Tax";
+
+  const projectRows: DocumentDetailRow[] = detailRows?.length
+    ? detailRows
+    : [
+        ...(equipmentName ? [{ label: "Equipment", value: equipmentName }] : []),
+        ...(ticketRef ? [{ label: kind === "Invoice" ? "Reference" : "Ticket", value: ticketRef }] : []),
+        ...(validOrDueLabel && validOrDueDate
+          ? [{ label: validOrDueLabel, value: formatDate(validOrDueDate) }]
+          : []),
+      ];
+
+  const metaCodeLabel = ticketRef
+    ? ticketRef.toUpperCase().startsWith("SO") || ticketRef.toUpperCase().includes("SALE")
+      ? "Sale code"
+      : "Project code"
+    : null;
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -111,48 +156,67 @@ export function ProfessionalDocument({
               {settings?.logoUrl ? (
                 <img src={settings.logoUrl} alt="" />
               ) : (
-                <MesmsLogo size="lg" className="h-10 max-w-[8.5rem]" />
+                <MesmsLogo size="lg" className="h-12 max-w-[3.5rem]" />
               )}
             </div>
             <div className="doc-company">
               <p className="doc-company-name">{company}</p>
+              {settings?.companyAddress ? (
+                <p className="doc-company-line">{settings.companyAddress}</p>
+              ) : null}
+              {settings?.companyPhone ? (
+                <p className="doc-company-line">Mob: {settings.companyPhone}</p>
+              ) : null}
               {settings?.supportEmail ? (
-                <p className="doc-company-email">{settings.supportEmail}</p>
+                <p className="doc-company-line">{settings.supportEmail}</p>
+              ) : null}
+              {settings?.companyWebsite ? (
+                <p className="doc-company-line">{settings.companyWebsite}</p>
               ) : null}
             </div>
           </div>
           <div className="doc-title-block">
             <p className="doc-kind">{kind}</p>
-            <p className="doc-reference">{reference}</p>
+            <dl className="doc-invoice-meta">
+              <div>
+                <dt>{kind === "Invoice" ? "Invoice No" : `${kind} No`}</dt>
+                <dd>{reference}</dd>
+              </div>
+              <div>
+                <dt>Date</dt>
+                <dd>{formatDate(issueDate)}</dd>
+              </div>
+              {ticketRef && metaCodeLabel ? (
+                <div>
+                  <dt>{metaCodeLabel}</dt>
+                  <dd>{ticketRef}</dd>
+                </div>
+              ) : null}
+            </dl>
           </div>
         </header>
 
-        <div className="doc-meta">
+        <div className="doc-parties">
           <div className="doc-bill-to">
             <p className="doc-label">Bill to</p>
             <p className="doc-customer">{customerName}</p>
             {customerAddress ? <p className="doc-muted whitespace-pre-line">{customerAddress}</p> : null}
             {customerPhone ? <p className="doc-muted">{customerPhone}</p> : null}
-            {equipmentName ? <p className="doc-equipment">Equipment: {equipmentName}</p> : null}
+            {customerEmail ? <p className="doc-muted">{customerEmail}</p> : null}
           </div>
-          <dl className="doc-dates">
-            <div>
-              <dt>Issue Date</dt>
-              <dd>{formatDate(issueDate)}</dd>
+          {projectRows.length > 0 ? (
+            <div className="doc-project">
+              <p className="doc-label">{detailsHeading ?? "Project details"}</p>
+              <dl className="doc-project-rows">
+                {projectRows.map((row) => (
+                  <div key={`${row.label}-${row.value}`}>
+                    <dt>{row.label}</dt>
+                    <dd>{row.value}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
-            {validOrDueLabel && validOrDueDate ? (
-              <div>
-                <dt>{validOrDueLabel}</dt>
-                <dd>{formatDate(validOrDueDate)}</dd>
-              </div>
-            ) : null}
-            {ticketRef ? (
-              <div>
-                <dt>Reference</dt>
-                <dd className="doc-ref-value">{ticketRef}</dd>
-              </div>
-            ) : null}
-          </dl>
+          ) : null}
         </div>
 
         {lines.length > 0 ? (
@@ -161,18 +225,18 @@ export function ProfessionalDocument({
               <colgroup>
                 <col className="col-num" />
                 <col className="col-desc" />
+                <col className="col-price" />
+                <col className="col-disc" />
                 <col className="col-qty" />
-                <col className="col-rate" />
-                <col className="col-tax" />
                 <col className="col-amt" />
               </colgroup>
               <thead>
                 <tr>
-                  <th className="cell-num">#</th>
+                  <th className="cell-num">Sl. No.</th>
                   <th className="cell-desc">Description</th>
+                  <th className="cell-price">Price</th>
+                  <th className="cell-disc">Discount</th>
                   <th className="cell-qty">Qty</th>
-                  <th className="cell-rate">Rate</th>
-                  <th className="cell-tax">Tax</th>
                   <th className="cell-amt">Amount</th>
                 </tr>
               </thead>
@@ -197,13 +261,10 @@ export function ProfessionalDocument({
                           <td className="cell-num">{n}</td>
                           <td className="cell-desc">
                             <p className="doc-line-name">{line.description}</p>
-                            {(line.discount ?? 0) > 0 ? (
-                              <p className="doc-line-sub">Discount {formatDocumentCurrency(line.discount ?? 0)}</p>
-                            ) : null}
                           </td>
-                          <td className="cell-qty">{line.quantity}</td>
-                          <td className="cell-rate">{formatDocumentCurrency(line.unitPrice)}</td>
-                          <td className="cell-tax">{`${line.taxRate ?? 0}%`}</td>
+                          <td className="cell-price">{formatDocumentCurrency(line.unitPrice)}</td>
+                          <td className="cell-disc">{formatDocumentCurrency(line.discount ?? 0)}</td>
+                          <td className="cell-qty">{qtyDisplay(line.quantity)}</td>
                           <td className="cell-amt">{formatDocumentCurrency(net)}</td>
                         </tr>
                       );
@@ -226,11 +287,11 @@ export function ProfessionalDocument({
                   </div>
                 ) : null}
                 <div>
-                  <dt>Tax</dt>
+                  <dt>{taxLabel}</dt>
                   <dd>{formatDocumentCurrency(tax)}</dd>
                 </div>
                 <div className="doc-total-row">
-                  <dt>{kind === "Invoice" ? "Final Amount" : "Total"}</dt>
+                  <dt>Grand Total</dt>
                   <dd>{formatDocumentCurrency(total)}</dd>
                 </div>
               </dl>
@@ -277,12 +338,14 @@ export function ProfessionalDocument({
           </div>
         ) : null}
 
-        <footer className="doc-footer">
-          <span>
-            {company} · {kind} {reference}
-          </span>
-          <span className="doc-page">Page 1 of 1</span>
-        </footer>
+        {showFooter ? (
+          <footer className="doc-footer">
+            <span>
+              {company} · {kind} {reference}
+            </span>
+            <span className="doc-page">Page 1 of 1</span>
+          </footer>
+        ) : null}
       </div>
     </section>
   );

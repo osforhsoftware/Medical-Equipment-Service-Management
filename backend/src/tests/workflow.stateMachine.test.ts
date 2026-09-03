@@ -7,6 +7,7 @@ import {
   TICKET_TRANSITIONS,
   TICKET_STATUS_ORDER,
   normalizeTicketStatus,
+  resolveTicketEventStatus,
 } from "@/services/workflow/serviceTicketStateMachine";
 import { AppError } from "@/middleware/errorHandler";
 
@@ -57,8 +58,19 @@ test("reopen moves backward and is role-gated", () => {
   assert.doesNotThrow(() => assertTicketReopen("closed", "invoiced", "admin"));
 });
 
-test("job transitions reject illegal jumps", () => {
+test("revision request returns ticket to estimate stage", () => {
+  assert.equal(resolveTicketEventStatus("pending_approval", "estimateRevisionRequested"), "estimate");
+  assert.equal(resolveTicketEventStatus("approval", "estimateRevisionRequested"), "estimate");
+  assert.equal(resolveTicketEventStatus("pending_approval", "estimateRejected"), "estimate");
+  // Same-stage pending approval is a no-op (stays on approval); it must not reverse.
+  assert.equal(resolveTicketEventStatus("pending_approval", "estimatePendingApproval"), "pending_approval");
+});
+
+test("job transitions require review before completed", () => {
   assert.doesNotThrow(() => assertJobTransition("scheduled", "inProgress"));
+  assert.doesNotThrow(() => assertJobTransition("inProgress", "review"));
+  assert.doesNotThrow(() => assertJobTransition("review", "completed"));
   expectAppError(() => assertJobTransition("scheduled", "completed"), 409);
+  expectAppError(() => assertJobTransition("inProgress", "completed"), 409);
   expectAppError(() => assertJobTransition("completed", "inProgress"), 409);
 });

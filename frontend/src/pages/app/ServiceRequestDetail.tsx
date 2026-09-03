@@ -60,7 +60,8 @@ const assignSchema = z.object({
   assignNote: fieldRules.optionalString(),
 });
 
-function formatServiceType(type: string, typeOther?: string | null) {
+function formatServiceType(type?: string | null, typeOther?: string | null) {
+  if (!type) return "—";
   return formatFixedOption(SERVICE_TYPE_OPTIONS, type, typeOther);
 }
 
@@ -287,7 +288,7 @@ export default function ServiceRequestDetail() {
                       <AlertTitle>Estimate stage</AlertTitle>
                       <AlertDescription>
                         {request.assignedEstimatorName
-                          ? `${request.assignedEstimatorName} should build the quotation, then use Send for Approval to continue to Approval.`
+                          ? `${request.assignedEstimatorName} should build or revise the quotation, then use Send for Approval to continue to Approval.`
                           : "Assign Estimate Staff, then build the quotation and send it for approval to continue."}
                       </AlertDescription>
                     </Alert>
@@ -341,7 +342,9 @@ export default function ServiceRequestDetail() {
                   </DetailSection>
                 ) : null}
                 <DetailSection title="Description">
-                  <p className="rounded-lg bg-muted/50 p-3 text-sm">{request.description}</p>
+                  <p className="rounded-lg bg-muted/50 p-3 text-sm">
+                    {request.description || "No description provided."}
+                  </p>
                 </DetailSection>
               </div>
             ),
@@ -416,7 +419,7 @@ export default function ServiceRequestDetail() {
               {canBuildEstimate && (isEstimateStage || isInspectionStage) ? (
                 <Button asChild variant={isEstimateStage ? "brand" : "outline"} className="w-full">
                   <Link to={`/app/estimates/${request.id}/build`}>
-                    {isEstimateStage ? "Build estimate & send for approval" : "Open estimate builder"}
+                    {isEstimateStage ? "Edit estimate & send for approval" : "Open estimate builder"}
                   </Link>
                 </Button>
               ) : null}

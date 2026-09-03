@@ -8,11 +8,12 @@ import { StaffWorkCard } from "@/components/mobile/StaffWorkCard";
 import { WorkflowTimeline } from "@/components/mobile/WorkflowTimeline";
 import { MobileQuickActions, MobileStatGrid } from "@/components/mobile/MobileStaffWidgets";
 import { MobileImportantAlerts } from "@/components/mobile/MobileImportantAlerts";
-import { useMobilePullRefresh, useMobileUnreadCount } from "@/components/mobile/MobileLayout";
+import { useMobilePullRefresh, useMobileUnreadCount } from "@/hooks/useMobilePullRefresh";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
+import { getUserRoles } from "@/lib/userRoles";
 import {
   filterQuickActionsByAccess,
   nextJobAction,
@@ -63,6 +64,7 @@ export default function MobileDashboard() {
   const navigate = useNavigate();
   const unread = useMobileUnreadCount();
   const role = (user?.role ?? "engineer") as Role;
+  const userRoles = useMemo(() => (user ? getUserRoles(user) : [role]), [user, role]);
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [notifications, setNotifications] = useState<BackendNotification[]>([]);
@@ -99,8 +101,8 @@ export default function MobileDashboard() {
 
   const stats = useMemo(() => (data ? roleStats(role, data) : []), [data, role]);
   const actions = useMemo(
-    () => filterQuickActionsByAccess(roleQuickActions(role), role, rbacMatrix),
-    [role, rbacMatrix],
+    () => filterQuickActionsByAccess(roleQuickActions(role), userRoles, rbacMatrix),
+    [role, userRoles, rbacMatrix],
   );
   const filterOptions = useMemo(() => roleFilterOptions(role), [role]);
   const pipelineStages = useMemo(() => rolePipelineStages(role), [role]);

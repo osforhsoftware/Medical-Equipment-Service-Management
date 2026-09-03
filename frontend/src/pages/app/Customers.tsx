@@ -37,6 +37,7 @@ import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
+import { CUSTOMER_WRITE_ROLES } from "@/config/roles";
 import { userCanAccessModule } from "@/lib/userRoles";
 import { navItems } from "@/config/nav";
 import { activeTerms, termLabel } from "@/lib/taxonomy";
@@ -87,8 +88,9 @@ const emptyForm: FormState = {
 export default function Customers() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const { rbacMatrix } = useSettings();
+  const canCreate = hasRole(CUSTOMER_WRITE_ROLES);
   const canManageMasterData = Boolean(
     user && userCanAccessModule(
       user,
@@ -156,6 +158,7 @@ export default function Customers() {
   const typeFilterOptions = typeTerms.map((t) => ({ label: t.name, value: t.slug }));
 
   const openCreate = async () => {
+    if (!canCreate) return;
     setForm({ ...emptyForm });
     setNextReference("");
     resetValidation();
@@ -273,9 +276,11 @@ export default function Customers() {
         title="Customers"
         description="Parties for product sales and service work."
         actions={
-          <Button onClick={openCreate} variant="brand">
-            <Plus className="mr-1 h-4 w-4" /> Add Customer
-          </Button>
+          canCreate ? (
+            <Button onClick={openCreate} variant="brand">
+              <Plus className="mr-1 h-4 w-4" /> Add Customer
+            </Button>
+          ) : undefined
         }
       />
 
@@ -286,7 +291,7 @@ export default function Customers() {
         search={search}
         onSearchChange={setSearch}
         searchPlaceholder="Search customers…"
-        emptyMessage="No customers yet. Add your first customer to get started."
+        emptyMessage={canCreate ? "No customers yet. Add your first customer to get started." : "No customers yet."}
         emptyHint="Try changing your search or filters."
         filterValues={filters}
         onFilterChange={setFilter}
@@ -315,7 +320,7 @@ export default function Customers() {
         onRowClick={(c) => navigate(`/app/customers/${c.id}`)}
       />
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetValidation(); setDialogOpen(open); }}>
+      <Dialog open={canCreate && dialogOpen} onOpenChange={(open) => { if (!open) resetValidation(); setDialogOpen(open); }}>
         <DialogContent ref={dialogRef} className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">

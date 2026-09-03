@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { FilePenLine, FileText } from "lucide-react";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { InspectionReportPanel } from "@/components/inspections/InspectionReportPanel";
@@ -29,6 +29,8 @@ function equipmentLabel(request: BackendServiceRequest) {
 
 export default function InspectionDetail() {
   const { id = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const fromHistory = searchParams.get("from") === "history";
   const [request, setRequest] = useState<BackendServiceRequest | null>(null);
   const [report, setReport] = useState<BackendInspectionReport | null>(null);
   const [timeline, setTimeline] = useState<BackendTimelineEvent[]>([]);
@@ -72,8 +74,8 @@ export default function InspectionDetail() {
   return (
     <RoleGuard roles={["admin", "coordinator", "inspector"]}>
       <RecordDetailLayout
-        backTo="/app/inspections"
-        backLabel="Back to inspections"
+        backTo={fromHistory ? "/app/inspections?view=history" : "/app/inspections"}
+        backLabel={fromHistory ? "Back to inspection history" : "Back to inspections"}
         title={request?.reference ?? "Inspection"}
         subtitle={request ? `${equipmentLabel(request)} · ${request.customerName}` : undefined}
         status={request?.status}
@@ -92,7 +94,7 @@ export default function InspectionDetail() {
           <div className="flex flex-wrap items-center gap-2">
             {report ? (
               <Button variant="outline" asChild>
-                <Link to={`/app/inspections/${request.id}/report`}>
+                <Link to={`/app/inspections/${request.id}/report${fromHistory ? "?from=history" : ""}`}>
                   <FileText className="mr-1.5 h-4 w-4" />
                   Full report
                 </Link>
@@ -134,7 +136,7 @@ export default function InspectionDetail() {
             <DetailSection title="Ticket details">
               <DetailInfoGrid
                 items={[
-                  { label: "Type", value: formatFixedOption(SERVICE_TYPE_OPTIONS, request.type, request.typeOther) },
+                  { label: "Type", value: request.type ? formatFixedOption(SERVICE_TYPE_OPTIONS, request.type, request.typeOther) : "—" },
                   { label: "Priority", value: request.priority },
                   { label: "Status", value: formatServiceStatus(request.status) },
                   { label: "Created by", value: request.createdBy },

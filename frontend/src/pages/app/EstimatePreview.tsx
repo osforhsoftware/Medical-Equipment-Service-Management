@@ -5,7 +5,7 @@ import { ProfessionalDocument } from "@/components/shared/ProfessionalDocument";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { ESTIMATE_READ_ROLES } from "@/config/roles";
 import { Button } from "@/components/ui/button";
-import { ApiError, api, type BackendEstimate } from "@/lib/api";
+import { ApiError, api, type BackendCustomer, type BackendEstimate } from "@/lib/api";
 import { estimateToDocumentLines } from "@/lib/estimates";
 import { toast } from "@/lib/toast";
 
@@ -14,6 +14,7 @@ export default function EstimatePreview() {
   const location = useLocation();
   const isPortal = location.pathname.startsWith("/portal");
   const [estimate, setEstimate] = useState<BackendEstimate | null>(null);
+  const [customer, setCustomer] = useState<BackendCustomer | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,15 +25,26 @@ export default function EstimatePreview() {
     setLoading(true);
     setError(null);
     try {
+      let next: BackendEstimate | null = null;
       if (isPortal) {
         const portal = await api.getCustomerPortal();
         const match = portal.estimates.find((item) => item.id === id);
-        setEstimate(match ? await api.getEstimate(id).catch(() => match) : null);
+        next = match ? await api.getEstimate(id).catch(() => match) : null;
       } else {
-        setEstimate(await api.getEstimate(id));
+        next = await api.getEstimate(id);
+      }
+      setEstimate(next);
+      setCustomer(null);
+      if (next?.customerId) {
+        try {
+          setCustomer(await api.getCustomer(next.customerId));
+        } catch {
+          setCustomer(null);
+        }
       }
     } catch (err) {
       setEstimate(null);
+      setCustomer(null);
       setError(err instanceof ApiError && err.status === 404 ? null : "Unable to load this document.");
       if (!(err instanceof ApiError && err.status === 404)) {
         toast.apiError(err, { fallback: "Failed to load estimate" });
@@ -107,11 +119,24 @@ export default function EstimatePreview() {
             kind="Estimate"
             reference={estimate.reference}
             customerName={estimate.customerName}
+            customerAddress={
+              customer
+                ? [customer.address, customer.city, customer.country].filter(Boolean).join(", ")
+                : undefined
+            }
+            customerPhone={customer?.phone || undefined}
+            customerEmail={customer?.email || undefined}
             equipmentName={estimate.equipmentName}
             issueDate={estimate.createdAt}
             validOrDueLabel="Valid until"
             validOrDueDate={estimate.validUntil}
             ticketRef={estimate.requestRef}
+            detailsHeading="Project details"
+            detailRows={[
+              { label: "Equipment", value: estimate.equipmentName },
+              { label: "Ticket", value: estimate.requestRef },
+              { label: "Status", value: estimate.status },
+            ]}
             lines={estimateToDocumentLines(estimate)}
             discount={Number(estimate.discount ?? 0)}
             notes={estimate.notes ?? undefined}

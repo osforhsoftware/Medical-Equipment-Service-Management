@@ -6,6 +6,7 @@ import { validate } from "@/middleware/validate";
 import { createJobSchema, updateJobSchema } from "@/schemas/jobs.schema";
 import {
   uploadJobPhotosSchema,
+  saveJobWorkReportSchema,
   requestJobPartsSchema,
   captureJobSignatureSchema,
   deductJobStockSchema,
@@ -16,16 +17,18 @@ router.use(authenticate, resolveTenant);
 
 const canRead = requireRole("admin", "coordinator", "engineer");
 const canExecute = requireRole("admin", "engineer");
+const canUpdate = requireRole("admin", "coordinator", "engineer");
 
 router.get("/", canRead, jobsController.getAll);
 router.get("/:id/activities", canRead, jobsController.getActivities);
 router.get("/:id", canRead, jobsController.getById);
 router.post("/", requireRole("admin", "coordinator"), validate(createJobSchema), jobsController.create);
 router.post("/:id/photos", canExecute, validate(uploadJobPhotosSchema), jobsController.uploadPhotos);
+router.put("/:id/work-report", canExecute, validate(saveJobWorkReportSchema), jobsController.saveWorkReport);
 router.post("/:id/parts-requests", canExecute, validate(requestJobPartsSchema), jobsController.requestParts);
 router.post("/:id/signature", canExecute, validate(captureJobSignatureSchema), jobsController.captureSignature);
 router.post("/:id/deduct-stock", canExecute, validate(deductJobStockSchema), jobsController.deductStock);
-router.put("/:id", canExecute, validate(updateJobSchema), jobsController.update);
+router.put("/:id", canUpdate, validate(updateJobSchema), jobsController.update);
 router.delete("/:id", requireRole("admin"), jobsController.delete);
 
 export default router;

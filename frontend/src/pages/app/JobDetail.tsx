@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { Camera, FileSignature, Loader2, PackageMinus, PlusCircle, Wrench } from "lucide-react";
+import { Camera, ClipboardList, Loader2, PackageMinus, PlusCircle, Wrench } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PhotoCaptionTile } from "@/components/shared/PhotoCaptionTile";
@@ -14,7 +14,8 @@ import {
   RecordDetailLayout,
 } from "@/components/shared/RecordDetailLayout";
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import { SignaturePad } from "@/components/shared/SignaturePad";
+import { JobWorkReportPanel } from "@/components/jobs/JobWorkReportPanel";
+import { pickWorkReportLog, useJobWorkReportEditor } from "@/components/jobs/useJobWorkReportEditor";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,6 +47,8 @@ const JOB_STATUS_OPTIONS = [
   { value: "completed", label: "Completed" },
 ] as const;
 
+const ENGINEER_STATUS_OPTIONS = JOB_STATUS_OPTIONS.filter((o) => o.value !== "completed");
+
 function toApiJobStatus(display: string) {
   if (display === "in-progress") return "inProgress";
   if (display === "parts-pending") return "partsPending";
@@ -54,10 +57,6 @@ function toApiJobStatus(display: string) {
 
 const scopeSchema = z.object({
   partsNote: fieldRules.requiredString("Scope change reason"),
-});
-
-const signatureSchema = z.object({
-  customerName: fieldRules.requiredString("Customer name"),
 });
 
 function validatePhotos(values: { photoCount: number }): FieldErrors {
@@ -91,7 +90,6 @@ export default function JobDetail() {
   const [error, setError] = useState<string | null>(null);
   const [photosOpen, setPhotosOpen] = useState(false);
   const [partsOpen, setPartsOpen] = useState(false);
-  const [signatureOpen, setSignatureOpen] = useState(false);
   const [stockOpen, setStockOpen] = useState(false);
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoCaptions, setPhotoCaptions] = useState<string[]>([]);
@@ -99,8 +97,6 @@ export default function JobDetail() {
   const [partsItemId, setPartsItemId] = useState("");
   const [partsQty, setPartsQty] = useState(1);
   const [extraType, setExtraType] = useState<(typeof ENGINEER_EXTRA_TYPES)[number]["value"]>("product");
-  const [customerName, setCustomerName] = useState("");
-  const [signatureData, setSignatureData] = useState<string | null>(null);
   const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
   const [stockItemId, setStockItemId] = useState("");
   const [stockQty, setStockQty] = useState(1);
@@ -108,7 +104,6 @@ export default function JobDetail() {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const photosDialogRef = useRef<HTMLDivElement>(null);
   const scopeDialogRef = useRef<HTMLDivElement>(null);
-  const signatureDialogRef = useRef<HTMLDivElement>(null);
   const stockDialogRef = useRef<HTMLDivElement>(null);
 
   const photosValidation = useFormValidation({
@@ -138,17 +133,19 @@ export default function JobDetail() {
     schema: scopeSchema,
   });
 
-  const signatureValidation = useFormValidation({
-    fieldOrder: ["customerName", "signature"],
-    schema: signatureSchema,
-  });
-
   const stockValidation = useFormValidation({
     fieldOrder: ["stockItemId", "stockQty"],
   });
 
   const canUpdateJob = hasRole(["engineer", "admin"]);
+  const canApproveComplete = hasRole(["coordinator", "admin"]);
   const canReviewExtras = hasRole(["coordinator", "admin"]);
+  const statusOptions = canApproveComplete ? JOB_STATUS_OPTIONS : ENGINEER_STATUS_OPTIONS;
+  const awaitingReview = job?.status === "review";
+  const canSubmitForReview =
+    canUpdateJob && job && !["review", "completed"].includes(job.status);
+  const canEditWorkReport = canUpdateJob && job && job.status !== "completed";
+  const hasWorkReport = Boolean(job && pickWorkReportLog(job.workLogs));
   const tab = searchParams.get("tab") ?? "overview";
 
   const load = useCallback(async () => {
@@ -174,6 +171,10 @@ export default function JobDetail() {
     void load();
   }, [load]);
 
+  const workReport = useJobWorkReportEditor(async () => {
+    await load();
+  });
+
   const refreshActivities = async (jobId: string) => {
     try {
       setActivities(await api.getJobActivities(jobId));
@@ -197,16 +198,42 @@ export default function JobDetail() {
     }
   };
 
-  const completeJob = async () => {
+  const submitForReview = async () => {
     if (!job) return;
+    if (!pickWorkReportLog(job.workLogs)) {
+      toast({
+        title: "Work report required",
+        description: "Fill the work report (like inspection) before submitting for review.",
+        variant: "destructive",
+      });
+      workReport.openReport(job);
+      return;
+    }
     try {
-      await api.updateJob(job.id, { status: "completed", progress: 100 });
+      await api.updateJob(job.id, { status: "review", progress: Math.max(job.progress, 90) });
       const doc = await api.generateDocument("service-report", job.id);
-      toast({ title: "Job completed", description: "Service report PDF generated." });
+      toast({
+        title: "Submitted for review",
+        description: "Service report generated. Awaiting coordinator or admin approval.",
+      });
       if (doc.file?.id) window.open(api.fileDownloadUrl(doc.file.id), "_blank");
       await load();
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to complete job" });
+      toast.apiError(err, { fallback: "Unable to submit job for review" });
+    }
+  };
+
+  const approveAndComplete = async () => {
+    if (!job) return;
+    try {
+      await api.updateJob(job.id, { status: "completed", progress: 100 });
+      toast({
+        title: "Job completed",
+        description: "Work approved. Ticket moved to pending final approval / billing.",
+      });
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to approve and complete job" });
     }
   };
 
@@ -326,35 +353,6 @@ export default function JobDetail() {
     }
   };
 
-  const handleCaptureSignature = async () => {
-    if (!job) return;
-    const values = { customerName };
-    const extraErrors: FieldErrors = {};
-    if (!signatureData) extraErrors.signature = "Customer signature is required.";
-    if (!signatureValidation.validateAll(values, extraErrors, signatureDialogRef.current)) return;
-
-    setActionSaving(true);
-    try {
-      const result = await api.captureJobSignature(job.id, {
-        customerName: customerName.trim(),
-        signatureData: signatureData!,
-      });
-      setJob(result.job);
-      toast({ title: "Signature captured", description: `Signed by ${customerName.trim()}` });
-      setCustomerName("");
-      setSignatureData(null);
-      setSignatureOpen(false);
-      signatureValidation.reset();
-      await refreshActivities(job.id);
-    } catch (err) {
-      if (!signatureValidation.applyApiErrors(err, signatureDialogRef.current)) {
-        toast.apiError(err, { fallback: "Signature failed" });
-      }
-    } finally {
-      setActionSaving(false);
-    }
-  };
-
   const openStockDialog = async () => {
     setStockOpen(true);
     setStockItemId("");
@@ -446,10 +444,28 @@ export default function JobDetail() {
         notFoundDescription="The requested service job could not be found."
         onRetry={() => void load()}
         actions={
-          job && canUpdateJob && job.status !== "completed" ? (
-            <Button onClick={() => void completeJob()}>
-              Complete & Generate Report
-            </Button>
+          job && job.status !== "completed" ? (
+            <div className="flex flex-wrap gap-2">
+              {canEditWorkReport ? (
+                <Button variant="outline" onClick={() => workReport.openReport(job)}>
+                  <ClipboardList className="mr-1.5 h-4 w-4" />
+                  {hasWorkReport ? "Update Work Report" : "Work Report"}
+                </Button>
+              ) : null}
+              {canSubmitForReview ? (
+                <Button onClick={() => void submitForReview()}>
+                  Submit for Review & Report
+                </Button>
+              ) : awaitingReview && canApproveComplete ? (
+                <Button onClick={() => void approveAndComplete()}>
+                  Approve & Complete
+                </Button>
+              ) : awaitingReview ? (
+                <Button disabled variant="outline">
+                  Awaiting coordinator approval
+                </Button>
+              ) : null}
+            </div>
           ) : undefined
         }
         activeTab={tab}
@@ -486,7 +502,7 @@ export default function JobDetail() {
                 </DetailSection>
                 {photos.length > 0 ? (
                   <DetailSection title="Photos">
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <div className="flex flex-wrap gap-3">
                       {photos.map((photo) => {
                         const src = photo.fileId ? api.fileDownloadUrl(photo.fileId) : "";
                         if (!src) return null;
@@ -498,6 +514,7 @@ export default function JobDetail() {
                             caption={photo.caption ?? ""}
                             href={src}
                             readOnly
+                            className="w-24 sm:w-28"
                           />
                         );
                       })}
@@ -594,28 +611,51 @@ export default function JobDetail() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {canUpdateJob && job.status !== "completed" ? (
-                  <>
-                    <div className="space-y-2">
-                      <Label>Update status</Label>
-                      <Select value={selectedApiStatus} onValueChange={(v) => void updateJobStatus(v)}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {JOB_STATUS_OPTIONS.map((o) => (
-                            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <ActionBtn icon={Camera} label="Photos" onClick={() => { photosValidation.reset(); resetPhotoDraft(); setPhotosOpen(true); }} />
-                      <ActionBtn icon={PlusCircle} label="Parts / scope" onClick={() => void openPartsDialog()} />
-                      <ActionBtn icon={FileSignature} label="Signature" onClick={() => { signatureValidation.reset(); setCustomerName(""); setSignatureData(null); setSignatureOpen(true); }} />
-                      <ActionBtn icon={PackageMinus} label="Stock" onClick={() => void openStockDialog()} />
-                    </div>
-                  </>
-                ) : (
+                {job.status === "completed" ? (
                   <p className="text-sm text-muted-foreground">This job is completed.</p>
+                ) : (
+                  <>
+                    {awaitingReview ? (
+                      <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
+                        Work submitted for review. A coordinator or admin must approve before the job is marked completed.
+                      </p>
+                    ) : null}
+                    {(canUpdateJob || canApproveComplete) && job.status !== "completed" ? (
+                      <div className="space-y-2">
+                        <Label>Update status</Label>
+                        <Select value={selectedApiStatus} onValueChange={(v) => void updateJobStatus(v)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {statusOptions.map((o) => (
+                              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+                    {canUpdateJob && job.status !== "completed" ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <ActionBtn
+                          icon={ClipboardList}
+                          label={hasWorkReport ? "Edit work report" : "Work report"}
+                          onClick={() => workReport.openReport(job)}
+                        />
+                        <ActionBtn icon={PlusCircle} label="Parts / scope" onClick={() => void openPartsDialog()} />
+                        <ActionBtn icon={PackageMinus} label="Stock" onClick={() => void openStockDialog()} />
+                        <ActionBtn icon={Camera} label="Quick photos" onClick={() => { photosValidation.reset(); resetPhotoDraft(); setPhotosOpen(true); }} />
+                      </div>
+                    ) : null}
+                    {awaitingReview && canApproveComplete ? (
+                      <Button className="w-full" onClick={() => void approveAndComplete()}>
+                        Approve & Complete
+                      </Button>
+                    ) : null}
+                    {canSubmitForReview ? (
+                      <Button className="w-full" variant="outline" onClick={() => void submitForReview()}>
+                        Submit for Review & Report
+                      </Button>
+                    ) : null}
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -793,60 +833,6 @@ export default function JobDetail() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={signatureOpen} onOpenChange={(open) => { if (!open) { signatureValidation.reset(); setCustomerName(""); setSignatureData(null); } setSignatureOpen(open); }}>
-        <DialogContent ref={signatureDialogRef} className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Capture Signature</DialogTitle></DialogHeader>
-          <form
-            noValidate
-            onSubmit={(e) => {
-              e.preventDefault();
-              void handleCaptureSignature();
-            }}
-          >
-            <div className="grid gap-4 py-2">
-              <div className="grid gap-2" data-field="customerName">
-                <Label htmlFor="customer-sign" className={signatureValidation.shouldShow("customerName") ? "text-destructive" : undefined}>
-                  Customer name
-                  <RequiredMark />
-                </Label>
-                <Input
-                  id="customer-sign"
-                  name="customerName"
-                  value={customerName}
-                  className={fieldErrorClass(signatureValidation.shouldShow("customerName"))}
-                  {...fieldAria("customerName", signatureValidation.shouldShow("customerName") ? signatureValidation.errors.customerName : null)}
-                  onChange={(e) => {
-                    setCustomerName(e.target.value);
-                    signatureValidation.handleChange("customerName", { customerName: e.target.value });
-                  }}
-                  onBlur={() => signatureValidation.handleBlur("customerName", { customerName })}
-                />
-                {signatureValidation.shouldShow("customerName") && (
-                  <FormFieldError field="customerName" message={signatureValidation.errors.customerName} />
-                )}
-              </div>
-              <div data-field="signature">
-                <SignaturePad
-                  onChange={(data) => {
-                    setSignatureData(data);
-                    if (data) signatureValidation.clearError("signature");
-                  }}
-                />
-                {signatureValidation.shouldShow("signature") && (
-                  <FormFieldError field="signature" message={signatureValidation.errors.signature} className="mt-2" />
-                )}
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => { setSignatureOpen(false); setCustomerName(""); setSignatureData(null); }}>Cancel</Button>
-              <Button type="submit" disabled={actionSaving}>
-                {actionSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={stockOpen} onOpenChange={(open) => { if (!open) stockValidation.reset(); setStockOpen(open); }}>
         <DialogContent ref={stockDialogRef} className="sm:max-w-md">
           <DialogHeader><DialogTitle>Deduct Stock</DialogTitle></DialogHeader>
@@ -937,6 +923,28 @@ export default function JobDetail() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <JobWorkReportPanel
+        open={Boolean(workReport.job)}
+        onClose={workReport.closePanel}
+        job={workReport.job}
+        existingLog={workReport.existingLog}
+        existingPhotos={workReport.existingPhotos}
+        saving={workReport.saving}
+        onSubmit={() => void workReport.submitReport()}
+        workPerformed={workReport.workPerformed}
+        setWorkPerformed={workReport.setWorkPerformed}
+        testingResult={workReport.testingResult}
+        setTestingResult={workReport.setTestingResult}
+        calibrationResult={workReport.calibrationResult}
+        setCalibrationResult={workReport.setCalibrationResult}
+        recommendation={workReport.recommendation}
+        setRecommendation={workReport.setRecommendation}
+        setNewImages={workReport.setNewImages}
+        imageCaptions={workReport.imageCaptions}
+        setImageCaptions={workReport.setImageCaptions}
+        newImagePreviews={workReport.newImagePreviews}
+      />
     </RoleGuard>
   );
 }

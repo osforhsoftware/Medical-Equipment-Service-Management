@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Loader2, QrCode } from "lucide-react";
 import { MobileHeader } from "@/components/mobile/MobileHeader";
 import { MobileSearchBar } from "@/components/mobile/MobileSearchBar";
-import { useMobileUnreadCount } from "@/components/mobile/MobileLayout";
+import { useMobileUnreadCount } from "@/hooks/useMobilePullRefresh";
 import { QrCameraScanner } from "@/components/shared/QrCameraScanner";
 import { ScannedEquipmentDetails } from "@/components/shared/ScannedEquipmentDetails";
 import { ApiError, type BackendEquipmentHistory } from "@/lib/api";

@@ -2,7 +2,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { getMobileNavTabs, isMobileTabActive } from "@/config/mobileNav";
-import { useMobileUnreadCount } from "@/components/mobile/MobileLayout";
+import { useMobileUnreadCount } from "@/hooks/useMobilePullRefresh";
 import { getUserRoles } from "@/lib/userRoles";
 import { cn } from "@/lib/utils";
 

@@ -15,6 +15,13 @@ export const uploadJobPhotosSchema = z.object({
     .max(10),
 });
 
+export const saveJobWorkReportSchema = z.object({
+  workPerformed: z.string().trim().min(3, "Describe the work performed").max(20000),
+  testingResult: z.string().trim().max(20000).optional().nullable(),
+  calibrationResult: z.string().trim().max(20000).optional().nullable(),
+  recommendation: z.string().trim().max(5000).optional().nullable(),
+});
+
 export const requestJobPartsSchema = z.object({
   notes: z.string().trim().min(3, "Describe the parts needed").max(2000),
 });

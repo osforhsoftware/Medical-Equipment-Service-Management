@@ -40,6 +40,7 @@ import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import { formatCurrency, formatCurrencyShort } from "@/lib/format";
 import { EMPTY_PAGINATION_META } from "@/lib/listing";
 import { navItems } from "@/config/nav";
+import { INVENTORY_WRITE_ROLES } from "@/config/roles";
 import { activeTerms, termLabel } from "@/lib/taxonomy";
 import { userCanAccessModule } from "@/lib/userRoles";
 import { toast } from "@/lib/toast";
@@ -56,7 +57,7 @@ const nonNegativeString = (label: string) =>
 
 const inventorySchema = z
   .object({
-    sku: fieldRules.requiredString("SKU"),
+    sku: z.string().trim().max(64, "SKU must be 64 characters or fewer."),
     name: fieldRules.requiredString("Name"),
     category: z.string(),
     subcategory: z.string(),
@@ -74,11 +75,11 @@ const inventorySchema = z
     supplierOther: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    if (!data.category || data.category === ADD_OPTION) {
+    if (data.category === ADD_OPTION) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: data.category === ADD_OPTION && data.categoryOther?.trim() ? ["categoryOther"] : ["category"],
-        message: data.category === ADD_OPTION ? "Click Add to save the new category." : "Select or add a category.",
+        path: data.categoryOther?.trim() ? ["categoryOther"] : ["category"],
+        message: data.categoryOther?.trim() ? "Click Add to save the new category." : "Enter a category, or choose an existing one.",
       });
     }
     if (data.category === ADD_OPTION && !data.categoryOther?.trim()) {
@@ -88,11 +89,11 @@ const inventorySchema = z
         message: "Enter a category.",
       });
     }
-    if (!data.subcategory || data.subcategory === ADD_OPTION) {
+    if (data.subcategory === ADD_OPTION) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: data.subcategory === ADD_OPTION && data.subcategoryOther?.trim() ? ["subcategoryOther"] : ["subcategory"],
-        message: data.subcategory === ADD_OPTION ? "Click Add to save the new subcategory." : "Select or add a subcategory.",
+        path: data.subcategoryOther?.trim() ? ["subcategoryOther"] : ["subcategory"],
+        message: data.subcategoryOther?.trim() ? "Click Add to save the new subcategory." : "Enter a subcategory, or choose an existing one.",
       });
     }
     if (data.subcategory === ADD_OPTION && !data.subcategoryOther?.trim()) {
@@ -189,9 +190,9 @@ function InlineAddTerm({
 export default function Inventory() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const { rbacMatrix } = useSettings();
-  const canManage = user?.role === "admin" || user?.role === "inventory";
+  const canManage = hasRole(INVENTORY_WRITE_ROLES);
   const canManageMasterData = Boolean(
     user &&
       userCanAccessModule(
@@ -580,11 +581,11 @@ export default function Inventory() {
               <div className="grid gap-2" data-field="sku">
                 <Label htmlFor="inventory-sku" className={shouldShow("sku") ? "text-destructive" : undefined}>
                   SKU / Part Number
-                  <RequiredMark />
                 </Label>
                 <Input
                   id="inventory-sku"
                   value={form.sku}
+                  placeholder="Optional"
                   onChange={(e) => {
                     const next = { ...form, sku: e.target.value };
                     setForm(next);
@@ -601,7 +602,6 @@ export default function Inventory() {
                   <div className="flex items-center justify-between gap-2">
                     <Label className={shouldShow("category") ? "text-destructive" : undefined}>
                       Category
-                      <RequiredMark />
                     </Label>
                     {canManageMasterData ? (
                       <Link to="/app/master-data?type=inventory_category" className="text-xs text-primary hover:underline">
@@ -646,7 +646,6 @@ export default function Inventory() {
                   <div className="flex items-center justify-between gap-2">
                     <Label className={shouldShow("subcategory") ? "text-destructive" : undefined}>
                       Subcategory
-                      <RequiredMark />
                     </Label>
                     {canManageMasterData ? (
                       <Link to="/app/master-data?type=inventory_subcategory" className="text-xs text-primary hover:underline">

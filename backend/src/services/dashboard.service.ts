@@ -170,7 +170,7 @@ export class DashboardService {
       }),
       prisma.invoice.findMany({
         where: { tenantId },
-        select: { total: true, issuedAt: true, status: true },
+        select: { total: true, issuedAt: true, status: true, salesOrderId: true, jobId: true, serviceRequestId: true },
       }),
       prisma.timelineEvent.findMany({
         where: { request: { tenantId } },
@@ -197,10 +197,18 @@ export class DashboardService {
         where: { tenantId, status: "sent" },
       }),
       prisma.invoice.count({
-        where: { tenantId, status: { in: ["draft", "sent"] } },
+        where: {
+          tenantId,
+          status: { in: ["draft", "sent"] },
+          ...(staffRole === "sales" ? { salesOrderId: { not: null } } : {}),
+        },
       }),
       prisma.invoice.count({
-        where: { tenantId, status: "overdue" },
+        where: {
+          tenantId,
+          status: "overdue",
+          ...(staffRole === "sales" ? { salesOrderId: { not: null } } : {}),
+        },
       }),
       prisma.purchaseOrder.count({
         where: { tenantId, status: { in: ["draft", "sent", "partial"] } },
@@ -259,13 +267,26 @@ export class DashboardService {
 
     const lowStock = lowStockItems.filter((i) => i.inStock <= i.reorderLevel);
 
-    const paidOnly = paidInvoices.filter((inv) => inv.status === "paid");
+    const isSaleInvoice = (inv: { salesOrderId: string | null }) => Boolean(inv.salesOrderId);
+    const isServiceInvoice = (inv: { jobId: string | null; serviceRequestId: string | null; salesOrderId: string | null }) =>
+      !inv.salesOrderId && Boolean(inv.jobId || inv.serviceRequestId);
+
+    const paidOnly = paidInvoices.filter((inv) => inv.status === "paid" || inv.status === "closed");
+    const salePaid = paidOnly.filter(isSaleInvoice);
+    const servicePaid = paidOnly.filter(isServiceInvoice);
+    const financePaid = staffRole === "sales" ? salePaid : paidOnly;
     const revenueTrend = last6MonthBuckets().map((bucket) => {
-      const revenue = paidOnly
+      const revenue = financePaid
+        .filter((inv) => inv.issuedAt >= bucket.start && inv.issuedAt <= bucket.end)
+        .reduce((sum, inv) => sum + Number(inv.total), 0);
+      const saleRevenue = salePaid
+        .filter((inv) => inv.issuedAt >= bucket.start && inv.issuedAt <= bucket.end)
+        .reduce((sum, inv) => sum + Number(inv.total), 0);
+      const serviceRevenue = servicePaid
         .filter((inv) => inv.issuedAt >= bucket.start && inv.issuedAt <= bucket.end)
         .reduce((sum, inv) => sum + Number(inv.total), 0);
       const jobs = allJobs.filter((j) => j.createdAt >= bucket.start && j.createdAt <= bucket.end).length;
-      return { month: bucket.label, revenue, jobs };
+      return { month: bucket.label, revenue, saleRevenue, serviceRevenue, jobs };
     });
 
     const jobsByTypeMap = new Map<string, number>();
@@ -276,11 +297,14 @@ export class DashboardService {
       .map(([type, count]) => ({ type, count }))
       .sort((a, b) => b.count - a.count);
 
-    const revenueMtd = paidOnly
-      .filter((inv) => inv.issuedAt >= mtdStart)
-      .reduce((sum, inv) => sum + Number(inv.total), 0);
+    const sumPaid = (rows: typeof paidOnly) =>
+      rows.filter((inv) => inv.issuedAt >= mtdStart).reduce((sum, inv) => sum + Number(inv.total), 0);
+    const saleRevenueMtd = sumPaid(salePaid);
+    const serviceRevenueMtd = sumPaid(servicePaid);
+    const otherRevenueMtd = sumPaid(paidOnly.filter((inv) => !isSaleInvoice(inv) && !isServiceInvoice(inv)));
+    const revenueMtd = staffRole === "sales" ? saleRevenueMtd : sumPaid(paidOnly);
 
-    const revenuePrevMonth = paidOnly
+    const revenuePrevMonth = financePaid
       .filter((inv) => inv.issuedAt >= prevMonthStart && inv.issuedAt <= prevMonthEnd)
       .reduce((sum, inv) => sum + Number(inv.total), 0);
 
@@ -386,6 +410,9 @@ export class DashboardService {
         lowStockItems: lowStock.length,
         revenueMtd,
         revenueMtdLabel: formatMoneyShort(revenueMtd),
+        saleRevenueMtd,
+        serviceRevenueMtd,
+        otherRevenueMtd,
         expiringAmc,
         unassignedRequests,
         pendingEstimates,
@@ -424,7 +451,9 @@ export class DashboardService {
         activeJobs: pctChange(jobsThisMonth, jobsPrevMonth),
         revenue: showFinance ? pctChange(revenueMtd, revenuePrevMonth) : undefined,
       },
-      revenueTrend: showFinance ? revenueTrend : revenueTrend.map(({ month, jobs }) => ({ month, revenue: 0, jobs })),
+      revenueTrend: showFinance
+        ? revenueTrend
+        : revenueTrend.map(({ month, jobs }) => ({ month, revenue: 0, saleRevenue: 0, serviceRevenue: 0, jobs })),
       jobsByType: showCompanyOps || staffRole === "engineer" || staffRole === "billing" ? jobsByType : [],
       activeJobs: (staffRole === "engineer" ? myJobs : activeJobsList).slice(0, 6).map((j) => ({
         id: j.id,
@@ -592,7 +621,7 @@ export class DashboardService {
       reference: string;
       customerName: string;
       equipmentName: string | null;
-      type: string;
+      type: string | null;
       status: string;
       priority: string;
       slaDue: Date;
@@ -612,7 +641,7 @@ export class DashboardService {
       reference: string;
       customerName: string;
       equipmentName: string | null;
-      type: string;
+      type: string | null;
       status: string;
       priority: string;
       slaDue: Date;
@@ -622,7 +651,7 @@ export class DashboardService {
       reference: string;
       customerName: string;
       equipmentName: string | null;
-      type: string;
+      type: string | null;
       status: string;
       priority: string;
       slaDue: Date;
@@ -632,7 +661,7 @@ export class DashboardService {
       reference: string;
       customerName: string;
       equipmentName: string | null;
-      type: string;
+      type: string | null;
       status: string;
       priority: string;
       slaDue: Date;
@@ -646,7 +675,7 @@ export class DashboardService {
       kind: "request",
       reference: r.reference,
       title: r.equipmentName ?? "Equipment",
-      subtitle: `${r.customerName} · ${r.type}`,
+      subtitle: r.type ? `${r.customerName} · ${r.type}` : r.customerName,
       status: r.status === "inProgress" ? "in-progress" : r.status,
       priority: r.priority,
       dueAt: r.slaDue.toISOString(),

@@ -677,9 +677,16 @@ export class SalesService {
       l.type === "service" || l.type === "labor" ? l.description : "",
     ).filter((row) => row.name);
 
+    const invoiced = invoices.reduce((sum, inv) => sum + num(inv.total), 0);
+    const collected = invoices.reduce((sum, inv) => sum + num(inv.paidTotal), 0);
+    const outstandingTotal = invoices.reduce((sum, inv) => sum + num(inv.balanceDue), 0);
+
     return {
       dailySales: daily,
       monthlySales: monthly,
+      invoiced,
+      collected,
+      outstandingTotal,
       productWise,
       sparePartsSales,
       equipmentSales,
@@ -728,15 +735,22 @@ export class SalesService {
 
     for (const line of lines) {
       let inventoryItemId = line.inventoryItemId ?? null;
+      let catalogItemId = line.catalogItemId ?? null;
       let description = line.description.trim();
       let sku = line.sku?.trim() || null;
-      let type = line.type?.trim() || (inventoryItemId ? "part" : "other");
+      let type = line.type?.trim() || (inventoryItemId ? "part" : catalogItemId ? "service" : "other");
       if (inventoryItemId) {
         const item = await tx.inventoryItem.findFirst({ where: { id: inventoryItemId, tenantId } });
         if (!item) throw new AppError(`Inventory item not found for ${description || "line"}`, 404);
         if (!description) description = item.name;
         if (!sku) sku = item.sku;
         if (!line.type) type = "part";
+      }
+      if (catalogItemId) {
+        const catalog = await tx.serviceCatalogItem.findFirst({ where: { id: catalogItemId, tenantId } });
+        if (!catalog) throw new AppError(`Service not found for ${description || "line"}`, 404);
+        if (!description) description = catalog.name;
+        if (!line.type) type = "service";
       }
       if (!description) throw new AppError("Each sold item needs a name", 422);
       const quantity = Number(line.quantity);
@@ -749,7 +763,7 @@ export class SalesService {
       const taxAmt = net.mul(taxRate).div(100);
       resolved.push({
         inventoryItemId,
-        catalogItemId: line.catalogItemId ?? null,
+        catalogItemId,
         type,
         description,
         sku,

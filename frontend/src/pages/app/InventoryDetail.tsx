@@ -28,7 +28,8 @@ const adjustSchema = z.object({
 export default function InventoryDetail() {
   const { id = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { hasRole } = useAuth();
+  const canAdjust = hasRole(["admin"]);
   const [item, setItem] = useState<BackendInventoryItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -99,7 +100,7 @@ export default function InventoryDetail() {
         backTo="/app/inventory"
         backLabel="Back to Inventory"
         title={item?.name ?? "Inventory item"}
-        subtitle={item ? `${item.sku} · ${item.category}` : undefined}
+        subtitle={item ? [item.sku, item.category].filter(Boolean).join(" · ") || undefined : undefined}
         meta={item ? [
           { label: "In stock", value: String(item.inStock) },
           { label: "Reserved", value: String(item.reserved) },
@@ -122,8 +123,8 @@ export default function InventoryDetail() {
                 <DetailSection title="Item details">
                   <DetailInfoGrid
                     items={[
-                      { label: "SKU", value: item.sku },
-                      { label: "Category", value: item.category },
+                      { label: "SKU", value: item.sku || "—" },
+                      { label: "Category", value: item.category || "—" },
                       { label: "Subcategory", value: item.subcategory || "—" },
                       { label: "In stock", value: String(item.inStock) },
                       { label: "Reserved", value: String(item.reserved) },
@@ -168,7 +169,7 @@ export default function InventoryDetail() {
           <Card>
             <CardHeader className="pb-3"><CardTitle className="text-base">Actions</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              {user?.role === "admin" ? (
+              {canAdjust ? (
                 <form
                   noValidate
                   onSubmit={(e) => {

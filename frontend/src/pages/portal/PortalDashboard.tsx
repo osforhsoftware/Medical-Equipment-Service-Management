@@ -79,7 +79,7 @@ export default function PortalDashboard() {
             <div key={r.id} className="flex items-center justify-between rounded-xl border border-border/80 bg-gradient-to-r from-secondary/30 to-transparent p-3 transition-colors hover:border-primary/20">
               <div>
                 <p className="text-sm font-medium">{r.equipmentName}</p>
-                <p className="text-xs text-muted-foreground">{r.reference} · {r.type}</p>
+                <p className="text-xs text-muted-foreground">{r.reference}{r.type ? ` · ${r.type}` : ""}</p>
               </div>
               <StatusBadge status={r.status} />
             </div>

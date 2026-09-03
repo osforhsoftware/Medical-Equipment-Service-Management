@@ -1,4 +1,5 @@
-import { Plus, Trash2 } from "lucide-react";
+import { Minus, Plus, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -10,21 +11,13 @@ import {
 } from "@/components/ui/select";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import type { BackendCatalogItem, BackendInventoryItem, InvoiceLineInput } from "@/lib/api";
-import { BILLING_ADD_LINE_TYPES, billingLineTypeLabel, lineAmount } from "@/lib/billingCharges";
+import { BILLING_ADD_LINE_TYPES, billingLineTypeLabel, lineAmount, newBillingLine } from "@/lib/billingCharges";
 import { formatCurrency } from "@/lib/format";
 import { fieldAria, fieldErrorClass } from "@/lib/formValidation";
 import { cn } from "@/lib/utils";
 
-export function newBillingLine(type: string = "product"): InvoiceLineInput {
-  return {
-    type,
-    description: "",
-    quantity: 1,
-    unitPrice: 0,
-    taxRate: 0,
-    discount: 0,
-  };
-}
+const numberInputClass =
+  "h-10 tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
 interface InvoiceLineEditorProps {
   lines: InvoiceLineInput[];
@@ -37,6 +30,14 @@ interface InvoiceLineEditorProps {
   minLines?: number;
   title?: string;
   className?: string;
+}
+
+function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: ReactNode }) {
+  return (
+    <label htmlFor={htmlFor} className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      {children}
+    </label>
+  );
 }
 
 export function InvoiceLineEditor({
@@ -108,180 +109,214 @@ export function InvoiceLineEditor({
           <Plus className="mr-1 h-4 w-4" /> Add Item
         </Button>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <th className="px-3 py-2.5">Description</th>
-              <th className="w-32 px-3 py-2.5">Type</th>
-              <th className="w-20 px-3 py-2.5 text-right">Qty</th>
-              <th className="w-28 px-3 py-2.5 text-right">Unit Price</th>
-              <th className="w-20 px-3 py-2.5 text-right">Tax</th>
-              <th className="w-24 px-3 py-2.5 text-right">Discount</th>
-              <th className="w-28 px-3 py-2.5 text-right">Total</th>
-              <th className="w-10 px-2 py-2.5" />
-            </tr>
-          </thead>
-          <tbody>
-            {lines.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="px-4 py-10 text-center text-sm text-muted-foreground">
-                  No line items yet. Add products or services like you do on an estimate.
-                </td>
-              </tr>
-            ) : (
-              lines.map((line, index) => {
-                const descKey = `line_${index}_description`;
-                const qtyKey = `line_${index}_quantity`;
-                return (
-                  <tr key={line.id ?? `new-${index}`} className="border-b border-border last:border-0">
-                    <td className="px-3 py-2 align-top">
-                      <div className="space-y-1.5" data-field={descKey}>
-                        <Input
-                          id={descKey}
-                          name={descKey}
-                          value={line.description}
-                          onChange={(e) => updateLine(index, { description: e.target.value })}
-                          onBlur={() => onBlurField?.(descKey)}
-                          placeholder="Description"
-                          aria-label={`Line ${index + 1} description`}
-                          className={fieldErrorClass(shouldShow?.(descKey))}
-                          {...fieldAria(descKey, shouldShow?.(descKey) ? errors?.[descKey] : null)}
-                        />
-                        {shouldShow?.(descKey) && errors?.[descKey] ? (
-                          <FormFieldError field={descKey} message={errors[descKey]} />
-                        ) : null}
-                        <div className="flex gap-2">
-                          <Select onValueChange={(value) => applyCatalog(index, value)}>
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue placeholder="Service / catalog" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {catalog.length === 0 ? (
-                                <SelectItem value="__empty_catalog" disabled>
-                                  No catalog services
-                                </SelectItem>
-                              ) : (
-                                catalog.map((item) => (
-                                  <SelectItem key={item.id} value={item.id}>
-                                    {item.name}
-                                  </SelectItem>
-                                ))
-                              )}
-                            </SelectContent>
-                          </Select>
-                          <Select onValueChange={(value) => applyInventory(index, value)}>
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue placeholder="Product / inventory" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {inventory.length === 0 ? (
-                                <SelectItem value="__empty_inventory" disabled>
-                                  No inventory products
-                                </SelectItem>
-                              ) : (
-                                inventory.map((item) => (
-                                  <SelectItem key={item.id} value={item.id}>
-                                    {item.name} ({item.sku}) · {Math.max(0, item.inStock - item.reserved)} avail
-                                  </SelectItem>
-                                ))
-                              )}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      <Select
-                        value={line.type ?? "product"}
-                        onValueChange={(value) => updateLine(index, { type: value })}
-                      >
-                        <SelectTrigger aria-label={`Line ${index + 1} type`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {typeOptions.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
+
+      {lines.length === 0 ? (
+        <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+          No line items yet. Add products or services like you do on an estimate.
+        </p>
+      ) : (
+        <div className="divide-y divide-border">
+          {lines.map((line, index) => {
+            const descKey = `line_${index}_description`;
+            const qtyKey = `line_${index}_quantity`;
+            const catalogId = `line_${index}_catalog`;
+            const inventoryId = `line_${index}_inventory`;
+            const typeId = `line_${index}_type`;
+            const priceId = `line_${index}_unitPrice`;
+            const taxId = `line_${index}_tax`;
+            const discountId = `line_${index}_discount`;
+            return (
+              <div key={line.id ?? `new-${index}`} className="space-y-3 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1 space-y-1.5" data-field={descKey}>
+                    <FieldLabel htmlFor={descKey}>Description</FieldLabel>
+                    <Input
+                      id={descKey}
+                      name={descKey}
+                      value={line.description}
+                      onChange={(e) => updateLine(index, { description: e.target.value })}
+                      onBlur={() => onBlurField?.(descKey)}
+                      placeholder="Item or service name"
+                      aria-label={`Line ${index + 1} description`}
+                      className={fieldErrorClass(shouldShow?.(descKey))}
+                      {...fieldAria(descKey, shouldShow?.(descKey) ? errors?.[descKey] : null)}
+                    />
+                    {shouldShow?.(descKey) && errors?.[descKey] ? (
+                      <FormFieldError field={descKey} message={errors[descKey]} />
+                    ) : null}
+                  </div>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="mt-6 shrink-0 text-muted-foreground hover:text-destructive"
+                    aria-label={`Remove line ${index + 1}`}
+                    disabled={lines.length <= minLines}
+                    onClick={() => onChange(lines.filter((_, i) => i !== index))}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="grid gap-1.5">
+                    <FieldLabel htmlFor={catalogId}>Service / catalog</FieldLabel>
+                    <Select onValueChange={(value) => applyCatalog(index, value)}>
+                      <SelectTrigger id={catalogId} className="h-10 text-sm">
+                        <SelectValue placeholder="Pick a catalog service" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {catalog.length === 0 ? (
+                          <SelectItem value="__empty_catalog" disabled>
+                            No catalog services
+                          </SelectItem>
+                        ) : (
+                          catalog.map((item) => (
+                            <SelectItem key={item.id} value={item.id}>
+                              {item.name}
                             </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </td>
-                    <td className="px-3 py-2 align-top text-right" data-field={qtyKey}>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <FieldLabel htmlFor={inventoryId}>Product / inventory</FieldLabel>
+                    <Select onValueChange={(value) => applyInventory(index, value)}>
+                      <SelectTrigger id={inventoryId} className="h-10 text-sm">
+                        <SelectValue placeholder="Pick an inventory product" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {inventory.length === 0 ? (
+                          <SelectItem value="__empty_inventory" disabled>
+                            No inventory products
+                          </SelectItem>
+                        ) : (
+                          inventory.map((item) => (
+                            <SelectItem key={item.id} value={item.id}>
+                              {item.name} ({item.sku}) · {Math.max(0, item.inStock - item.reserved)} avail
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-1.5 sm:col-span-2 lg:col-span-1">
+                    <FieldLabel htmlFor={typeId}>Type</FieldLabel>
+                    <Select
+                      value={line.type ?? "product"}
+                      onValueChange={(value) => updateLine(index, { type: value })}
+                    >
+                      <SelectTrigger id={typeId} aria-label={`Line ${index + 1} type`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {typeOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                  <div className="grid gap-1.5" data-field={qtyKey}>
+                    <FieldLabel htmlFor={qtyKey}>Qty</FieldLabel>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        className="h-10 w-9 shrink-0"
+                        aria-label={`Decrease line ${index + 1} quantity`}
+                        onClick={() =>
+                          updateLine(index, { quantity: Math.max(1, Number(line.quantity || 1) - 1) })
+                        }
+                      >
+                        <Minus className="h-3.5 w-3.5" />
+                      </Button>
                       <Input
                         id={qtyKey}
                         name={qtyKey}
                         type="number"
                         min={0.001}
                         step="any"
-                        className={cn("text-right", fieldErrorClass(shouldShow?.(qtyKey)))}
+                        className={cn("min-w-0 flex-1 px-1 text-center", numberInputClass, fieldErrorClass(shouldShow?.(qtyKey)))}
                         value={line.quantity}
                         onChange={(e) => updateLine(index, { quantity: Number(e.target.value) || 0 })}
                         onBlur={() => onBlurField?.(qtyKey)}
                         aria-label={`Line ${index + 1} quantity`}
                         {...fieldAria(qtyKey, shouldShow?.(qtyKey) ? errors?.[qtyKey] : null)}
                       />
-                      {shouldShow?.(qtyKey) && errors?.[qtyKey] ? (
-                        <FormFieldError field={qtyKey} message={errors[qtyKey]} />
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2 align-top text-right">
-                      <Input
-                        type="number"
-                        min={0}
-                        step="any"
-                        className="text-right"
-                        value={line.unitPrice}
-                        onChange={(e) => updateLine(index, { unitPrice: Number(e.target.value) || 0 })}
-                        aria-label={`Line ${index + 1} unit price`}
-                      />
-                    </td>
-                    <td className="px-3 py-2 align-top text-right">
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step="any"
-                        className="text-right"
-                        value={line.taxRate ?? 0}
-                        onChange={(e) => updateLine(index, { taxRate: Number(e.target.value) || 0 })}
-                        aria-label={`Line ${index + 1} tax rate`}
-                      />
-                    </td>
-                    <td className="px-3 py-2 align-top text-right">
-                      <Input
-                        type="number"
-                        min={0}
-                        step="any"
-                        className="text-right"
-                        value={line.discount ?? 0}
-                        onChange={(e) => updateLine(index, { discount: Number(e.target.value) || 0 })}
-                        aria-label={`Line ${index + 1} discount`}
-                      />
-                    </td>
-                    <td className="px-3 py-2 align-top text-right font-medium">
-                      {formatCurrency(lineAmount(line))}
-                    </td>
-                    <td className="px-2 py-2 align-top">
                       <Button
                         type="button"
                         size="icon"
-                        variant="ghost"
-                        aria-label={`Remove line ${index + 1}`}
-                        disabled={lines.length <= minLines}
-                        onClick={() => onChange(lines.filter((_, i) => i !== index))}
+                        variant="outline"
+                        className="h-10 w-9 shrink-0"
+                        aria-label={`Increase line ${index + 1} quantity`}
+                        onClick={() => updateLine(index, { quantity: Number(line.quantity || 0) + 1 })}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Plus className="h-3.5 w-3.5" />
                       </Button>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                    </div>
+                    {shouldShow?.(qtyKey) && errors?.[qtyKey] ? (
+                      <FormFieldError field={qtyKey} message={errors[qtyKey]} />
+                    ) : null}
+                  </div>
+                  <div className="grid gap-1.5">
+                    <FieldLabel htmlFor={priceId}>Unit price</FieldLabel>
+                    <Input
+                      id={priceId}
+                      type="number"
+                      min={0}
+                      step="any"
+                      className={cn("px-2 text-right", numberInputClass)}
+                      value={line.unitPrice}
+                      onChange={(e) => updateLine(index, { unitPrice: Number(e.target.value) || 0 })}
+                      aria-label={`Line ${index + 1} unit price`}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <FieldLabel htmlFor={taxId}>Tax %</FieldLabel>
+                    <Input
+                      id={taxId}
+                      type="number"
+                      min={0}
+                      max={100}
+                      step="any"
+                      className={cn("px-2 text-right", numberInputClass)}
+                      value={line.taxRate ?? 0}
+                      onChange={(e) => updateLine(index, { taxRate: Number(e.target.value) || 0 })}
+                      aria-label={`Line ${index + 1} tax rate`}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <FieldLabel htmlFor={discountId}>Discount</FieldLabel>
+                    <Input
+                      id={discountId}
+                      type="number"
+                      min={0}
+                      step="any"
+                      className={cn("px-2 text-right", numberInputClass)}
+                      value={line.discount ?? 0}
+                      onChange={(e) => updateLine(index, { discount: Number(e.target.value) || 0 })}
+                      aria-label={`Line ${index + 1} discount`}
+                    />
+                  </div>
+                  <div className="col-span-2 grid gap-1.5 sm:col-span-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Line total</p>
+                    <p className="flex h-10 items-center text-sm font-semibold tabular-nums">
+                      {formatCurrency(lineAmount(line))}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }

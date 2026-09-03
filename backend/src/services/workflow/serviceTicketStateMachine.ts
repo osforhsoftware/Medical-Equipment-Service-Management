@@ -85,6 +85,8 @@ export const TICKET_EVENT_TARGETS = {
   estimateApproved: "assigned_engineer",
   estimateRejectedToEstimate: "estimate",
   estimateRejectedToInspection: "inspection",
+  /** Coordinator/customer requested changes — return ticket to estimate staff. */
+  estimateRevisionRequested: "estimate",
   changeRequestSubmitted: "change_pending_approval",
   changeRequestResolved: "assigned_engineer",
   jobScheduled: "assigned_engineer",
@@ -113,8 +115,9 @@ export type JobStatus = (typeof JOB_STATUS_ORDER)[number];
 /** Allowed job status transitions (from → to[]). */
 export const JOB_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   scheduled: ["inProgress", "partsPending"],
-  inProgress: ["partsPending", "review", "completed"],
-  partsPending: ["inProgress", "review", "completed"],
+  /** Field work must go through coordinator/admin review before completed. */
+  inProgress: ["partsPending", "review"],
+  partsPending: ["inProgress", "review"],
   review: ["inProgress", "completed"],
   completed: [],
 };
@@ -180,6 +183,7 @@ export function resolveTicketEventStatus(current: string, event: TicketEvent): T
     "estimateRejected",
     "estimateRejectedToEstimate",
     "estimateRejectedToInspection",
+    "estimateRevisionRequested",
     "changeRequestResolved",
   ];
   if (targetIdx < currentIdx && !allowReverse.includes(event)) {

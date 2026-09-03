@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Check } from "lucide-react";
+import { ArrowRight, Check, FileText } from "lucide-react";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Card } from "@/components/ui/card";
 import type { BackendServiceRequest } from "@/lib/api";
@@ -45,16 +45,21 @@ interface InspectionCardProps {
   task: BackendServiceRequest;
   onInspect: (task: BackendServiceRequest) => void;
   mobile?: boolean;
+  mode?: "queue" | "history";
 }
 
-export function InspectionCard({ task, onInspect, mobile = false }: InspectionCardProps) {
+export function InspectionCard({ task, onInspect, mobile = false, mode = "queue" }: InspectionCardProps) {
   const navigate = useNavigate();
   const report = task.inspectionReport;
   const title = equipmentLabel(task);
-  const status = queueStatus(task);
-  const cta = report ? "Update" : "Inspect";
+  const isHistory = mode === "history";
+  const status = isHistory ? task.status : queueStatus(task);
+  const detailTo = isHistory ? `/app/inspections/${task.id}?from=history` : `/app/inspections/${task.id}`;
+  const reportTo = `/app/inspections/${task.id}/report${isHistory ? "?from=history" : ""}`;
+  const filedAt = report?.submittedAt ?? report?.reportedAt;
+  const cta = isHistory ? "View report" : report ? "Update" : "Inspect";
 
-  const openDetails = () => navigate(`/app/inspections/${task.id}`);
+  const openDetails = () => navigate(detailTo);
 
   return (
     <Card
@@ -100,9 +105,12 @@ export function InspectionCard({ task, onInspect, mobile = false }: InspectionCa
             <p className="truncate font-medium text-foreground">{task.assignedName || "Unassigned"}</p>
           </div>
           <div className="min-w-0">
-            <p className="text-muted-foreground">Created</p>
-            <p className="truncate font-medium text-foreground" title={formatDateTime(task.createdAt)}>
-              {formatCreatedLabel(task.createdAt)}
+            <p className="text-muted-foreground">{isHistory ? "Filed" : "Created"}</p>
+            <p
+              className="truncate font-medium text-foreground"
+              title={formatDateTime(isHistory ? filedAt : task.createdAt)}
+            >
+              {formatCreatedLabel(isHistory ? filedAt ?? task.createdAt : task.createdAt)}
             </p>
           </div>
         </div>
@@ -118,23 +126,34 @@ export function InspectionCard({ task, onInspect, mobile = false }: InspectionCa
 
       <div className="flex items-center justify-between gap-2 border-t border-border/50 px-3 py-2">
         <Link
-          to={`/app/inspections/${task.id}`}
+          to={detailTo}
           onClick={(event) => event.stopPropagation()}
           className="text-xs font-medium text-muted-foreground hover:text-foreground"
         >
           Details
         </Link>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onInspect(task);
-          }}
-          className="inline-flex items-center gap-1 text-xs font-semibold text-primary"
-        >
-          {cta}
-          <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
+        {isHistory ? (
+          <Link
+            to={reportTo}
+            onClick={(event) => event.stopPropagation()}
+            className="inline-flex items-center gap-1 text-xs font-semibold text-primary"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            {cta}
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onInspect(task);
+            }}
+            className="inline-flex items-center gap-1 text-xs font-semibold text-primary"
+          >
+            {cta}
+            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        )}
       </div>
     </Card>
   );

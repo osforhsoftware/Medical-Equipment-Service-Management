@@ -7,6 +7,7 @@ export const ESTIMATE_STATUS_OPTIONS = [
   { label: "Sent", value: "sent" },
   { label: "Approved", value: "approved" },
   { label: "Rejected", value: "rejected" },
+  { label: "Revision Required", value: "revision" },
   { label: "Converted", value: "converted" },
 ] as const;
 
@@ -16,6 +17,7 @@ export const ESTIMATE_STATUS_LABELS: Record<string, string> = {
   sent: "Sent",
   approved: "Approved",
   rejected: "Rejected",
+  revision: "Revision Required",
   converted: "Converted",
 };
 
@@ -121,12 +123,12 @@ export function formatLineType(type: string) {
 }
 
 export function workflowStepIndex(status?: string | null, hasLines = false, hasValidity = false) {
-  if (!status || status === "draft") {
+  if (!status || status === "draft" || status === "revision") {
     if (!hasValidity) return 0;
     if (!hasLines) return 1;
     return 2;
   }
   if (status === "pendingAdminApproval" || status === "sent") return 4;
-  if (status === "approved" || status === "rejected" || status === "revision") return 4;
+  if (status === "approved" || status === "rejected") return 4;
   return 3;
 }

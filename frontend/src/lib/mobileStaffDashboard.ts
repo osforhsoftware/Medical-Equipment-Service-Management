@@ -58,6 +58,7 @@ export function roleQuickActions(role: Role): MobileQuickAction[] {
       return [
         { label: "Sales", to: "/app/sales", icon: ShoppingCart, primary: true },
         { label: "New Sale", to: "/app/sales/new", icon: ShoppingCart },
+        { label: "Customers", to: "/app/customers", icon: UserCheck },
         { label: "Alerts", to: "/app/notifications", icon: Bell },
       ];
     case "engineer":
@@ -260,9 +261,11 @@ export function showTodaySchedule(role: Role): boolean {
 }
 
 const PATH_TO_MODULE: Record<string, string> = {
+  "/app": "Dashboard",
   "/app/inspections": "Inspections",
   "/app/qr-tracking": "QR Tracking",
   "/app/service-tickets": "Service Tickets",
+  "/app/service-requests": "Service Tickets",
   "/app/estimates": "Estimates",
   "/app/sales": "Sales",
   "/app/jobs": "Service Jobs",
@@ -274,18 +277,28 @@ const PATH_TO_MODULE: Record<string, string> = {
   "/app/billing": "Billing",
   "/app/notifications": "Notifications",
   "/app/reports": "Reports",
+  "/app/customers": "Customers",
+  "/app/users": "Users",
 };
+
+function moduleForPath(path: string): string | undefined {
+  const match = Object.entries(PATH_TO_MODULE)
+    .sort((a, b) => b[0].length - a[0].length)
+    .find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`));
+  return match?.[1];
+}
 
 export function filterQuickActionsByAccess(
   actions: MobileQuickAction[],
-  role: Role,
+  roleOrRoles: Role | Role[],
   rbacMatrix: Record<string, Role[]>,
 ): MobileQuickAction[] {
+  const roles = Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles];
   return actions.filter((action) => {
-    const module = PATH_TO_MODULE[action.to];
+    const module = moduleForPath(action.to);
     if (!module) return true;
-    const roles = rbacMatrix[module];
-    return roles ? roles.includes(role) : true;
+    const allowed = rbacMatrix[module];
+    return allowed ? roles.some((role) => allowed.includes(role)) : true;
   });
 }
 

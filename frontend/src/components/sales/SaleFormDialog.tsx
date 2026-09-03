@@ -16,6 +16,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Command,
@@ -26,15 +33,18 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { api, type BackendCustomer, type BackendInventoryItem, type BackendSalesOrder, type BackendTaxonomyTerm } from "@/lib/api";
+import { api, type BackendCatalogItem, type BackendCustomer, type BackendInventoryItem, type BackendSalesOrder, type BackendTaxonomyTerm } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
 import { termLabel } from "@/lib/taxonomy";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/context/AuthContext";
+import { CUSTOMER_WRITE_ROLES } from "@/config/roles";
 
 type DraftLine = {
   key: string;
   inventoryItemId?: string | null;
+  catalogItemId?: string | null;
   type: string;
   description: string;
   sku?: string | null;
@@ -43,6 +53,12 @@ type DraftLine = {
   discount: number;
   taxRate: number;
 };
+
+const SALE_LINE_TYPES = [
+  { value: "part", label: "Part" },
+  { value: "service", label: "Service" },
+  { value: "other", label: "Other" },
+] as const;
 
 function newKey() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -121,7 +137,8 @@ function linesFromOrder(initial?: BackendSalesOrder): DraftLine[] {
     initial?.lines.map((line) => ({
       key: line.id,
       inventoryItemId: line.inventoryItemId,
-      type: line.type,
+      catalogItemId: line.catalogItemId,
+      type: line.type || (line.inventoryItemId ? "part" : "other"),
       description: line.description,
       sku: line.sku,
       quantity: line.quantity,
@@ -145,6 +162,8 @@ export function SaleFormDialog({
   initial?: BackendSalesOrder;
   onSaved: (order: BackendSalesOrder) => void;
 }) {
+  const { hasRole } = useAuth();
+  const canAddCustomer = hasRole(CUSTOMER_WRITE_ROLES);
   const [customerId, setCustomerId] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [itemSearch, setItemSearch] = useState("");
@@ -154,6 +173,8 @@ export function SaleFormDialog({
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
   const [itemOpen, setItemOpen] = useState(false);
+  const [serviceOpen, setServiceOpen] = useState(false);
+  const [serviceSearch, setServiceSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const debouncedItemSearch = useDebouncedValue(itemSearch);
 
@@ -164,8 +185,10 @@ export function SaleFormDialog({
     setLines(linesFromOrder(initial));
     setCustomerSearch("");
     setItemSearch("");
+    setServiceSearch("");
     setCustomerOpen(false);
     setItemOpen(false);
+    setServiceOpen(false);
   }, [open, initial?.id]);
 
   const customersQuery = useQuery({
@@ -203,6 +226,12 @@ export function SaleFormDialog({
     enabled: open,
   });
 
+  const catalogQuery = useQuery({
+    queryKey: ["service-catalog", "sale-form"],
+    queryFn: () => api.listServiceCatalog(),
+    enabled: open,
+  });
+
   const customers = useMemo(() => {
     const rows = [...(customersQuery.data?.data ?? [])];
     for (const extra of extraCustomers) {
@@ -235,6 +264,18 @@ export function SaleFormDialog({
     () => new Set(lines.map((line) => line.inventoryItemId).filter(Boolean) as string[]),
     [lines],
   );
+  const selectedCatalogIds = useMemo(
+    () => new Set(lines.map((line) => line.catalogItemId).filter(Boolean) as string[]),
+    [lines],
+  );
+  const catalog = useMemo(() => {
+    const rows = (catalogQuery.data ?? []).filter((item) => item.isActive !== false);
+    const q = serviceSearch.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((item) =>
+      `${item.name} ${item.code} ${item.category} ${item.description ?? ""}`.toLowerCase().includes(q),
+    );
+  }, [catalogQuery.data, serviceSearch]);
 
   const totals = useMemo(() => {
     const subtotal = lines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
@@ -272,13 +313,42 @@ export function SaleFormDialog({
     else addInventory(item);
   };
 
-  const addCustomItem = () => {
+  const addCatalogService = (item: BackendCatalogItem) => {
+    setLines((prev) => {
+      if (prev.some((line) => line.catalogItemId === item.id)) return prev;
+      return [
+        ...prev,
+        {
+          key: newKey(),
+          catalogItemId: item.id,
+          type: "service",
+          description: item.name,
+          sku: item.code,
+          quantity: 1,
+          unitPrice: Number(item.unitPrice ?? 0),
+          discount: 0,
+          taxRate: Number(item.taxRate ?? 0),
+        },
+      ];
+    });
+  };
+
+  const removeCatalog = (itemId: string) => {
+    setLines((prev) => prev.filter((line) => line.catalogItemId !== itemId));
+  };
+
+  const toggleCatalog = (item: BackendCatalogItem) => {
+    if (selectedCatalogIds.has(item.id)) removeCatalog(item.id);
+    else addCatalogService(item);
+  };
+
+  const addCustomItem = (type: "service" | "other" = "other") => {
     setLines((prev) => [
       ...prev,
       {
         key: newKey(),
-        type: "other",
-        description: "",
+        type,
+        description: type === "service" ? "" : "",
         sku: "",
         quantity: 1,
         unitPrice: 0,
@@ -287,6 +357,7 @@ export function SaleFormDialog({
       },
     ]);
     setItemOpen(false);
+    setServiceOpen(false);
   };
 
   const updateLine = (key: string, patch: Partial<DraftLine>) => {
@@ -315,6 +386,7 @@ export function SaleFormDialog({
         notes: notes.trim() || null,
         lines: ready.map((line) => ({
           inventoryItemId: line.inventoryItemId ?? null,
+          catalogItemId: line.catalogItemId ?? null,
           type: line.type,
           description: line.description.trim(),
           sku: line.sku?.trim() || null,
@@ -344,7 +416,7 @@ export function SaleFormDialog({
     <>
       <Dialog open={open} onOpenChange={closeForm}>
         <DialogContent
-          className="sm:max-w-2xl"
+          className="max-h-[90vh] overflow-y-auto sm:max-w-3xl"
           onPointerDownOutside={(event) => {
             const target = event.target as HTMLElement | null;
             if (addCustomerOpen || target?.closest("[data-radix-popper-content-wrapper]")) {
@@ -361,7 +433,7 @@ export function SaleFormDialog({
           <DialogHeader>
             <DialogTitle>{mode === "edit" ? "Edit sale" : "New sale"}</DialogTitle>
             <DialogDescription>
-              Choose a customer, pick inventory items (spare parts and stock — not equipment), then set quantity and sale price.
+              Choose a customer, add sold parts, service amounts, and other charges. Service-ticket estimates stay on the ticket — this is sale billing only.
             </DialogDescription>
           </DialogHeader>
 
@@ -372,10 +444,12 @@ export function SaleFormDialog({
                   Customer
                   <RequiredMark />
                 </Label>
-                <Button type="button" size="sm" variant="ghost" onClick={() => setAddCustomerOpen(true)}>
-                  <UserPlus className="h-4 w-4" />
-                  Add customer
-                </Button>
+                {canAddCustomer ? (
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setAddCustomerOpen(true)}>
+                    <UserPlus className="h-4 w-4" />
+                    Add customer
+                  </Button>
+                ) : null}
               </div>
               <Popover modal open={customerOpen} onOpenChange={setCustomerOpen}>
                 <PopoverTrigger asChild>
@@ -447,13 +521,19 @@ export function SaleFormDialog({
             <div className="grid gap-2">
               <div className="flex items-center justify-between gap-2">
                 <Label>
-                  Inventory items
+                  Sold items
                   <RequiredMark />
                 </Label>
-                <Button type="button" size="sm" variant="ghost" onClick={addCustomItem}>
-                  <Plus className="h-4 w-4" />
-                  Custom item
-                </Button>
+                <div className="flex flex-wrap gap-1">
+                  <Button type="button" size="sm" variant="ghost" onClick={() => addCustomItem("service")}>
+                    <Plus className="h-4 w-4" />
+                    Service amount
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => addCustomItem("other")}>
+                    <Plus className="h-4 w-4" />
+                    Other charge
+                  </Button>
+                </div>
               </div>
               <Popover modal open={itemOpen} onOpenChange={setItemOpen}>
                 <PopoverTrigger asChild>
@@ -543,90 +623,203 @@ export function SaleFormDialog({
                     ))}
                 </div>
               ) : null}
+
+              <Popover modal open={serviceOpen} onOpenChange={setServiceOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={serviceOpen}
+                    className="h-10 w-full justify-between font-normal"
+                  >
+                    <span className="truncate">
+                      {selectedCatalogIds.size
+                        ? `${selectedCatalogIds.size} service${selectedCatalogIds.size === 1 ? "" : "s"} selected`
+                        : catalogQuery.isLoading
+                          ? "Loading services…"
+                          : "Select catalog services"}
+                    </span>
+                    <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="z-[80] p-0"
+                  align="start"
+                  style={{ width: "var(--radix-popover-trigger-width)" }}
+                >
+                  <Command shouldFilter={false}>
+                    <CommandInput
+                      placeholder="Search services…"
+                      value={serviceSearch}
+                      onValueChange={setServiceSearch}
+                    />
+                    <CommandList>
+                      <CommandEmpty>
+                        {catalogQuery.isLoading ? "Loading services…" : "No catalog services found."}
+                      </CommandEmpty>
+                      <CommandGroup heading="Service catalog">
+                        {catalog.map((item) => {
+                          const selected = selectedCatalogIds.has(item.id);
+                          return (
+                            <CommandItem
+                              key={item.id}
+                              value={`${item.name} ${item.code} ${item.category}`}
+                              onSelect={() => toggleCatalog(item)}
+                            >
+                              <Check className={cn("mr-2 h-4 w-4", selected ? "opacity-100" : "opacity-0")} />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate font-medium">{item.name}</span>
+                                <span className="block truncate text-xs text-muted-foreground">
+                                  {item.code}
+                                  {item.category ? ` · ${item.category}` : ""}
+                                </span>
+                              </span>
+                              <span className="ml-2 shrink-0 text-xs font-medium">
+                                {formatCurrency(Number(item.unitPrice ?? 0))}
+                              </span>
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div className="grid gap-2">
-              <Label>Quantity & sale price</Label>
+              <Label>Quantity, type & sale price</Label>
               {lines.length === 0 ? (
                 <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
-                  Select inventory items above, or add a custom item.
+                  Select inventory or catalog services, or add a service amount / other charge.
                 </p>
               ) : (
                 <div className="space-y-2">
                   {lines.map((line) => (
                     <div
                       key={line.key}
-                      className="grid gap-2 rounded-lg border bg-muted/20 p-2.5 sm:grid-cols-[minmax(0,1fr)_auto_minmax(6.5rem,7.5rem)_auto_auto] sm:items-end"
+                      className="grid gap-2 rounded-lg border bg-muted/20 p-2.5"
                     >
-                      <div className="grid gap-1">
-                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Item</p>
-                        <Input
-                          value={line.description}
-                          onChange={(e) => updateLine(line.key, { description: e.target.value })}
-                          placeholder="Item name"
-                        />
-                      </div>
-                      <div className="grid gap-1">
-                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Qty</p>
-                        <div className="flex w-[8.5rem] items-center gap-1">
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="outline"
-                            className="h-10 w-8 shrink-0"
-                            onClick={() =>
-                              updateLine(line.key, { quantity: Math.max(1, Number(line.quantity) - 1) })
-                            }
-                          >
-                            <Minus className="h-3.5 w-3.5" />
-                          </Button>
+                      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_7.5rem_auto] sm:items-end">
+                        <div className="grid gap-1">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Item</p>
                           <Input
-                            className="h-10 min-w-0 flex-1 px-1 text-center tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                            value={line.description}
+                            onChange={(e) => updateLine(line.key, { description: e.target.value })}
+                            placeholder={line.type === "service" ? "Service name" : "Item name"}
+                          />
+                        </div>
+                        <div className="grid gap-1">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Type</p>
+                          <Select
+                            value={SALE_LINE_TYPES.some((t) => t.value === line.type) ? line.type : "other"}
+                            onValueChange={(value) => updateLine(line.key, { type: value })}
+                            disabled={Boolean(line.inventoryItemId)}
+                          >
+                            <SelectTrigger className="h-10">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {SALE_LINE_TYPES.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="text-destructive sm:mb-0"
+                          onClick={() => setLines((prev) => prev.filter((row) => row.key !== line.key))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 sm:items-end">
+                        <div className="grid gap-1">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Qty</p>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="outline"
+                              className="h-10 w-8 shrink-0"
+                              onClick={() =>
+                                updateLine(line.key, { quantity: Math.max(1, Number(line.quantity) - 1) })
+                              }
+                            >
+                              <Minus className="h-3.5 w-3.5" />
+                            </Button>
+                            <Input
+                              className="h-10 min-w-0 flex-1 px-1 text-center tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              type="number"
+                              min={1}
+                              value={line.quantity}
+                              onChange={(e) =>
+                                updateLine(line.key, { quantity: Number(e.target.value) || 0 })
+                              }
+                            />
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="outline"
+                              className="h-10 w-8 shrink-0"
+                              onClick={() =>
+                                updateLine(line.key, { quantity: Number(line.quantity) + 1 })
+                              }
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="grid gap-1">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Sale price</p>
+                          <Input
+                            className="h-10 px-2 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                             type="number"
-                            min={1}
-                            value={line.quantity}
+                            min={0}
+                            step="0.01"
+                            value={line.unitPrice}
                             onChange={(e) =>
-                              updateLine(line.key, { quantity: Number(e.target.value) || 0 })
+                              updateLine(line.key, { unitPrice: Number(e.target.value) || 0 })
                             }
                           />
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="outline"
-                            className="h-10 w-8 shrink-0"
-                            onClick={() =>
-                              updateLine(line.key, { quantity: Number(line.quantity) + 1 })
-                            }
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                          </Button>
                         </div>
+                        <div className="grid gap-1">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Discount</p>
+                          <Input
+                            className="h-10 px-2 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={line.discount}
+                            onChange={(e) =>
+                              updateLine(line.key, { discount: Number(e.target.value) || 0 })
+                            }
+                          />
+                        </div>
+                        <div className="grid gap-1">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tax %</p>
+                          <Input
+                            className="h-10 px-2 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                            type="number"
+                            min={0}
+                            max={100}
+                            step="0.01"
+                            value={line.taxRate}
+                            onChange={(e) =>
+                              updateLine(line.key, { taxRate: Number(e.target.value) || 0 })
+                            }
+                          />
+                        </div>
+                        <p className="flex h-10 items-center whitespace-nowrap text-sm font-semibold sm:justify-end">
+                          {formatCurrency(lineTotal(line))}
+                        </p>
                       </div>
-                      <div className="grid gap-1">
-                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Sale price</p>
-                        <Input
-                          className="h-10 px-2 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={line.unitPrice}
-                          onChange={(e) =>
-                            updateLine(line.key, { unitPrice: Number(e.target.value) || 0 })
-                          }
-                        />
-                      </div>
-                      <p className="flex h-10 items-center whitespace-nowrap text-sm font-semibold sm:justify-end">
-                        {formatCurrency(lineTotal(line))}
-                      </p>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="text-destructive"
-                        onClick={() => setLines((prev) => prev.filter((row) => row.key !== line.key))}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
                     </div>
                   ))}
                 </div>
@@ -663,14 +856,16 @@ export function SaleFormDialog({
         </DialogContent>
       </Dialog>
 
-      <QuickAddCustomerDialog
-        open={addCustomerOpen}
-        onOpenChange={setAddCustomerOpen}
-        onCreated={(customer) => {
-          setExtraCustomers((prev) => [customer, ...prev.filter((row) => row.id !== customer.id)]);
-          setCustomerId(customer.id);
-        }}
-      />
+      {canAddCustomer ? (
+        <QuickAddCustomerDialog
+          open={addCustomerOpen}
+          onOpenChange={setAddCustomerOpen}
+          onCreated={(customer) => {
+            setExtraCustomers((prev) => [customer, ...prev.filter((row) => row.id !== customer.id)]);
+            setCustomerId(customer.id);
+          }}
+        />
+      ) : null}
     </>
   );
 }

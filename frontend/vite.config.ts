@@ -6,11 +6,13 @@ import path from "path";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const port = Number(env.VITE_PORT || 8080);
-  const apiUrl = env.VITE_API_URL || "http://localhost:4000";
+  const apiUrl = (env.VITE_API_URL || "http://127.0.0.1:4000")
+    .replace(/localhost/gi, "127.0.0.1")
+    .replace("[::1]", "127.0.0.1");
 
   return {
     server: {
-      host: "::",
+      host: true,
       port,
       hmr: {
         overlay: false,
@@ -35,6 +37,9 @@ export default defineConfig(({ mode }) => {
         "@tanstack/react-query",
         "@tanstack/query-core",
       ],
+    },
+    optimizeDeps: {
+      include: ["react", "react-dom", "react/jsx-runtime", "react-router-dom"],
     },
   };
 });

@@ -21,8 +21,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { RoleGuard } from "@/components/auth/RoleGuard";
-import { ApiError, api, type BackendStockPurchaseRequest } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { INVENTORY_WRITE_ROLES } from "@/config/roles";
+import { ApiError, api, type BackendStockPurchaseRequest } from "@/lib/api";
 import { defaultDatePlusDays, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
@@ -34,8 +35,8 @@ const convertSchema = z.object({
 export default function StockPurchaseRequests() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
-  const canConvert = user?.role === "admin" || user?.role === "inventory";
+  const { hasRole } = useAuth();
+  const canConvert = hasRole(INVENTORY_WRITE_ROLES);
   const rowsQuery = useQuery({
     queryKey: ["stock-purchase-requests"],
     queryFn: () => api.listStockPurchaseRequests(),

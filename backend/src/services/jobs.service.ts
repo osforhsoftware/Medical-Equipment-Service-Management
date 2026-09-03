@@ -19,6 +19,7 @@ import {
   resolveWorkLogUserId,
   startWorkLog,
 } from "@/services/jobWorkLog.helpers";
+import { userHasAnyRoleKey } from "@/utils/userRoles";
 
 const ASSIGNABLE_JOB_ROLES = ["coordinator", "engineer"];
 const jobSyncInflight = new Map<string, Promise<void>>();
@@ -140,7 +141,7 @@ export class JobsService {
             equipmentName: (sr.equipmentName ?? "Equipment").split(" (")[0],
             engineer: engineer.name,
             engineerId: engineer.id,
-            type: sr.type,
+            type: sr.type ?? "Other",
             typeOther: sr.typeOther,
             status: "scheduled",
             scheduledFor: new Date(),
@@ -392,7 +393,7 @@ export class JobsService {
           equipmentName: (sr.equipmentName ?? "Equipment").split(" (")[0],
           engineer: assignee.name,
           engineerId: assignee.id,
-          type: sr.type,
+          type: sr.type ?? "Other",
           typeOther: sr.typeOther,
           status: (data.status ?? "scheduled") as never,
           scheduledFor: new Date(data.scheduledFor),
@@ -440,6 +441,19 @@ export class JobsService {
 
     if (data.status && data.status !== existing.status) {
       assertJobTransition(existing.status, String(data.status));
+    }
+
+    if (data.status === "completed" && existing.status !== "completed") {
+      const canComplete =
+        !!actorId &&
+        !!actorRole &&
+        (await userHasAnyRoleKey(actorId, tenantId, actorRole, ["admin", "coordinator"]));
+      if (!canComplete) {
+        throw new AppError(
+          "Only administrators and service coordinators can mark a job completed after review",
+          403,
+        );
+      }
     }
 
     if (data.engineerId) {
@@ -535,6 +549,14 @@ export class JobsService {
         existing.status,
         String(data.status),
       );
+      if (data.status === "review") {
+        const actor = actorId ? await usersRepository.findById(actorId, tenantId) : null;
+        await jobActionsRepository.addActivity(id, {
+          actor: actor?.name ?? actorId ?? "system",
+          action: "Submitted for review",
+          note: "Awaiting coordinator or admin approval before the job can be completed",
+        });
+      }
       await notificationsService.notifyJobUpdated(tenantId, existing.reference, String(data.status));
     }
     return updated;
@@ -611,6 +633,101 @@ export class JobsService {
     });
 
     return { job: updated, photos: saved };
+  }
+
+  /**
+   * Upsert the engineer's narrative work report (editable until the job is completed).
+   * Stored as a JobWorkLog so service-report PDFs and billing checks keep working.
+   */
+  async saveWorkReport(
+    id: string,
+    tenantId: string,
+    actorId: string,
+    actorRole: string,
+    input: {
+      workPerformed: string;
+      testingResult?: string | null;
+      calibrationResult?: string | null;
+      recommendation?: string | null;
+    },
+  ) {
+    const job = await this.getById(id, tenantId, actorId, actorRole);
+    if (job.status === "completed") {
+      throw new AppError("Completed jobs cannot update the work report", 409);
+    }
+
+    const actor = await usersRepository.findById(actorId, tenantId);
+    const actorName = actor?.name ?? actorId;
+    const recommendation = input.recommendation?.trim() || "";
+    const calibrationBase = input.calibrationResult?.trim() || "";
+    const calibrationResult = recommendation
+      ? calibrationBase
+        ? `${calibrationBase}\n\nRecommendation:\n${recommendation}`
+        : `Recommendation:\n${recommendation}`
+      : calibrationBase || null;
+
+    const autoPrefixes = [
+      "Field work started",
+      "Work paused — parts pending",
+      "Work paused — awaiting review",
+      "Job completed",
+      "Customer sign-off captured",
+    ];
+
+    const candidates = await prisma.jobWorkLog.findMany({
+      where: { tenantId, jobId: id },
+      orderBy: { updatedAt: "desc" },
+      take: 25,
+    });
+    const existing = candidates.find((log) => {
+      const text = log.workPerformed.trim();
+      return !autoPrefixes.some((prefix) => text === prefix || text.startsWith(`${prefix}\n`));
+    });
+
+    const now = new Date();
+    let workLog;
+    if (existing) {
+      const startedAt = existing.startedAt;
+      const endedAt = now;
+      workLog = await prisma.jobWorkLog.update({
+        where: { id: existing.id },
+        data: {
+          workPerformed: input.workPerformed.trim(),
+          testingResult: input.testingResult?.trim() || null,
+          calibrationResult,
+          endedAt,
+          minutes: Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 60000)),
+          userId: actorId,
+        },
+      });
+    } else {
+      workLog = await prisma.jobWorkLog.create({
+        data: {
+          tenantId,
+          jobId: id,
+          userId: actorId,
+          startedAt: now,
+          endedAt: now,
+          minutes: 0,
+          workPerformed: input.workPerformed.trim(),
+          testingResult: input.testingResult?.trim() || null,
+          calibrationResult,
+        },
+      });
+    }
+
+    const progress = Math.max(job.progress, 70);
+    const status = job.status === "scheduled" ? "inProgress" : job.status;
+    if (status !== job.status) assertJobTransition(job.status, status);
+    const updated = await jobsRepository.update(id, tenantId, { progress, status });
+
+    await jobActionsRepository.addActivity(id, {
+      actor: actorName,
+      action: existing ? "Updated work report" : "Submitted work report",
+      note: input.workPerformed.trim().slice(0, 200),
+    });
+
+    return { job: updated, workLog };
   }
 
   async requestParts(id: string, tenantId: string, actorId: string, actorRole: string, notes: string) {

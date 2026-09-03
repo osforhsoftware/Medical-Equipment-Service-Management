@@ -1,3 +1,4 @@
+import http from "http";
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -31,8 +32,34 @@ import taxonomyRoutes from "@/routes/taxonomy.routes";
 
 const app = express();
 
-// ── Middleware ────────────────────────────────────────────────
-app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
+function isAllowedOrigin(origin: string | undefined) {
+  if (!origin) return true;
+  const configured = [env.CORS_ORIGIN, env.FRONTEND_URL]
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (configured.includes(origin)) return true;
+  if (env.NODE_ENV === "production") return false;
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (isAllowedOrigin(origin)) {
+        callback(null, origin ?? true);
+        return;
+      }
+      callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  }),
+);
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -77,14 +104,25 @@ app.use((_req, res) => {
 app.use(errorHandler);
 
 // ── Start Server ──────────────────────────────────────────────
-app.listen(env.PORT, env.HOST, () => {
+function logReady() {
   console.log(`
 ╔════════════════════════════════════════════╗
 ║   MESMS Prisma API Server                  ║
-║   http://${env.HOST}:${env.PORT}/api/health        ║
+║   http://127.0.0.1:${env.PORT}/api/health          ║
 ║   Environment: ${env.NODE_ENV}                 ║
 ╚════════════════════════════════════════════╝
   `);
+}
+
+const server = http.createServer(app);
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EAFNOSUPPORT" || err.code === "EADDRNOTAVAIL") {
+    app.listen(env.PORT, "0.0.0.0", logReady);
+    return;
+  }
+  console.error(err);
+  process.exit(1);
 });
+server.listen({ port: env.PORT, host: "::", ipv6Only: false }, logReady);
 
 export default app;

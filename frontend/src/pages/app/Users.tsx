@@ -61,6 +61,12 @@ const staffRoles: Role[] = ["admin", "coordinator", "inspector", "estimator", "s
 const filterRoles: (Role | "all")[] = ["all", "admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing"];
 const multiAssignableRoles: Role[] = ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing"];
 
+const roleHints: Partial<Record<Role, string>> = {
+  sales: "Record sales, add service amounts on the sale bill, and bill customers. Estimates stay on service tickets.",
+  estimator: "Create estimates on service tickets and jobs. Separate from product sale billing.",
+  billing: "Service-ticket invoices after jobs complete. Product sale invoices stay on the Sales desk.",
+};
+
 type FormState = {
   name: string;
   username: string;
@@ -489,12 +495,18 @@ export default function UsersPage() {
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {multiAssignableRoles.map((role) => (
-                  <label key={role} className="flex items-center gap-2 rounded-md border border-border/70 px-3 py-2 text-sm">
+                  <label key={role} className="flex items-start gap-2 rounded-md border border-border/70 px-3 py-2 text-sm">
                     <Checkbox
+                      className="mt-0.5"
                       checked={form.selectedRoles.includes(role)}
                       onCheckedChange={(checked) => updateSelectedRoles(role, checked === true)}
                     />
-                    <span>{roleLabels[role]}</span>
+                    <span>
+                      <span className="block">{roleLabels[role]}</span>
+                      {roleHints[role] ? (
+                        <span className="block text-xs text-muted-foreground">{roleHints[role]}</span>
+                      ) : null}
+                    </span>
                   </label>
                 ))}
               </div>

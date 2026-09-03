@@ -72,6 +72,9 @@ model TenantSettings {
   tenantId              String   @unique @map("tenant_id")
   logoFileId            String?  @unique @map("logo_file_id")
   supportEmail          String   @default("support@mesms.io") @map("support_email")
+  companyAddress        String?  @map("company_address") @db.VarChar(500)
+  companyPhone          String?  @map("company_phone") @db.VarChar(40)
+  companyWebsite        String?  @map("company_website") @db.VarChar(200)
   defaultTaxRate        Decimal  @default(8) @map("default_tax_rate") @db.Decimal(5, 2)
   amcRenewalReminders   Boolean  @default(true) @map("amc_renewal_reminders")
   lowStockAlerts        Boolean  @default(true) @map("low_stock_alerts")
@@ -377,7 +380,7 @@ model ServiceRequest {
   equipmentId   String?       @map("equipment_id")
   equipmentName String?       @map("equipment_name")
   branchId      String        @map("branch_id")
-  type          ServiceType
+  type          ServiceType?
   typeOther     String?       @map("type_other")
   priority      Priority
   status        ServiceStatus @default(new)

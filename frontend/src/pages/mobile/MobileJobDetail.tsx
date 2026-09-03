@@ -4,7 +4,7 @@ import { z } from "zod";
 import {
   ArrowLeft,
   Camera,
-  FileSignature,
+  ClipboardList,
   HardDrive,
   Loader2,
   MapPin,
@@ -16,11 +16,12 @@ import {
 import { CollapsibleSection } from "@/components/mobile/CollapsibleSection";
 import { WorkflowTimeline } from "@/components/mobile/WorkflowTimeline";
 import { WorkflowStatusChip } from "@/components/mobile/WorkflowStatusChip";
-import { useMobilePullRefresh } from "@/components/mobile/MobileLayout";
+import { useMobilePullRefresh } from "@/hooks/useMobilePullRefresh";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PhotoCaptionTile } from "@/components/shared/PhotoCaptionTile";
-import { SignaturePad } from "@/components/shared/SignaturePad";
+import { JobWorkReportPanel } from "@/components/jobs/JobWorkReportPanel";
+import { pickWorkReportLog, useJobWorkReportEditor } from "@/components/jobs/useJobWorkReportEditor";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { fieldAria, fieldErrorClass, fieldRules, type FieldErrors } from "@/lib/formValidation";
@@ -56,12 +57,10 @@ const JOB_STATUS_OPTIONS = [
   { value: "completed", label: "Completed" },
 ] as const;
 
+const ENGINEER_STATUS_OPTIONS = JOB_STATUS_OPTIONS.filter((o) => o.value !== "completed");
+
 const scopeSchema = z.object({
   partsNote: fieldRules.requiredString("Scope change reason"),
-});
-
-const signatureSchema = z.object({
-  customerName: fieldRules.requiredString("Customer name"),
 });
 
 function validatePhotos(values: { photoCount: number }): FieldErrors {
@@ -94,7 +93,7 @@ function toApiJobStatus(display: string) {
 export default function MobileJobDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { hasRole } = useAuth();
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const [job, setJob] = useState<BackendServiceJob | null>(null);
@@ -103,20 +102,16 @@ export default function MobileJobDetail() {
 
   const [photosOpen, setPhotosOpen] = useState(false);
   const [partsOpen, setPartsOpen] = useState(false);
-  const [signatureOpen, setSignatureOpen] = useState(false);
   const [stockOpen, setStockOpen] = useState(false);
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoCaptions, setPhotoCaptions] = useState<string[]>([]);
   const [partsNote, setPartsNote] = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [signatureData, setSignatureData] = useState<string | null>(null);
   const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
   const [stockItemId, setStockItemId] = useState("");
   const [stockQty, setStockQty] = useState(1);
   const [actionSaving, setActionSaving] = useState(false);
   const photosDrawerRef = useRef<HTMLDivElement>(null);
   const scopeDrawerRef = useRef<HTMLDivElement>(null);
-  const signatureDrawerRef = useRef<HTMLDivElement>(null);
   const stockDrawerRef = useRef<HTMLDivElement>(null);
 
   const photosValidation = useFormValidation({
@@ -144,16 +139,17 @@ export default function MobileJobDetail() {
     fieldOrder: ["partsNote"],
     schema: scopeSchema,
   });
-  const signatureValidation = useFormValidation({
-    fieldOrder: ["customerName", "signature"],
-    schema: signatureSchema,
-  });
   const stockValidation = useFormValidation({
     fieldOrder: ["stockItemId", "stockQty"],
   });
 
-  const isEngineer = user?.role === "engineer";
-  const canUpdateJob = isEngineer || user?.role === "admin";
+  const canUpdateJob = hasRole(["engineer", "admin"]);
+  const canApproveComplete = hasRole(["coordinator", "admin"]);
+  const statusOptions = canApproveComplete ? JOB_STATUS_OPTIONS : ENGINEER_STATUS_OPTIONS;
+  const awaitingReview = job?.status === "review";
+  const canSubmitForReview =
+    canUpdateJob && job && !["review", "completed"].includes(job.status);
+  const hasWorkReport = Boolean(job && pickWorkReportLog(job.workLogs));
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -176,6 +172,10 @@ export default function MobileJobDetail() {
 
   useMobilePullRefresh(load);
 
+  const workReport = useJobWorkReportEditor(async () => {
+    await load();
+  });
+
   const updateJobStatus = async (status: string) => {
     if (!job) return;
     try {
@@ -188,13 +188,36 @@ export default function MobileJobDetail() {
     }
   };
 
-  const completeJob = async () => {
+  const submitForReview = async () => {
+    if (!job) return;
+    if (!pickWorkReportLog(job.workLogs)) {
+      toast({
+        title: "Work report required",
+        description: "Fill the work report before submitting for review.",
+        variant: "destructive",
+      });
+      workReport.openReport(job);
+      return;
+    }
+    try {
+      await api.updateJob(job.id, { status: "review", progress: Math.max(job.progress, 90) });
+      const doc = await api.generateDocument("service-report", job.id);
+      toast({
+        title: "Submitted for review",
+        description: "Awaiting coordinator or admin approval.",
+      });
+      if (doc.file?.id) window.open(api.fileDownloadUrl(doc.file.id), "_blank");
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Error" });
+    }
+  };
+
+  const approveAndComplete = async () => {
     if (!job) return;
     try {
       await api.updateJob(job.id, { status: "completed", progress: 100 });
-      const doc = await api.generateDocument("service-report", job.id);
-      toast({ title: "Job completed", description: "Service report generated." });
-      if (doc.file?.id) window.open(api.fileDownloadUrl(doc.file.id), "_blank");
+      toast({ title: "Job completed", description: "Work approved by coordinator/admin." });
       navigate("/app/jobs");
     } catch (err) {
       toast.apiError(err, { fallback: "Error" });
@@ -256,34 +279,6 @@ export default function MobileJobDetail() {
     } catch (err) {
       if (!scopeValidation.applyApiErrors(err, scopeDrawerRef.current)) {
         toast.apiError(err, { fallback: "Request failed" });
-      }
-    } finally {
-      setActionSaving(false);
-    }
-  };
-
-  const handleCaptureSignature = async () => {
-    if (!job) return;
-    const values = { customerName };
-    const extraErrors: FieldErrors = {};
-    if (!signatureData) extraErrors.signature = "Customer signature is required.";
-    if (!signatureValidation.validateAll(values, extraErrors, signatureDrawerRef.current)) return;
-
-    setActionSaving(true);
-    try {
-      const result = await api.captureJobSignature(job.id, {
-        customerName: customerName.trim(),
-        signatureData: signatureData!,
-      });
-      setJob(result.job);
-      setCustomerName("");
-      setSignatureData(null);
-      setSignatureOpen(false);
-      signatureValidation.reset();
-      await load();
-    } catch (err) {
-      if (!signatureValidation.applyApiErrors(err, signatureDrawerRef.current)) {
-        toast.apiError(err, { fallback: "Signature failed" });
       }
     } finally {
       setActionSaving(false);
@@ -439,7 +434,7 @@ export default function MobileJobDetail() {
 
           {(job.photos?.length ?? 0) > 0 ? (
             <CollapsibleSection title="Photos" icon={<Camera className="h-4 w-4" />} defaultOpen>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-wrap gap-2.5">
                 {job.photos!.map((photo) => {
                   const src = photo.fileId ? api.fileDownloadUrl(photo.fileId) : "";
                   if (!src) return null;
@@ -451,6 +446,7 @@ export default function MobileJobDetail() {
                       caption={photo.caption ?? ""}
                       href={src}
                       readOnly
+                      className="w-24"
                     />
                   );
                 })}
@@ -471,9 +467,14 @@ export default function MobileJobDetail() {
             </dl>
           </CollapsibleSection>
 
-          {canUpdateJob && job.status !== "completed" && (
+          {(canUpdateJob || canApproveComplete) && job.status !== "completed" && (
             <CollapsibleSection title="Field Actions" icon={<Wrench className="h-4 w-4" />} defaultOpen>
-              {canUpdateJob && (
+              {awaitingReview ? (
+                <p className="mb-3 rounded-[14px] border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
+                  Awaiting coordinator or admin approval before completion.
+                </p>
+              ) : null}
+              {(canUpdateJob || canApproveComplete) && (
                 <div className="mb-4">
                   <Label className="text-xs text-muted-foreground">Update Status</Label>
                   <Select value={selectedApiStatus} onValueChange={(v) => void updateJobStatus(v)}>
@@ -481,19 +482,25 @@ export default function MobileJobDetail() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {JOB_STATUS_OPTIONS.map((o) => (
+                      {statusOptions.map((o) => (
                         <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-2">
-                <FieldAction icon={Camera} label="Photos" onClick={() => { photosValidation.reset(); resetPhotoDraft(); setPhotosOpen(true); }} />
-                <FieldAction icon={PlusCircle} label="Extra Scope" onClick={() => { scopeValidation.reset(); setPartsNote(""); setPartsOpen(true); }} />
-                <FieldAction icon={FileSignature} label="Signature" onClick={() => { signatureValidation.reset(); setCustomerName(""); setSignatureData(null); setSignatureOpen(true); }} />
-                <FieldAction icon={PackageMinus} label="Deduct Stock" onClick={() => void openStockDialog()} />
-              </div>
+              {canUpdateJob ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <FieldAction
+                    icon={ClipboardList}
+                    label={hasWorkReport ? "Edit report" : "Work report"}
+                    onClick={() => workReport.openReport(job)}
+                  />
+                  <FieldAction icon={PlusCircle} label="Extra Scope" onClick={() => { scopeValidation.reset(); setPartsNote(""); setPartsOpen(true); }} />
+                  <FieldAction icon={PackageMinus} label="Deduct Stock" onClick={() => void openStockDialog()} />
+                  <FieldAction icon={Camera} label="Quick photos" onClick={() => { photosValidation.reset(); resetPhotoDraft(); setPhotosOpen(true); }} />
+                </div>
+              ) : null}
             </CollapsibleSection>
           )}
 
@@ -515,11 +522,31 @@ export default function MobileJobDetail() {
           </CollapsibleSection>
         </div>
 
-        {canUpdateJob && job.status !== "completed" && (
-          <div className="mobile-sticky-footer mt-6">
-            <button type="button" className="mobile-btn-primary w-full" onClick={() => void completeJob()}>
-              Complete & Generate Report
-            </button>
+        {job.status !== "completed" && (
+          <div className="mobile-sticky-footer mt-6 space-y-2">
+            {canUpdateJob ? (
+              <button
+                type="button"
+                className="mobile-btn-secondary w-full"
+                onClick={() => workReport.openReport(job)}
+              >
+                <ClipboardList className="mr-2 h-4 w-4" />
+                {hasWorkReport ? "Update Work Report" : "Work Report"}
+              </button>
+            ) : null}
+            {canSubmitForReview ? (
+              <button type="button" className="mobile-btn-primary w-full" onClick={() => void submitForReview()}>
+                Submit for Review & Report
+              </button>
+            ) : awaitingReview && canApproveComplete ? (
+              <button type="button" className="mobile-btn-primary w-full" onClick={() => void approveAndComplete()}>
+                Approve & Complete
+              </button>
+            ) : awaitingReview ? (
+              <button type="button" className="mobile-btn-secondary w-full" disabled>
+                Awaiting coordinator approval
+              </button>
+            ) : null}
           </div>
         )}
       </div>
@@ -613,50 +640,6 @@ export default function MobileJobDetail() {
         </form>
       </ActionDrawer>
 
-      <ActionDrawer open={signatureOpen} onOpenChange={(open) => { if (!open) { signatureValidation.reset(); setCustomerName(""); setSignatureData(null); } setSignatureOpen(open); }} title="Capture Signature" contentRef={signatureDrawerRef}>
-        <form noValidate onSubmit={(e) => { e.preventDefault(); void handleCaptureSignature(); }}>
-          <div className="space-y-3">
-            <div data-field="customerName">
-              <Label htmlFor="sign-name" className={signatureValidation.shouldShow("customerName") ? "text-destructive" : undefined}>
-                Customer name
-                <RequiredMark />
-              </Label>
-              <Input
-                id="sign-name"
-                name="customerName"
-                className={`mt-1.5 h-12 rounded-[14px] ${fieldErrorClass(signatureValidation.shouldShow("customerName"))}`}
-                value={customerName}
-                {...fieldAria("customerName", signatureValidation.shouldShow("customerName") ? signatureValidation.errors.customerName : null)}
-                onChange={(e) => {
-                  setCustomerName(e.target.value);
-                  signatureValidation.handleChange("customerName", { customerName: e.target.value });
-                }}
-                onBlur={() => signatureValidation.handleBlur("customerName", { customerName })}
-              />
-              {signatureValidation.shouldShow("customerName") && (
-                <FormFieldError field="customerName" message={signatureValidation.errors.customerName} className="mt-2" />
-              )}
-            </div>
-            <div data-field="signature">
-              <SignaturePad
-                onChange={(data) => {
-                  setSignatureData(data);
-                  if (data) signatureValidation.clearError("signature");
-                }}
-              />
-              {signatureValidation.shouldShow("signature") && (
-                <FormFieldError field="signature" message={signatureValidation.errors.signature} className="mt-2" />
-              )}
-            </div>
-          </div>
-          <DrawerFooter className="px-0">
-            <button type="submit" className="mobile-btn-primary w-full" disabled={actionSaving}>
-              Confirm Sign-off
-            </button>
-          </DrawerFooter>
-        </form>
-      </ActionDrawer>
-
       <ActionDrawer open={stockOpen} onOpenChange={(open) => { if (!open) stockValidation.reset(); setStockOpen(open); }} title="Deduct Stock" contentRef={stockDrawerRef}>
         <form
           noValidate
@@ -733,6 +716,28 @@ export default function MobileJobDetail() {
           </DrawerFooter>
         </form>
       </ActionDrawer>
+
+      <JobWorkReportPanel
+        open={Boolean(workReport.job)}
+        onClose={workReport.closePanel}
+        job={workReport.job}
+        existingLog={workReport.existingLog}
+        existingPhotos={workReport.existingPhotos}
+        saving={workReport.saving}
+        onSubmit={() => void workReport.submitReport()}
+        workPerformed={workReport.workPerformed}
+        setWorkPerformed={workReport.setWorkPerformed}
+        testingResult={workReport.testingResult}
+        setTestingResult={workReport.setTestingResult}
+        calibrationResult={workReport.calibrationResult}
+        setCalibrationResult={workReport.setCalibrationResult}
+        recommendation={workReport.recommendation}
+        setRecommendation={workReport.setRecommendation}
+        setNewImages={workReport.setNewImages}
+        imageCaptions={workReport.imageCaptions}
+        setImageCaptions={workReport.setImageCaptions}
+        newImagePreviews={workReport.newImagePreviews}
+      />
     </RoleGuard>
   );
 }

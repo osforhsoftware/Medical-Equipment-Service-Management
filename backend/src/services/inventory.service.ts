@@ -5,10 +5,10 @@ import { prisma } from "@/db/prisma";
 import { getDefaultBranchId } from "@/utils/defaultBranch";
 
 type CreateInventoryData = {
-  sku: string;
+  sku?: string;
   name: string;
-  category: string;
-  subcategory: string;
+  category?: string;
+  subcategory?: string | null;
   description?: string | null;
   branchId?: string;
   inStock?: number;
@@ -62,11 +62,34 @@ export class InventoryService {
     return this.withAvailability(item);
   }
 
+  private async resolveOptionalSlug(
+    tenantId: string,
+    type: "inventory_category" | "inventory_subcategory",
+    value?: string | null,
+  ) {
+    const trimmed = value?.trim() ?? "";
+    if (!trimmed) return type === "inventory_subcategory" ? null : "";
+    return taxonomyService.resolveSlug(tenantId, type, trimmed);
+  }
+
+  private async nextSku(tenantId: string, branchId: string) {
+    const year = new Date().getFullYear();
+    const count = await prisma.inventoryItem.count({ where: { tenantId, branchId } });
+    let n = count + 1;
+    let sku = `SKU-${year}-${String(n).padStart(4, "0")}`;
+    while (await prisma.inventoryItem.findFirst({ where: { tenantId, branchId, sku } })) {
+      n += 1;
+      sku = `SKU-${year}-${String(n).padStart(4, "0")}`;
+    }
+    return sku;
+  }
+
   async create(tenantId: string, data: CreateInventoryData) {
     const { imageFileIds, ...rest } = data;
     const branchId = rest.branchId || await getDefaultBranchId(tenantId);
-    const category = await taxonomyService.resolveSlug(tenantId, "inventory_category", rest.category);
-    const subcategory = await taxonomyService.resolveSlug(tenantId, "inventory_subcategory", rest.subcategory);
+    const sku = rest.sku?.trim() || await this.nextSku(tenantId, branchId);
+    const category = await this.resolveOptionalSlug(tenantId, "inventory_category", rest.category);
+    const subcategory = await this.resolveOptionalSlug(tenantId, "inventory_subcategory", rest.subcategory);
     if (rest.supplierId) {
       const supplier = await prisma.supplier.findFirst({ where: { id: rest.supplierId, tenantId } });
       if (!supplier) throw new AppError("Supplier not found", 404);
@@ -76,9 +99,9 @@ export class InventoryService {
       const item = await tx.inventoryItem.create({
         data: {
           tenantId,
-          sku: rest.sku,
+          sku,
           name: rest.name,
-          category,
+          category: category ?? "",
           subcategory,
           description: rest.description ?? null,
           branchId,
@@ -127,20 +150,21 @@ export class InventoryService {
       if (!supplier) throw new AppError("Supplier not found", 404);
       safe.supplier = supplier.name;
     }
-    if (safe.category) {
-      safe.category = await taxonomyService.resolveSlug(tenantId, "inventory_category", safe.category);
+    if (safe.category !== undefined) {
+      safe.category = (await this.resolveOptionalSlug(tenantId, "inventory_category", safe.category)) ?? "";
     }
-    if (safe.subcategory) {
-      safe.subcategory = await taxonomyService.resolveSlug(tenantId, "inventory_subcategory", safe.subcategory);
+    if (safe.subcategory !== undefined) {
+      safe.subcategory = await this.resolveOptionalSlug(tenantId, "inventory_subcategory", safe.subcategory);
     }
+    const nextSku = typeof safe.sku === "string" ? safe.sku.trim() : undefined;
     return prisma.$transaction(async (tx) => {
       await tx.inventoryItem.update({
         where: { id },
         data: {
-          ...(safe.sku != null ? { sku: safe.sku } : {}),
+          ...(nextSku ? { sku: nextSku } : {}),
           ...(safe.name != null ? { name: safe.name } : {}),
-          ...(safe.category != null ? { category: safe.category } : {}),
-          ...(safe.subcategory != null ? { subcategory: safe.subcategory } : {}),
+          ...(safe.category !== undefined ? { category: safe.category } : {}),
+          ...(safe.subcategory !== undefined ? { subcategory: safe.subcategory } : {}),
           ...(safe.description !== undefined ? { description: safe.description } : {}),
           ...(safe.branchId != null ? { branchId: safe.branchId } : {}),
           ...(safe.inStock != null ? { inStock: safe.inStock } : {}),
