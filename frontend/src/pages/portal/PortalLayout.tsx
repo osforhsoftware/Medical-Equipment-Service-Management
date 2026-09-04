@@ -15,10 +15,19 @@ const links = [
 ];
 
 export function PortalLayout() {
-  const { user, logout } = useAuth();
+  const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background text-muted-foreground">
+        <MesmsLogo size="lg" />
+        <p className="text-sm">Loading…</p>
+      </div>
+    );
+  }
 
   if (!user) return <Navigate to="/login" replace />;
   if (user.role !== "customer") return <Navigate to="/app" replace />;

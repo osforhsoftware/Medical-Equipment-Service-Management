@@ -81,7 +81,7 @@ export default function Reports() {
   }, [dashboard, sales]);
 
   return (
-    <RoleGuard roles={["admin", "billing", "coordinator", "sales"]}>
+    <RoleGuard roles={["admin", "billing", "coordinator"]}>
       <div className="space-y-6">
         <PageHeader
           title="Reports & Analytics"

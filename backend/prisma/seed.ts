@@ -902,7 +902,7 @@ async function main() {
         machineCondition: "down",
         errorCodes: ["E-RA-204", "E-FLUID-11"],
         technicianRemarks: "Unit unsafe for patient testing until repaired.",
-        reportedBy: users.inspector1.id,
+        reportedBy: users.inspector1.name,
         submittedAt: daysAgo(1),
       },
     });
@@ -929,6 +929,11 @@ async function main() {
           estimatedCost: 185,
         },
       ],
+    });
+  } else if (inspection.reportedBy === users.inspector1.id) {
+    inspection = await prisma.inspectionReport.update({
+      where: { id: inspection.id },
+      data: { reportedBy: users.inspector1.name },
     });
   }
 

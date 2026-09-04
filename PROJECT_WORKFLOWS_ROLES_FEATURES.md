@@ -4,7 +4,7 @@
 **Last updated:** 24 July 2026  
 **Source:** current frontend routes, backend APIs, Prisma schema, seed data, and `PROJECT_SCOPE_AND_GAP_ANALYSIS.md`
 
-This file is the practical reference for **what the product does**, **who does what**, and **which features exist today**. For deep gap analysis, security risks, and production completion phases, see `PROJECT_SCOPE_AND_GAP_ANALYSIS.md`.
+This file is the practical reference for **what the product does**, **who does what**, and **which features exist today**. For the client-facing handbook (roles, permissions, how to run the workflow, and work assignment), see `docs/CLIENT_USER_GUIDE.md`. For deep gap analysis, security risks, and production completion phases, see `PROJECT_SCOPE_AND_GAP_ANALYSIS.md`.
 
 ---
 
@@ -457,6 +457,7 @@ Prisma models cover tenants, settings, users, roles, branches, customers, equipm
 
 | File | Purpose |
 |------|---------|
+| `docs/CLIENT_USER_GUIDE.md` | Client handbook: roles, permissions, features, workflows, assignment |
 | `PROJECT_SCOPE_AND_GAP_ANALYSIS.md` | Full audit: gaps, risks, completion phases, acceptance criteria |
 | `frontend/src/config/nav.ts` | Default role → module navigation matrix |
 | `backend/prisma/schema.prisma` | Data model and `UserRole` enum |

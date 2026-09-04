@@ -7,6 +7,8 @@ export type ToastType = "success" | "error" | "warning" | "info" | "loading" | "
 export type ToastOptions = ExternalToast & {
   /** Skip duplicate suppression for this toast. */
   force?: boolean;
+  /** Show 401 toasts on login/forgot/reset forms instead of treating them as a session expiry. */
+  authForm?: boolean;
 };
 
 /** Legacy shadcn-style toast payload used across existing pages. */
@@ -110,8 +112,16 @@ export function getApiErrorMessage(
         return error.message || "Cannot reach the backend. Start it with npm run dev in the backend folder.";
       case 400:
         return validation || error.message || "Invalid request. Please check your input.";
-      case 401:
-        return "Your session has expired. Please log in again.";
+      case 401: {
+        const message = error.message || "";
+        if (/invalid username or password|invalid credentials/i.test(message)) {
+          return "Invalid username or password.";
+        }
+        if (/authentication required|invalid or expired token/i.test(message)) {
+          return "Your session has ended. Please sign in again.";
+        }
+        return message || "Your session has ended. Please sign in again.";
+      }
       case 403:
         return error.message || "You don't have permission to perform this action.";
       case 404:
@@ -198,7 +208,7 @@ type ToastCallable = {
   promise: typeof sonnerToast.promise;
   apiError: (
     error: unknown,
-    options?: ToastOptions & { fallback?: string },
+    options?: ToastOptions & { fallback?: string; authForm?: boolean },
   ) => string | number;
 };
 
@@ -225,8 +235,11 @@ export const toast: ToastCallable = Object.assign(toastFn, {
   message: (message: string, options?: ToastOptions) => show("message", message, options),
   dismiss: (id?: string | number) => sonnerToast.dismiss(id),
   promise: sonnerToast.promise.bind(sonnerToast),
-  apiError: (error: unknown, options?: ToastOptions & { fallback?: string }) => {
-    const { fallback, ...rest } = options ?? {};
+  apiError: (error: unknown, options?: ToastOptions & { fallback?: string; authForm?: boolean }) => {
+    const { fallback, authForm, ...rest } = options ?? {};
+    if (error instanceof ApiError && error.status === 401 && !authForm) {
+      return "skipped";
+    }
     return show("error", getApiErrorMessage(error, fallback), rest);
   },
 });

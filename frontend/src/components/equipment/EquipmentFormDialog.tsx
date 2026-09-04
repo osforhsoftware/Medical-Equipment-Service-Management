@@ -34,6 +34,8 @@ import { userCanAccessModule } from "@/lib/userRoles";
 import { activeTerms } from "@/lib/taxonomy";
 import { navItems } from "@/config/nav";
 
+const NONE = "__none__";
+
 type FormState = {
   assetTag: string;
   name: string;
@@ -52,27 +54,17 @@ type FormState = {
 const equipmentSchema = z.object({
   assetTag: fieldRules.requiredString("Asset tag"),
   name: fieldRules.requiredString("Equipment name"),
-  model: fieldRules.requiredString("Model"),
-  manufacturer: fieldRules.requiredString("Manufacturer"),
-  category: fieldRules.selectRequired("a category"),
+  model: fieldRules.optionalString(),
+  manufacturer: fieldRules.optionalString(),
+  category: fieldRules.optionalString(),
   serialNumber: fieldRules.requiredString("Serial number"),
-  customerId: fieldRules.selectRequired("a customer"),
-  location: fieldRules.requiredString("Location"),
-  installDate: fieldRules.requiredString("Install date"),
-  warrantyEnd: fieldRules.requiredString("Warranty end date"),
-  condition: fieldRules.selectRequired("a condition"),
+  customerId: fieldRules.optionalString(),
+  location: fieldRules.optionalString(),
+  installDate: fieldRules.optionalString(),
+  warrantyEnd: fieldRules.optionalString(),
+  condition: fieldRules.optionalString(),
   lastServiceDate: fieldRules.optionalString(),
 });
-
-function todayInputValue() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function defaultWarrantyEnd() {
-  const d = new Date();
-  d.setFullYear(d.getFullYear() + 1);
-  return d.toISOString().slice(0, 10);
-}
 
 function toDateInput(value: string | null | undefined) {
   if (!value) return "";
@@ -88,8 +80,8 @@ const emptyForm = (): FormState => ({
   serialNumber: "",
   customerId: "",
   location: "",
-  installDate: todayInputValue(),
-  warrantyEnd: defaultWarrantyEnd(),
+  installDate: "",
+  warrantyEnd: "",
   condition: "",
   lastServiceDate: "",
 });
@@ -98,15 +90,15 @@ function fromEquipment(item: BackendEquipment): FormState {
   return {
     assetTag: item.assetTag,
     name: item.name,
-    model: item.model,
-    manufacturer: item.manufacturer,
-    category: item.category,
+    model: item.model ?? "",
+    manufacturer: item.manufacturer ?? "",
+    category: item.category ?? "",
     serialNumber: item.serialNumber,
-    customerId: item.customerId,
-    location: item.location,
-    installDate: toDateInput(item.installDate) || todayInputValue(),
-    warrantyEnd: toDateInput(item.warrantyEnd) || defaultWarrantyEnd(),
-    condition: item.condition,
+    customerId: item.customerId ?? "",
+    location: item.location ?? "",
+    installDate: toDateInput(item.installDate),
+    warrantyEnd: toDateInput(item.warrantyEnd),
+    condition: item.condition ?? "",
     lastServiceDate: toDateInput(item.lastServiceDate),
   };
 }
@@ -119,11 +111,11 @@ function toPayload(form: FormState): CreateEquipmentInput {
     manufacturer: form.manufacturer.trim(),
     category: form.category,
     serialNumber: form.serialNumber.trim(),
-    customerId: form.customerId,
+    customerId: form.customerId || null,
     location: form.location.trim(),
-    installDate: form.installDate,
-    warrantyEnd: form.warrantyEnd,
-    condition: form.condition,
+    installDate: form.installDate || null,
+    warrantyEnd: form.warrantyEnd || null,
+    condition: form.condition || undefined,
     lastServiceDate: form.lastServiceDate || undefined,
   };
 }
@@ -205,8 +197,6 @@ export function EquipmentFormDialog({
   const customers = (customersQuery.data ?? []).filter((c) => c.status === "active");
   const activeCategories = activeTerms(categoriesQuery.data ?? []);
   const activeConditions = activeTerms(conditionsQuery.data ?? []);
-  const defaultCategory = activeCategories.find((t) => t.slug === "imaging")?.slug ?? activeCategories[0]?.slug ?? "";
-  const defaultCondition = activeConditions.find((t) => t.slug === "operational")?.slug ?? activeConditions[0]?.slug ?? "";
 
   useEffect(() => {
     if (!open) return;
@@ -222,16 +212,6 @@ export function EquipmentFormDialog({
     // Reset only when the dialog opens or the edited record changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, equipment?.id]);
-
-  useEffect(() => {
-    if (!open || equipment) return;
-    setForm((prev) => ({
-      ...prev,
-      customerId: prev.customerId || customers[0]?.id || "",
-      category: prev.category || defaultCategory,
-      condition: prev.condition || defaultCondition,
-    }));
-  }, [open, equipment, customers, defaultCategory, defaultCondition]);
 
   const saveEquipment = async () => {
     if (!validateAll(form, undefined, dialogRef.current)) return;
@@ -338,10 +318,7 @@ export function EquipmentFormDialog({
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2" data-field="manufacturer">
-              <Label htmlFor="manufacturer" className={shouldShow("manufacturer") ? "text-destructive" : undefined}>
-                Manufacturer
-                <RequiredMark />
-              </Label>
+              <Label htmlFor="manufacturer">Manufacturer (optional)</Label>
               <Input
                 id="manufacturer"
                 value={form.manufacturer}
@@ -352,16 +329,10 @@ export function EquipmentFormDialog({
                 }}
                 onBlur={() => handleBlur("manufacturer", form)}
                 placeholder="Siemens"
-                className={fieldErrorClass(shouldShow("manufacturer"))}
-                {...fieldAria("manufacturer", shouldShow("manufacturer") ? errors.manufacturer : null)}
               />
-              {shouldShow("manufacturer") && <FormFieldError field="manufacturer" message={errors.manufacturer} />}
             </div>
             <div className="grid gap-2" data-field="model">
-              <Label htmlFor="model" className={shouldShow("model") ? "text-destructive" : undefined}>
-                Model
-                <RequiredMark />
-              </Label>
+              <Label htmlFor="model">Model (optional)</Label>
               <Input
                 id="model"
                 value={form.model}
@@ -372,19 +343,13 @@ export function EquipmentFormDialog({
                 }}
                 onBlur={() => handleBlur("model", form)}
                 placeholder="Magnetom Vida"
-                className={fieldErrorClass(shouldShow("model"))}
-                {...fieldAria("model", shouldShow("model") ? errors.model : null)}
               />
-              {shouldShow("model") && <FormFieldError field="model" message={errors.model} />}
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2" data-field="category">
               <div className="flex items-center justify-between gap-2">
-                <Label className={shouldShow("category") ? "text-destructive" : undefined}>
-                  Category
-                  <RequiredMark />
-                </Label>
+                <Label>Category (optional)</Label>
                 {canManageMasterData ? (
                   <Link to="/app/master-data?type=equipment_category" className="text-xs text-primary hover:underline">
                     Manage
@@ -392,22 +357,19 @@ export function EquipmentFormDialog({
                 ) : null}
               </div>
               <Select
-                value={form.category}
+                value={form.category || NONE}
                 onValueChange={(value) => {
-                  const next = { ...form, category: value };
+                  const next = { ...form, category: value === NONE ? "" : value };
                   setForm(next);
                   clearError("category");
                   handleChange("category", next);
                 }}
               >
-                <SelectTrigger
-                  id="category"
-                  className={fieldErrorClass(shouldShow("category"))}
-                  {...fieldAria("category", shouldShow("category") ? errors.category : null)}
-                >
+                <SelectTrigger id="category">
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={NONE}>Not specified</SelectItem>
                   {activeCategories.map((c) => (
                     <SelectItem key={c.id} value={c.slug}>
                       {c.name}
@@ -415,30 +377,23 @@ export function EquipmentFormDialog({
                   ))}
                 </SelectContent>
               </Select>
-              {shouldShow("category") && <FormFieldError field="category" message={errors.category} />}
             </div>
             <div className="grid gap-2" data-field="customerId">
-              <Label className={shouldShow("customerId") ? "text-destructive" : undefined}>
-                Customer
-                <RequiredMark />
-              </Label>
+              <Label>Customer (optional)</Label>
               <Select
-                value={form.customerId}
-                onValueChange={(customerId) => {
-                  const next = { ...form, customerId };
+                value={form.customerId || NONE}
+                onValueChange={(value) => {
+                  const next = { ...form, customerId: value === NONE ? "" : value };
                   setForm(next);
                   clearError("customerId");
                   handleChange("customerId", next);
                 }}
               >
-                <SelectTrigger
-                  id="customerId"
-                  className={fieldErrorClass(shouldShow("customerId"))}
-                  {...fieldAria("customerId", shouldShow("customerId") ? errors.customerId : null)}
-                >
+                <SelectTrigger id="customerId">
                   <SelectValue placeholder="Select customer" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={NONE}>Not specified</SelectItem>
                   {customers.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.name}
@@ -446,14 +401,10 @@ export function EquipmentFormDialog({
                   ))}
                 </SelectContent>
               </Select>
-              {shouldShow("customerId") && <FormFieldError field="customerId" message={errors.customerId} />}
             </div>
           </div>
           <div className="grid gap-2" data-field="location">
-            <Label htmlFor="location" className={shouldShow("location") ? "text-destructive" : undefined}>
-              Location at site
-              <RequiredMark />
-            </Label>
+            <Label htmlFor="location">Location at site (optional)</Label>
             <Input
               id="location"
               value={form.location}
@@ -464,17 +415,11 @@ export function EquipmentFormDialog({
               }}
               onBlur={() => handleBlur("location", form)}
               placeholder="Radiology Wing 2"
-              className={fieldErrorClass(shouldShow("location"))}
-              {...fieldAria("location", shouldShow("location") ? errors.location : null)}
             />
-            {shouldShow("location") && <FormFieldError field="location" message={errors.location} />}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2" data-field="installDate">
-              <Label htmlFor="install-date" className={shouldShow("installDate") ? "text-destructive" : undefined}>
-                Install date
-                <RequiredMark />
-              </Label>
+              <Label htmlFor="install-date">Install date (optional)</Label>
               <Input
                 id="install-date"
                 type="date"
@@ -485,16 +430,10 @@ export function EquipmentFormDialog({
                   handleChange("installDate", next);
                 }}
                 onBlur={() => handleBlur("installDate", form)}
-                className={fieldErrorClass(shouldShow("installDate"))}
-                {...fieldAria("installDate", shouldShow("installDate") ? errors.installDate : null)}
               />
-              {shouldShow("installDate") && <FormFieldError field="installDate" message={errors.installDate} />}
             </div>
             <div className="grid gap-2" data-field="warrantyEnd">
-              <Label htmlFor="warranty-end" className={shouldShow("warrantyEnd") ? "text-destructive" : undefined}>
-                Warranty end
-                <RequiredMark />
-              </Label>
+              <Label htmlFor="warranty-end">Warranty end (optional)</Label>
               <Input
                 id="warranty-end"
                 type="date"
@@ -505,19 +444,13 @@ export function EquipmentFormDialog({
                   handleChange("warrantyEnd", next);
                 }}
                 onBlur={() => handleBlur("warrantyEnd", form)}
-                className={fieldErrorClass(shouldShow("warrantyEnd"))}
-                {...fieldAria("warrantyEnd", shouldShow("warrantyEnd") ? errors.warrantyEnd : null)}
               />
-              {shouldShow("warrantyEnd") && <FormFieldError field="warrantyEnd" message={errors.warrantyEnd} />}
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2" data-field="condition">
               <div className="flex items-center justify-between gap-2">
-                <Label className={shouldShow("condition") ? "text-destructive" : undefined}>
-                  Condition
-                  <RequiredMark />
-                </Label>
+                <Label>Condition (optional)</Label>
                 {canManageMasterData ? (
                   <Link to="/app/master-data?type=equipment_condition" className="text-xs text-primary hover:underline">
                     Manage
@@ -525,18 +458,19 @@ export function EquipmentFormDialog({
                 ) : null}
               </div>
               <Select
-                value={form.condition}
+                value={form.condition || NONE}
                 onValueChange={(value) => {
-                  const next = { ...form, condition: value };
+                  const next = { ...form, condition: value === NONE ? "" : value };
                   setForm(next);
                   clearError("condition");
                   handleChange("condition", next);
                 }}
               >
-                <SelectTrigger className={fieldErrorClass(shouldShow("condition"))}>
+                <SelectTrigger>
                   <SelectValue placeholder="Select condition" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={NONE}>Not specified</SelectItem>
                   {activeConditions.map((o) => (
                     <SelectItem key={o.id} value={o.slug}>
                       {o.name}
@@ -544,7 +478,6 @@ export function EquipmentFormDialog({
                   ))}
                 </SelectContent>
               </Select>
-              {shouldShow("condition") && <FormFieldError field="condition" message={errors.condition} />}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="last-service">Last service (optional)</Label>

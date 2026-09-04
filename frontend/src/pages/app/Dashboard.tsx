@@ -71,7 +71,6 @@ function roleQuickActions(role: Role): QuickAction[] {
       return [
         { label: "Assigned Inspections", to: "/app/inspections", icon: Search },
         { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList },
-        { label: "Estimates", to: "/app/estimates", icon: FileText },
         { label: "QR Scanner", to: "/app/qr-tracking", icon: QrCode },
         { label: "Notifications", to: "/app/notifications", icon: Bell },
       ];
@@ -79,7 +78,7 @@ function roleQuickActions(role: Role): QuickAction[] {
       return [
         { label: "Pending Estimates", to: "/app/estimates", icon: FileText },
         { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList },
-        { label: "Ticket Billing", to: "/app/billing", icon: Receipt },
+        { label: "Customers", to: "/app/customers", icon: FileText },
         { label: "Notifications", to: "/app/notifications", icon: Bell },
       ];
     case "sales":
@@ -87,7 +86,7 @@ function roleQuickActions(role: Role): QuickAction[] {
         { label: "Sales Desk", to: "/app/sales", icon: ShoppingCart },
         { label: "New Sale", to: "/app/sales/new", icon: ShoppingCart },
         { label: "Customers", to: "/app/customers", icon: FileText },
-        { label: "Sale Reports", to: "/app/sales", icon: IndianRupee },
+        { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList },
         { label: "Notifications", to: "/app/notifications", icon: Bell },
       ];
     case "engineer":
@@ -95,7 +94,6 @@ function roleQuickActions(role: Role): QuickAction[] {
         { label: "Assigned Jobs", to: "/app/jobs", icon: Wrench },
         { label: "Request Parts", to: "/app/jobs", icon: Package },
         { label: "Inventory", to: "/app/inventory", icon: Package },
-        { label: "Estimates", to: "/app/estimates", icon: FileText },
         { label: "QR Scanner", to: "/app/qr-tracking", icon: QrCode },
         { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList },
       ];
@@ -110,6 +108,7 @@ function roleQuickActions(role: Role): QuickAction[] {
     case "billing":
       return [
         { label: "Pending Bills", to: "/app/billing", icon: Receipt },
+        { label: "Sales Desk", to: "/app/sales", icon: ShoppingCart },
         { label: "Estimates", to: "/app/estimates", icon: FileText },
         { label: "Reports", to: "/app/reports", icon: IndianRupee },
       ];

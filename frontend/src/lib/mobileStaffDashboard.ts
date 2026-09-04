@@ -43,7 +43,7 @@ export function roleQuickActions(role: Role): MobileQuickAction[] {
     case "inspector":
       return [
         { label: "Inspections", to: "/app/inspections", icon: Search, primary: true },
-        { label: "Estimates", to: "/app/estimates", icon: FileText },
+        { label: "Tickets", to: "/app/service-tickets", icon: ClipboardList },
         { label: "Scan QR", to: "/app/qr-tracking", icon: QrCode },
         { label: "Alerts", to: "/app/notifications", icon: Bell },
       ];
@@ -51,33 +51,35 @@ export function roleQuickActions(role: Role): MobileQuickAction[] {
       return [
         { label: "Estimates", to: "/app/estimates", icon: FileText, primary: true },
         { label: "Tickets", to: "/app/service-tickets", icon: ClipboardList },
-        { label: "Billing", to: "/app/billing", icon: Receipt },
+        { label: "Customers", to: "/app/customers", icon: UserCheck },
         { label: "Alerts", to: "/app/notifications", icon: Bell },
       ];
     case "sales":
       return [
         { label: "Sales", to: "/app/sales", icon: ShoppingCart, primary: true },
         { label: "New Sale", to: "/app/sales/new", icon: ShoppingCart },
+        { label: "Tickets", to: "/app/service-tickets", icon: ClipboardList },
         { label: "Customers", to: "/app/customers", icon: UserCheck },
         { label: "Alerts", to: "/app/notifications", icon: Bell },
       ];
     case "engineer":
       return [
         { label: "My Jobs", to: "/app/jobs", icon: Wrench, primary: true },
-        { label: "Estimates", to: "/app/estimates", icon: FileText },
+        { label: "Parts", to: "/app/inventory", icon: Package },
         { label: "Scan QR", to: "/app/qr-tracking", icon: QrCode },
         { label: "Alerts", to: "/app/notifications", icon: Bell },
-        { label: "Parts", to: "/app/inventory", icon: Package },
       ];
     case "inventory":
       return [
         { label: "Inventory", to: "/app/inventory", icon: Package, primary: true },
         { label: "Purchase", to: "/app/purchase-orders", icon: ShoppingCart },
+        { label: "Sales fulfill", to: "/app/sales", icon: ShoppingCart },
         { label: "Alerts", to: "/app/notifications", icon: Bell },
       ];
     case "billing":
       return [
         { label: "Billing", to: "/app/billing", icon: Receipt, primary: true },
+        { label: "Sales", to: "/app/sales", icon: ShoppingCart },
         { label: "Estimates", to: "/app/estimates", icon: FileText },
         { label: "Alerts", to: "/app/notifications", icon: Bell },
         { label: "Reports", to: "/app/reports", icon: IndianRupee },
@@ -185,7 +187,7 @@ export const PIPELINE_STAGES = [
 
 const FILTER_OPTIONS_BY_ROLE: Partial<Record<Role, string[]>> = {
   inspector: ["all", "assigned", "inspection", "in-progress", "completed"],
-  estimator: ["all", "estimate", "assigned", "completed", "billing"],
+  estimator: ["all", "estimate", "assigned", "completed"],
   sales: ["all", "billing", "completed"],
   engineer: ["all", "assigned", "in-progress", "completed"],
   billing: ["all", "billing", "completed"],

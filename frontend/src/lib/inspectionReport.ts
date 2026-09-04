@@ -16,6 +16,13 @@ export function displayOrFallback(value: unknown, fallback = "") {
 export function formatJsonField(value: unknown): Array<{ label: string; value: string }> {
   if (!value) return [];
   if (Array.isArray(value)) {
+    const allStrings = value.every((item) => typeof item === "string");
+    if (allStrings) {
+      return (value as string[]).map((item) => ({
+        label: "Code",
+        value: item,
+      }));
+    }
     return value.map((item, index) => ({
       label: `Item ${index + 1}`,
       value: typeof item === "string" ? item : JSON.stringify(item),
@@ -28,6 +35,23 @@ export function formatJsonField(value: unknown): Array<{ label: string; value: s
     }));
   }
   return [{ label: "Value", value: displayOrFallback(value) }];
+}
+
+/** Prefer a clean list when error codes are a string array. */
+export function formatErrorCodes(value: unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === "string" ? item.trim() : displayOrFallback(item)))
+      .filter(Boolean);
+  }
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>)
+      .map((item) => displayOrFallback(item))
+      .filter(Boolean);
+  }
+  const text = displayOrFallback(value);
+  return text ? [text] : [];
 }
 
 export interface InspectionReportBundle {

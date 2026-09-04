@@ -31,6 +31,7 @@ import filesRoutes from "@/routes/files.routes";
 import taxonomyRoutes from "@/routes/taxonomy.routes";
 
 const app = express();
+app.set("trust proxy", 1);
 
 function isAllowedOrigin(origin: string | undefined) {
   if (!origin) return true;

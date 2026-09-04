@@ -62,12 +62,12 @@ export interface Equipment {
   manufacturer: string;
   category: string;
   serialNumber: string;
-  customerId: string;
+  customerId: string | null;
   customerName: string;
   branchId: string;
   location: string;
-  installDate: string;
-  warrantyEnd: string;
+  installDate: string | null;
+  warrantyEnd: string | null;
   amcStatus: "active" | "expiring" | "expired" | "none";
   condition: string;
   lastServiceDate: string;

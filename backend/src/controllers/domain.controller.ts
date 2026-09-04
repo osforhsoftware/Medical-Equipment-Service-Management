@@ -44,6 +44,12 @@ export class DomainController {
   approveJobExtra = async (req: Request, res: Response, next: NextFunction) => {
     try { send(res, "Job extra approved", await domainService.approveJobExtra(req.tenantId!, req.params.id, actor(req))); } catch (e) { next(e); }
   };
+  updateJobExtra = async (req: Request, res: Response, next: NextFunction) => {
+    try { send(res, "Job extra updated", await domainService.updateJobExtra(req.tenantId!, req.params.id, actor(req), req.body)); } catch (e) { next(e); }
+  };
+  deleteJobExtra = async (req: Request, res: Response, next: NextFunction) => {
+    try { await domainService.deleteJobExtra(req.tenantId!, req.params.id, actor(req)); res.status(204).send(); } catch (e) { next(e); }
+  };
   reservations = async (req: Request, res: Response, next: NextFunction) => {
     try { send(res, "Stock reservations fetched", await domainService.listReservations(req.tenantId!, req.query.status as string | undefined)); } catch (e) { next(e); }
   };

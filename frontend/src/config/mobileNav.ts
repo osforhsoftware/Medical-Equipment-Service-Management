@@ -42,11 +42,11 @@ const MOBILE_NAV_ORDER: Record<Role, string[]> = {
   admin: ["home", "jobs", "alerts", "billing", "profile"],
   coordinator: ["home", "jobs", "tickets", "alerts", "profile"],
   inspector: ["home", "inspections", "scan", "alerts", "profile"],
-  estimator: ["home", "estimates", "billing", "tickets", "profile"],
-  sales: ["home", "sales", "alerts", "profile"],
+  estimator: ["home", "estimates", "tickets", "alerts", "profile"],
+  sales: ["home", "sales", "tickets", "alerts", "profile"],
   engineer: ["home", "jobs", "scan", "alerts", "profile"],
   inventory: ["home", "inventory", "scan", "alerts", "profile"],
-  billing: ["home", "billing", "estimates", "alerts", "profile"],
+  billing: ["home", "billing", "sales", "alerts", "profile"],
   customer: ["home", "profile"],
 };
 

@@ -1,22 +1,41 @@
 import { z } from "zod";
 
 export const amcStatusSchema = z.enum(["active", "expiring", "expired", "none"]);
-export const conditionSchema = z.string().trim().min(1, "Condition is required").max(80);
+export const conditionSchema = z.string().trim().max(80);
+
+const optionalText = (max: number) =>
+  z.preprocess(
+    (v) => (v == null ? "" : v),
+    z.string().trim().max(max),
+  );
+
+const optionalNullableId = z.preprocess(
+  (v) => (v == null || v === "" ? null : v),
+  z.string().trim().nullable(),
+);
+
+const optionalNullableDate = z.preprocess(
+  (v) => (v == null || v === "" ? null : v),
+  z.string().trim().nullable(),
+);
 
 export const createEquipmentSchema = z.object({
   assetTag: z.string().min(2, "Asset tag is required").max(64),
   name: z.string().min(2, "Name is required").max(200),
-  model: z.string().min(1, "Model is required").max(120),
-  manufacturer: z.string().min(1, "Manufacturer is required").max(120),
-  category: z.string().trim().min(1, "Category is required").max(80),
+  model: optionalText(120),
+  manufacturer: optionalText(120),
+  category: optionalText(80),
   serialNumber: z.string().min(1, "Serial number is required").max(120),
-  customerId: z.string().min(1, "Customer is required"),
+  customerId: optionalNullableId,
   branchId: z.string().optional(),
-  location: z.string().min(1, "Location is required").max(200),
-  installDate: z.string().min(1, "Install date is required"),
-  warrantyEnd: z.string().min(1, "Warranty end date is required"),
+  location: z.string().max(200).optional(),
+  installDate: optionalNullableDate,
+  warrantyEnd: optionalNullableDate,
   amcStatus: amcStatusSchema.optional().default("none"),
-  condition: conditionSchema.optional().default("operational"),
+  condition: z.preprocess(
+    (v) => (v == null || v === "" ? undefined : v),
+    conditionSchema.optional(),
+  ),
   lastServiceDate: z.string().optional().nullable(),
 });
 

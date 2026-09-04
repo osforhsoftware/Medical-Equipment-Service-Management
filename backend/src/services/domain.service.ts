@@ -597,6 +597,37 @@ export class DomainService {
     return prisma.jobExtra.findUniqueOrThrow({ where: { id } });
   }
 
+  async updateJobExtra(tenantId: string, id: string, actor: Actor, input: any) {
+    const existing = await prisma.jobExtra.findFirst({ where: { id, tenantId } });
+    if (!existing) throw new AppError("Job extra not found", 404);
+    if (existing.status !== "pending") throw new AppError("Only pending extras can be edited", 422);
+    await assertJobAccess(tenantId, existing.jobId, actor);
+    if (input.inventoryItemId) {
+      const item = await prisma.inventoryItem.findFirst({ where: { id: input.inventoryItemId, tenantId } });
+      if (!item) throw new AppError("Inventory item not found", 404);
+    }
+    return prisma.jobExtra.update({
+      where: { id },
+      data: {
+        inventoryItemId: input.inventoryItemId ?? null,
+        description: input.description,
+        type: input.type ?? existing.type,
+        reason: input.reason,
+        quantity: input.quantity,
+        unitPrice: input.unitPrice,
+        taxRate: input.taxRate ?? 0,
+      },
+    });
+  }
+
+  async deleteJobExtra(tenantId: string, id: string, actor: Actor) {
+    const existing = await prisma.jobExtra.findFirst({ where: { id, tenantId } });
+    if (!existing) throw new AppError("Job extra not found", 404);
+    if (existing.status !== "pending") throw new AppError("Only pending extras can be deleted", 422);
+    await assertJobAccess(tenantId, existing.jobId, actor);
+    await prisma.jobExtra.delete({ where: { id } });
+  }
+
   listReservations(tenantId: string, status?: string) {
     return prisma.stockReservation.findMany({
       where: { tenantId, ...(status ? { status } : {}) },

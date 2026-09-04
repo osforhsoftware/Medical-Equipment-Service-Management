@@ -270,16 +270,16 @@ model Equipment {
   tenantId        String    @map("tenant_id")
   assetTag        String    @map("asset_tag")
   name            String
-  model           String
-  manufacturer    String
-  category        String
+  model           String    @default("")
+  manufacturer    String    @default("")
+  category        String    @default("")
   serialNumber    String    @map("serial_number")
-  customerId      String    @map("customer_id")
-  customerName    String    @map("customer_name")
+  customerId      String?   @map("customer_id")
+  customerName    String    @default("") @map("customer_name")
   branchId        String    @map("branch_id")
-  location        String
-  installDate     DateTime  @map("install_date")
-  warrantyEnd     DateTime  @map("warranty_end")
+  location        String    @default("")
+  installDate     DateTime? @map("install_date")
+  warrantyEnd     DateTime? @map("warranty_end")
   amcStatus       AmcStatus @default(none) @map("amc_status")
   condition       String    @default("operational")
   lastServiceDate DateTime? @map("last_service_date")
@@ -287,7 +287,7 @@ model Equipment {
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer        Customer         @relation(fields: [customerId], references: [id])
+  customer        Customer?        @relation(fields: [customerId], references: [id])
   serviceRequests ServiceRequest[]
   estimates       Estimate[]
   serviceJobs     ServiceJob[]

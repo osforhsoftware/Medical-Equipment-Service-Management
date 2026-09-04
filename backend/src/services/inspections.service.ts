@@ -71,13 +71,27 @@ export class InspectionsService {
     if (!sr) throw new AppError("Service ticket not found", 404);
     this.assertAccess(sr, actorId, actorRole);
 
-    return prisma.inspectionReport.findUnique({
+    const report = await prisma.inspectionReport.findUnique({
       where: { serviceRequestId },
       include: {
         recommendations: { include: { catalogItem: true, inventoryItem: true } },
         attachments: { include: { file: true } },
       },
     });
+    if (!report) return null;
+    return {
+      ...report,
+      reportedBy: await this.resolveReporterName(tenantId, report.reportedBy),
+    };
+  }
+
+  /** Resolve stored user ids (legacy seed/data) to a display name. */
+  private async resolveReporterName(tenantId: string, reportedBy: string): Promise<string> {
+    const value = reportedBy?.trim();
+    if (!value) return "";
+    const byId = await usersRepository.findById(value, tenantId);
+    if (byId?.name) return byId.name;
+    return value;
   }
 
   private async notifyProcurementShortage(

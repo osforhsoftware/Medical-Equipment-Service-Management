@@ -423,8 +423,9 @@
 }
 
 .inspection-report-document .doc-kind {
-  font-size: 20px;
+  font-size: 18px;
   letter-spacing: 0.06em;
+  line-height: 1.15;
 }
 
 .professional-document .doc-invoice-meta {
@@ -740,11 +741,85 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--doc-ink);
+  color: #1657a8;
 }
 
 .inspection-report-document .doc-section-body-wrap {
   margin-top: 2px;
+}
+
+.inspection-report-document .doc-text-block {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--doc-muted);
+}
+
+.inspection-report-document .doc-parts-list {
+  margin-top: 12px;
+}
+
+.inspection-report-document .doc-parts-heading {
+  margin: 0 0 8px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--doc-label);
+}
+
+.inspection-report-document .doc-parts-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inspection-report-document .doc-parts-list li {
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.inspection-report-document .doc-parts-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--doc-ink);
+}
+
+.inspection-report-document .doc-parts-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--doc-muted);
+}
+
+.inspection-report-document .doc-parts-cost {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--doc-ink);
+}
+
+.inspection-report-document .doc-error-codes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inspection-report-document .doc-error-codes li {
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--doc-rule);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--doc-ink);
+  background: var(--doc-wash);
 }
 
 .inspection-report-document .doc-info-grid {
@@ -776,13 +851,6 @@
   overflow-wrap: anywhere;
 }
 
-.inspection-report-document .doc-text-block {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--doc-muted);
-}
-
 .inspection-report-document .doc-report-summary {
   display: flex;
   flex-wrap: wrap;
@@ -807,7 +875,7 @@
   display: grid;
   gap: 8px 20px;
   margin: 0;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .inspection-report-document .doc-report-summary-meta > div {
@@ -1082,7 +1150,8 @@
   }
 
   .inspection-report-document .doc-signatures {
-    display: none !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .inspection-report-document .doc-photo-grid {

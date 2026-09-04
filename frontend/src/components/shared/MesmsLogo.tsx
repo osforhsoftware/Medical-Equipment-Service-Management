@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-/** Brand mark served from /public/MESMS.png */
+/** Brand mark served from /public/MESMS.svg */
 const sizeClasses = {
   xs: "h-7 max-w-[5.5rem]",
   sm: "h-8 max-w-[6.5rem]",
@@ -18,7 +18,7 @@ interface MesmsLogoProps {
 export function MesmsLogo({ className, size = "md" }: MesmsLogoProps) {
   return (
     <img
-      src="/MESMS.png"
+      src="/MESMS.svg"
       alt="MESMS — Medical Equipment Service Management"
       className={cn("w-auto shrink-0 object-contain object-left", sizeClasses[size], className)}
     />

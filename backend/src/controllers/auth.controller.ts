@@ -1,5 +1,6 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { authService } from "@/services/auth.service";
+import { signToken } from "@/middleware/auth";
 import { success } from "@/utils/response";
 import { clearAuthCookie, setAuthCookie } from "@/utils/authCookie";
 
@@ -8,7 +9,7 @@ export class AuthController {
     try {
       const { username, password } = req.body;
       const result = await authService.login(username, password);
-      setAuthCookie(res, result.token);
+      setAuthCookie(req, res, result.token);
       res.json(success("Login successful", { user: result.user }));
     } catch (err) {
       next(err);
@@ -18,6 +19,22 @@ export class AuthController {
   async logout(_req: Request, res: Response) {
     clearAuthCookie(res);
     res.json(success("Logged out successfully", null));
+  }
+
+  async refresh(req: Request, res: Response) {
+    const user = req.user!;
+    setAuthCookie(
+      req,
+      res,
+      signToken({
+        userId: user.userId,
+        tenantId: user.tenantId,
+        role: user.role,
+        email: user.email,
+        name: user.name,
+      }),
+    );
+    res.json(success("Session refreshed", null));
   }
 
   async me(req: Request, res: Response, next: NextFunction) {

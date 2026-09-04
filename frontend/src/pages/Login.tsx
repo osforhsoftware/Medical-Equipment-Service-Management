@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { ArrowRight, ShieldCheck, Boxes, FileText, Loader2 } from "lucide-react";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/AuthContext";
 import { useFormValidation } from "@/hooks/useFormValidation";
-import { api } from "@/lib/api";
+import { api, consumeSessionExpiredNotice } from "@/lib/api";
 import { fieldRules } from "@/lib/formValidation";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -44,6 +44,12 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [resetToken, setResetToken] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [sessionNotice, setSessionNotice] = useState(false);
+
+  useEffect(() => {
+    if (loading) return;
+    if (consumeSessionExpiredNotice()) setSessionNotice(true);
+  }, [loading]);
 
   const loginValidation = useFormValidation({
     fieldOrder: ["username", "password"],
@@ -92,7 +98,12 @@ export default function Login() {
       toast.success("Signed in successfully", { id: loadingId, force: true });
       navigate(homeForRole(loggedInUser.role));
     } catch (err) {
-      toast.apiError(err, { id: loadingId, fallback: "Unable to sign in. Check your credentials.", force: true });
+      toast.apiError(err, {
+        id: loadingId,
+        fallback: "Unable to sign in. Check your credentials.",
+        force: true,
+        authForm: true,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -196,6 +207,11 @@ export default function Login() {
           <div className="mb-8 lg:hidden">
             <MesmsLogo size="lg" className="mb-4" />
             <h1 className="text-2xl font-semibold tracking-tight">Welcome to MESMS</h1>
+            {sessionNotice ? (
+              <p className="mt-3 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
+                Your session ended. Please sign in again.
+              </p>
+            ) : null}
           </div>
 
           <div className="mb-6 hidden lg:block">
@@ -210,6 +226,11 @@ export default function Login() {
                   ? "Enter the email on your account to receive a reset link."
                   : "Enter your reset token and choose a new password."}
             </p>
+            {sessionNotice ? (
+              <p className="mt-3 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
+                Your session ended. Please sign in again.
+              </p>
+            ) : null}
           </div>
 
           {mode === "login" ? (

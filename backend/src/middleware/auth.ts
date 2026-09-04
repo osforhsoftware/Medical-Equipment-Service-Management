@@ -3,7 +3,7 @@ import jwt, { type SignOptions } from "jsonwebtoken";
 import { env } from "@/config/env";
 import type { JwtPayload } from "@/types";
 import { failure } from "@/utils/response";
-import { AUTH_COOKIE_NAME } from "@/utils/authCookie";
+import { AUTH_COOKIE_NAME, authTtlMs, setAuthCookie } from "@/utils/authCookie";
 import { prisma } from "@/db/prisma";
 import { rolesFor, type ApiWritePermission } from "@/config/apiAccess";
 
@@ -62,8 +62,11 @@ export const authenticate = (req: Request, res: Response, next: NextFunction): v
         role: user.role,
         email: user.email,
         name: user.name,
+        exp: payload.exp,
+        iat: payload.iat,
       };
       req.tenantId = user.tenantId;
+      slideAuthCookieIfNeeded(req, res);
       next();
     } catch {
       res.status(401).json(failure("Invalid or expired token"));
@@ -73,7 +76,26 @@ export const authenticate = (req: Request, res: Response, next: NextFunction): v
 
 /** Sign a JWT for a user */
 export const signToken = (payload: JwtPayload): string =>
-  jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN as SignOptions["expiresIn"] });
+  jwt.sign(
+    {
+      userId: payload.userId,
+      tenantId: payload.tenantId,
+      role: payload.role,
+      email: payload.email,
+      name: payload.name,
+    },
+    env.JWT_SECRET,
+    { expiresIn: env.JWT_EXPIRES_IN as SignOptions["expiresIn"] },
+  );
+
+/** Re-issue the auth cookie while the user is still active, before the JWT actually expires. */
+function slideAuthCookieIfNeeded(req: Request, res: Response): void {
+  const user = req.user;
+  if (!user?.exp) return;
+  const remainingMs = user.exp * 1000 - Date.now();
+  if (remainingMs > authTtlMs() / 2) return;
+  setAuthCookie(req, res, signToken(user));
+}
 
 /** Role guard — every protected API action must declare its allowed roles. */
 export const requireRole = (...roles: readonly string[]) =>

@@ -2,7 +2,14 @@
 import { useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createHmrContext } from "@/context/hmrContext";
 import type { AppUser, Role } from "@/data/types";
-import { api, getStoredUser, setStoredUser, type BackendUser } from "@/lib/api";
+import {
+  api,
+  getStoredUser,
+  markSessionActive,
+  setStoredUser,
+  SESSION_EXPIRED_EVENT,
+  type BackendUser,
+} from "@/lib/api";
 import { userHasAnyRole } from "@/lib/userRoles";
 
 interface AuthState {
@@ -15,6 +22,7 @@ interface AuthState {
 }
 
 const AuthContext = createHmrContext<AuthState>("__MESMS_AUTH_CONTEXT__");
+const SESSION_REFRESH_MS = 10 * 60 * 1000;
 
 function mapUser(user: BackendUser): AppUser {
   return {
@@ -48,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const profile = await api.me();
         persist(mapUser(profile));
+        markSessionActive();
       } catch {
         persist(null);
       } finally {
@@ -58,6 +67,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void bootstrap();
   }, []);
 
+  useEffect(() => {
+    const onExpired = () => persist(null);
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      void api.refreshSession().catch(() => {
+        // 401 is handled by the API client session-expired flow
+      });
+    };
+
+    const interval = window.setInterval(refresh, SESSION_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [user]);
+
   const value = useMemo<AuthState>(
     () => ({
       user,
@@ -66,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const result = await api.login(username, password);
         const nextUser = mapUser(result.user);
         persist(nextUser);
+        markSessionActive();
         return nextUser;
       },
       logout: async () => {

@@ -76,7 +76,7 @@ export default function EquipmentDetail() {
       backTo="/app/equipment"
       backLabel="Back to Equipment"
       title={equipment?.name ?? "Equipment"}
-      subtitle={equipment ? `${equipment.assetTag} · ${equipment.customerName}` : undefined}
+      subtitle={equipment ? `${equipment.assetTag}${equipment.customerName ? ` · ${equipment.customerName}` : ""}` : undefined}
       status={equipment ? equipment.condition : undefined}
       statusLabel={equipment ? conditionName : undefined}
       actions={canManage && equipment ? (
@@ -109,12 +109,12 @@ export default function EquipmentDetail() {
                   { label: "Model", value: equipment.model },
                   { label: "Category", value: categoryName },
                   { label: "Serial no.", value: equipment.serialNumber },
-                  { label: "Location", value: equipment.location },
-                  { label: "Customer", value: (
+                  { label: "Location", value: equipment.location || "—" },
+                  { label: "Customer", value: equipment.customerId ? (
                     <Link className="text-primary hover:underline normal-case" to={`/app/customers/${equipment.customerId}`}>
                       {equipment.customerName}
                     </Link>
-                  ) },
+                  ) : (equipment.customerName || "—") },
                   { label: "Installed", value: formatDate(equipment.installDate) },
                   { label: "Warranty ends", value: formatDate(equipment.warrantyEnd) },
                   { label: "Last service", value: formatDate(equipment.lastServiceDate) },

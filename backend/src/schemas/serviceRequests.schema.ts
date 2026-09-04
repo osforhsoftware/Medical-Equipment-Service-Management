@@ -32,6 +32,8 @@ export const createServiceRequestSchema = z
     description: z.string().trim().max(500).optional().default(""),
     assignedTo: z.string().min(1).optional(),
     assignedName: z.string().optional(),
+    /** Create intake only supports Inspection Technician → Inspection flow. */
+    role: z.literal("inspector").optional(),
     slaDue: z.string().optional(),
   })
   .superRefine((data, ctx) => {
@@ -42,15 +44,35 @@ export const createServiceRequestSchema = z
         message: "Please specify the service type",
       });
     }
+    if (data.role && data.role !== "inspector") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["role"],
+        message: "On create, only an Inspection Technician can be assigned",
+      });
+    }
   });
 
 export const updateServiceRequestSchema = z.object({
   status: z.enum(TICKET_STATUS_VALUES).optional(),
   priority: z.enum(["low", "medium", "high", "critical"]).optional(),
+  type: z.preprocess(
+    (value) => (value === "" || value == null ? undefined : value),
+    z.enum(["Repair", "Maintenance", "Calibration", "Inspection", "Installation", "Other"]).optional().nullable(),
+  ),
+  typeOther: z.string().trim().max(100).optional().nullable(),
   assignedTo: z.string().nullable().optional(),
   assignedName: z.string().nullable().optional(),
   description: z.string().trim().max(500).optional(),
   timelineNote: z.string().trim().max(1000).optional(),
+}).superRefine((data, ctx) => {
+  if (data.type === "Other" && !data.typeOther?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["typeOther"],
+      message: "Please specify the service type",
+    });
+  }
 });
 
 export const assignServiceRequestSchema = z.object({

@@ -60,6 +60,8 @@ const canRead = requireRole(
 
   "billing",
 
+  "sales",
+
 );
 
 

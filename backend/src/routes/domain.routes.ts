@@ -39,11 +39,11 @@ router.use(authenticate, resolveTenant);
 const operations = requireRole("admin", "coordinator");
 const inventory = requireRole("admin", "inventory");
 const finance = requireRole("admin", "billing");
-const serviceBilling = requireRole("admin", "billing", "estimator");
+const serviceBilling = requireRole("admin", "billing");
 const documentRole = (req: Request, res: Response, next: NextFunction) => {
   const permissions: Record<string, string[]> = {
     estimate: ["admin", "coordinator", "estimator", "billing"],
-    invoice: ["admin", "billing", "estimator", "sales"],
+    invoice: ["admin", "billing", "sales"],
     "service-report": ["admin", "coordinator", "engineer"],
     "inspection-report": ["admin", "coordinator", "inspector", "estimator", "billing"],
   };
@@ -65,6 +65,8 @@ router.post("/jobs/:id/assignments", operations, validate(jobAssignmentSchema), 
 router.post("/jobs/:id/work-logs", requireRole("admin", "coordinator", "engineer"), validate(workLogSchema), c.workLog);
 router.post("/jobs/:id/extras", requireRole("admin", "coordinator", "engineer"), validate(jobExtraSchema), c.jobExtra);
 router.post("/job-extras/:id/approve", requireRole("admin", "coordinator"), c.approveJobExtra);
+router.patch("/job-extras/:id", requireRole("admin", "coordinator", "engineer"), validate(jobExtraSchema), c.updateJobExtra);
+router.delete("/job-extras/:id", requireRole("admin", "coordinator", "engineer"), c.deleteJobExtra);
 
 router.get("/stock/reservations", inventory, c.reservations);
 router.post("/stock/reservations/:id/action", inventory, validate(reservationActionSchema), c.reservationAction);
@@ -85,7 +87,7 @@ router.post("/purchase-returns", inventory, validate(createPurchaseReturnSchema)
 router.get("/purchase-returns/:id", inventory, c.purchaseReturnById);
 
 router.post("/invoices/from-job", serviceBilling, validate(invoiceFromJobSchema), c.invoiceFromJob);
-router.post("/invoices/:id/payments", requireRole("admin", "billing", "estimator", "sales"), validate(paymentSchema), c.payment);
+router.post("/invoices/:id/payments", requireRole("admin", "billing", "sales"), validate(paymentSchema), c.payment);
 router.post("/documents/:kind/:id", documentRole, c.documentGenerate);
 router.post("/service-tickets/:id/finish", requireRole("admin", "coordinator", "billing"), c.finishTicket);
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { Plus, ChevronDown, Loader2, X } from "lucide-react";
+import { Plus, ChevronDown, Loader2, Pencil, Trash2, X } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -33,6 +33,7 @@ import { useAuth } from "@/context/AuthContext";
 import { TICKET_CREATE_ROLES } from "@/config/roles";
 import {
   api,
+  type BackendServiceRequest,
   type BackendUser,
 } from "@/lib/api";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
@@ -80,10 +81,22 @@ const columns = [
 const ALL_KANBAN_STATUSES = columns.flatMap((col) => col.statuses).join(",");
 const KANBAN_PAGE_SIZE = 10;
 
-const ASSIGNABLE_ROLES: Role[] = ["coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
+/** Create-time assignment is intake only — Inspection Technician → Inspection flow. */
+const CREATE_ASSIGN_ROLE: Role = "inspector";
 
 const schema = z.object({
   customerId: z.string().min(1, "Select a customer"),
+  type: z.string().optional(),
+  typeOther: z.string().optional(),
+  priority: z.string().min(1, "Select priority"),
+  description: z.string().trim().max(500),
+}).superRefine((data, ctx) => {
+  if (data.type === "Other" && !data.typeOther?.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["typeOther"], message: "Please specify the service type" });
+  }
+});
+
+const editSchema = z.object({
   type: z.string().optional(),
   typeOther: z.string().optional(),
   priority: z.string().min(1, "Select priority"),
@@ -104,12 +117,20 @@ function TicketColumn({
   statuses,
   overdueOnly,
   count,
+  canEdit,
+  canDelete,
+  onEdit,
+  onDelete,
 }: {
   columnKey: string;
   label: string;
   statuses: readonly string[];
   overdueOnly: boolean;
   count: number;
+  canEdit: boolean;
+  canDelete: boolean;
+  onEdit: (ticket: BackendServiceRequest) => void;
+  onDelete: (ticket: BackendServiceRequest) => void;
 }) {
   const navigate = useNavigate();
   const query = useInfiniteQuery({
@@ -159,9 +180,43 @@ function TicketColumn({
                 onClick={() => navigate(`/app/service-tickets/${r.id}`)}
                 className="cursor-pointer space-y-2 p-3 hover:bg-muted/40"
               >
-                <div className="flex items-center justify-between">
+                <div className="flex items-start justify-between gap-2">
                   <span className="font-mono text-xs text-muted-foreground">{r.reference}</span>
-                  <StatusBadge status={r.priority} />
+                  <div className="flex items-center gap-1">
+                    <StatusBadge status={r.priority} />
+                    {canEdit || canDelete ? (
+                      <div
+                        className="flex items-center"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        {canEdit ? (
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            aria-label={`Edit ${r.reference}`}
+                            onClick={() => onEdit(r)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        ) : null}
+                        {canDelete ? (
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                            aria-label={`Delete ${r.reference}`}
+                            onClick={() => onDelete(r)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
                 <p className="line-clamp-2 text-sm font-medium leading-snug">{allEquip}</p>
                 <p className="text-xs text-muted-foreground">{r.customerName}</p>
@@ -201,7 +256,10 @@ export default function ServiceRequests() {
   const [searchParams] = useSearchParams();
   const overdueOnly = searchParams.get("filter") === "overdue";
   const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingTicket, setEditingTicket] = useState<BackendServiceRequest | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Create form
   const [form, setForm] = useState({
@@ -210,14 +268,19 @@ export default function ServiceRequests() {
     typeOther: "",
     priority: "",
     description: "",
-    assignRole: "" as Role | "",
+  });
+  const [editForm, setEditForm] = useState({
+    type: "",
+    typeOther: "",
+    priority: "",
+    description: "",
   });
   const [selectedEquipIds, setSelectedEquipIds] = useState<string[]>([]);
-  const [assignRole, setAssignRole] = useState<Role | "">("");
-  const [staffByRole, setStaffByRole] = useState<BackendUser[]>([]);
+  const [inspectors, setInspectors] = useState<BackendUser[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<BackendUser | null>(null);
   const [loadingStaff, setLoadingStaff] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const editDialogRef = useRef<HTMLDivElement>(null);
   const {
     errors,
     shouldShow,
@@ -227,7 +290,6 @@ export default function ServiceRequests() {
     handleChange,
     applyApiErrors,
     clearError,
-    setErrors,
   } = useFormValidation({
     fieldOrder: [
       "customerId",
@@ -240,8 +302,14 @@ export default function ServiceRequests() {
     ],
     schema,
   });
+  const editValidation = useFormValidation({
+    fieldOrder: ["type", "typeOther", "priority", "description"],
+    schema: editSchema,
+  });
 
   const canCreate = hasRole(TICKET_CREATE_ROLES);
+  const canEdit = hasRole(TICKET_CREATE_ROLES);
+  const canDelete = hasRole(TICKET_CREATE_ROLES);
 
   const customersQuery = useQuery({
     queryKey: ["customers", "options"],
@@ -278,27 +346,20 @@ export default function ServiceRequests() {
     );
   };
 
-  // Load staff when assignRole changes (create form)
+  // Load inspection technicians when the create dialog opens
   useEffect(() => {
-    if (!assignRole) {
-      setStaffByRole([]);
-      setSelectedStaff(null);
-      return;
-    }
+    if (!open) return;
     setLoadingStaff(true);
-    api.listUsers({ role: assignRole, isActive: true })
-      .then(setStaffByRole)
-      .catch(() => setStaffByRole([]))
+    api.listUsers({ role: CREATE_ASSIGN_ROLE, isActive: true })
+      .then(setInspectors)
+      .catch(() => setInspectors([]))
       .finally(() => setLoadingStaff(false));
-  }, [assignRole]);
+  }, [open]);
 
   const submit = async () => {
     const extraErrors: Record<string, string> = {};
     if (selectedEquipIds.length === 0) {
       extraErrors.equipment = "Select at least one equipment item.";
-    }
-    if (assignRole && !selectedStaff) {
-      extraErrors.assignedStaff = "Select a staff member or clear the role.";
     }
 
     if (!validateAll(form, extraErrors, dialogRef.current)) return;
@@ -316,10 +377,18 @@ export default function ServiceRequests() {
         description: parsed.data.description,
         equipmentIds: selectedEquipIds,
         ...(selectedStaff
-          ? { assignedTo: selectedStaff.id, assignedName: selectedStaff.name }
+          ? {
+              assignedTo: selectedStaff.id,
+              assignedName: selectedStaff.name,
+              role: CREATE_ASSIGN_ROLE,
+            }
           : {}),
       });
-      toast.success("Service request created", { description: "Request added to the New column." });
+      toast.success("Service request created", {
+        description: selectedStaff
+          ? "Ticket is in New and ready for the Inspection flow."
+          : "Ticket added to New. Assign an inspection technician when ready, or rely on auto-assign.",
+      });
       resetValidation();
       setOpen(false);
       resetCreateForm();
@@ -334,12 +403,64 @@ export default function ServiceRequests() {
   };
 
   const resetCreateForm = () => {
-    setForm({ customerId: "", type: "", typeOther: "", priority: "", description: "", assignRole: "" });
+    setForm({ customerId: "", type: "", typeOther: "", priority: "", description: "" });
     setSelectedEquipIds([]);
-    setAssignRole("");
     setSelectedStaff(null);
-    setStaffByRole([]);
     resetValidation();
+  };
+
+  const openEditTicket = (ticket: BackendServiceRequest) => {
+    setEditingTicket(ticket);
+    setEditForm({
+      type: ticket.type ?? "",
+      typeOther: ticket.typeOther ?? "",
+      priority: ticket.priority,
+      description: ticket.description ?? "",
+    });
+    editValidation.reset();
+    setEditOpen(true);
+  };
+
+  const submitEdit = async () => {
+    if (!editingTicket) return;
+    if (!editValidation.validateAll(editForm, undefined, editDialogRef.current)) return;
+    const parsed = editSchema.safeParse(editForm);
+    if (!parsed.success) return;
+
+    setSaving(true);
+    try {
+      await api.updateServiceRequest(editingTicket.id, {
+        type: parsed.data.type || null,
+        typeOther: parsed.data.type === "Other" ? parsed.data.typeOther?.trim() || null : null,
+        priority: parsed.data.priority,
+        description: parsed.data.description,
+      });
+      toast.success("Ticket updated");
+      setEditOpen(false);
+      setEditingTicket(null);
+      editValidation.reset();
+      await queryClient.invalidateQueries({ queryKey: ["service-requests"] });
+    } catch (err) {
+      if (!editValidation.applyApiErrors(err, editDialogRef.current)) {
+        toast.apiError(err, { fallback: "Unable to update ticket" });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteTicket = async (ticket: BackendServiceRequest) => {
+    if (!window.confirm(`Delete ticket ${ticket.reference}? This cannot be undone.`)) return;
+    setDeletingId(ticket.id);
+    try {
+      await api.deleteServiceRequest(ticket.id);
+      toast.success("Ticket deleted", { description: ticket.reference });
+      await queryClient.invalidateQueries({ queryKey: ["service-requests"] });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to delete ticket" });
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const filteredEquipment = equipment.filter((e) => !form.customerId || e.customerId === form.customerId);
@@ -379,6 +500,10 @@ export default function ServiceRequests() {
               statuses={col.statuses}
               overdueOnly={overdueOnly}
               count={sumStatusCounts(statusCounts, col.statuses)}
+              canEdit={canEdit}
+              canDelete={canDelete}
+              onEdit={openEditTicket}
+              onDelete={(ticket) => void deleteTicket(ticket)}
             />
           ))}
         </div>
@@ -587,73 +712,65 @@ export default function ServiceRequests() {
               {shouldShow("description") && <FormFieldError field="description" message={errors.description} />}
             </div>
 
-            {/* Role-based assignment */}
+            {/* Intake → Inspection flow only (no direct engineer/estimator assign on create) */}
             <div className="rounded-lg border border-border p-3 space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Assign Work <span className="font-normal normal-case text-muted-foreground">(optional — assign later if needed)</span>
+                Assign Inspection Technician{" "}
+                <span className="font-normal normal-case text-muted-foreground">
+                  (optional — starts Inspection flow; assign later if needed)
+                </span>
               </p>
-              <div className="grid gap-2">
-                <Label>Select Role</Label>
-                <Select
-                  value={assignRole}
-                  onValueChange={(v) => {
-                    setAssignRole(v as Role);
-                    setSelectedStaff(null);
-                    setErrors((e) => ({ ...e, assignRole: "", assignedStaff: "" }));
-                  }}
-                >
-                  <SelectTrigger><SelectValue placeholder="Choose a role…" /></SelectTrigger>
-                  <SelectContent>
-                    {ASSIGNABLE_ROLES.map((r) => (
-                      <SelectItem key={r} value={r}>{roleLabels[r]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {errors.assignRole && <p className="text-xs text-destructive">{errors.assignRole}</p>}
-              </div>
-              {assignRole && (
-                <div className="grid gap-2" data-field="assignedStaff">
-                  <Label className={shouldShow("assignedStaff") ? "text-destructive" : undefined}>
-                    Assign to — {roleLabels[assignRole as Role]}
-                    <RequiredMark />
-                  </Label>
-                  {loadingStaff ? (
-                    <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading staff…
-                    </div>
-                  ) : staffByRole.length === 0 ? (
-                    <p className="text-xs text-muted-foreground py-1">No active staff for this role.</p>
-                  ) : (
-                    <Select
-                      value={selectedStaff?.id ?? ""}
-                      onValueChange={(v) => {
-                        const staff = staffByRole.find((s) => s.id === v) ?? null;
-                        setSelectedStaff(staff);
+              <p className="text-xs text-muted-foreground">
+                New tickets go to Inspection first. Estimate and engineer assignment happen in later steps.
+              </p>
+              <div className="grid gap-2" data-field="assignedStaff">
+                <Label className={shouldShow("assignedStaff") ? "text-destructive" : undefined}>
+                  {roleLabels[CREATE_ASSIGN_ROLE]}
+                </Label>
+                {loadingStaff ? (
+                  <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading staff…
+                  </div>
+                ) : inspectors.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-1">
+                    No active inspection technicians. Leave blank to use auto-assign, or add one in Users.
+                  </p>
+                ) : (
+                  <Select
+                    value={selectedStaff?.id ?? "__unassigned__"}
+                    onValueChange={(v) => {
+                      if (!v || v === "__unassigned__") {
+                        setSelectedStaff(null);
                         clearError("assignedStaff");
-                      }}
+                        return;
+                      }
+                      const staff = inspectors.find((s) => s.id === v) ?? null;
+                      setSelectedStaff(staff);
+                      clearError("assignedStaff");
+                    }}
+                  >
+                    <SelectTrigger
+                      id="assignedStaff"
+                      className={fieldErrorClass(shouldShow("assignedStaff"))}
+                      {...fieldAria(
+                        "assignedStaff",
+                        shouldShow("assignedStaff") ? errors.assignedStaff : null,
+                      )}
                     >
-                      <SelectTrigger
-                        id="assignedStaff"
-                        className={fieldErrorClass(shouldShow("assignedStaff"))}
-                        {...fieldAria(
-                          "assignedStaff",
-                          shouldShow("assignedStaff") ? errors.assignedStaff : null,
-                        )}
-                      >
-                        <SelectValue placeholder="Select staff member" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {staffByRole.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  {shouldShow("assignedStaff") && (
-                    <FormFieldError field="assignedStaff" message={errors.assignedStaff} />
-                  )}
-                </div>
-              )}
+                      <SelectValue placeholder="Select inspection technician (or leave blank)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__unassigned__">Unassigned (assign later)</SelectItem>
+                      {inspectors.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {shouldShow("assignedStaff") && (
+                  <FormFieldError field="assignedStaff" message={errors.assignedStaff} />
+                )}
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -661,6 +778,133 @@ export default function ServiceRequests() {
             <Button onClick={submit} disabled={saving} variant="brand">
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Create Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Dialog ── */}
+      <Dialog
+        open={editOpen}
+        onOpenChange={(o) => {
+          if (!o) {
+            setEditingTicket(null);
+            editValidation.reset();
+          }
+          setEditOpen(o);
+        }}
+      >
+        <DialogContent ref={editDialogRef} className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit ticket</DialogTitle>
+            <DialogDescription>
+              {editingTicket
+                ? `Update type, priority, or description for ${editingTicket.reference}.`
+                : "Update ticket details."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2" data-field="type">
+                <Label>Type</Label>
+                <Select
+                  value={editForm.type || undefined}
+                  onValueChange={(v) => {
+                    const next = { ...editForm, type: v, typeOther: v === "Other" ? editForm.typeOther : "" };
+                    setEditForm(next);
+                    editValidation.clearError("type");
+                    if (v !== "Other") editValidation.clearError("typeOther");
+                    editValidation.handleChange("type", next);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SERVICE_TYPE_OPTIONS.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2" data-field="priority">
+                <Label className={editValidation.shouldShow("priority") ? "text-destructive" : undefined}>
+                  Priority
+                  <RequiredMark />
+                </Label>
+                <Select
+                  value={editForm.priority}
+                  onValueChange={(v) => {
+                    const next = { ...editForm, priority: v };
+                    setEditForm(next);
+                    editValidation.clearError("priority");
+                    editValidation.handleChange("priority", next);
+                  }}
+                >
+                  <SelectTrigger
+                    className={fieldErrorClass(editValidation.shouldShow("priority"))}
+                    {...fieldAria("priority", editValidation.shouldShow("priority") ? editValidation.errors.priority : null)}
+                  >
+                    <SelectValue placeholder="Priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["low", "medium", "high", "critical"].map((p) => (
+                      <SelectItem key={p} value={p} className="capitalize">{p}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {editValidation.shouldShow("priority") && (
+                  <FormFieldError field="priority" message={editValidation.errors.priority} />
+                )}
+              </div>
+            </div>
+            {editForm.type === "Other" && (
+              <div className="grid gap-2" data-field="typeOther">
+                <Label className={editValidation.shouldShow("typeOther") ? "text-destructive" : undefined}>
+                  Specify type
+                  <RequiredMark />
+                </Label>
+                <Input
+                  value={editForm.typeOther}
+                  onChange={(e) => {
+                    const next = { ...editForm, typeOther: e.target.value };
+                    setEditForm(next);
+                    editValidation.handleChange("typeOther", next);
+                  }}
+                  onBlur={() => editValidation.handleBlur("typeOther", editForm)}
+                  className={fieldErrorClass(editValidation.shouldShow("typeOther"))}
+                  {...fieldAria("typeOther", editValidation.shouldShow("typeOther") ? editValidation.errors.typeOther : null)}
+                  placeholder="e.g. Relocation, Decommission"
+                />
+                {editValidation.shouldShow("typeOther") && (
+                  <FormFieldError field="typeOther" message={editValidation.errors.typeOther} />
+                )}
+              </div>
+            )}
+            <div className="grid gap-2" data-field="description">
+              <Label>Description</Label>
+              <Textarea
+                value={editForm.description}
+                onChange={(e) => {
+                  const next = { ...editForm, description: e.target.value.slice(0, 500) };
+                  setEditForm(next);
+                  editValidation.handleChange("description", next);
+                }}
+                onBlur={() => editValidation.handleBlur("description", editForm)}
+                className={fieldErrorClass(editValidation.shouldShow("description"))}
+                {...fieldAria("description", editValidation.shouldShow("description") ? editValidation.errors.description : null)}
+                rows={3}
+              />
+              {editValidation.shouldShow("description") && (
+                <FormFieldError field="description" message={editValidation.errors.description} />
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button onClick={() => void submitEdit()} disabled={saving || Boolean(deletingId)} variant="brand">
+              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Save changes
             </Button>
           </DialogFooter>
         </DialogContent>

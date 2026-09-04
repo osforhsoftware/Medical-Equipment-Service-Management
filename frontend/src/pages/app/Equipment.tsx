@@ -101,7 +101,7 @@ export default function EquipmentPage() {
         <div>
           <p className="font-medium">{e.name}</p>
           <p className="text-xs text-muted-foreground">
-            {e.manufacturer} · {e.model}
+            {[e.manufacturer, e.model].filter(Boolean).join(" · ") || "—"}
           </p>
         </div>
       ),
@@ -118,7 +118,7 @@ export default function EquipmentPage() {
     {
       key: "customerName",
       header: "Customer",
-      render: (e) => <span className="text-sm">{e.customerName}</span>,
+      render: (e) => <span className="text-sm">{e.customerName || "—"}</span>,
     },
     {
       key: "category",
@@ -128,7 +128,7 @@ export default function EquipmentPage() {
     {
       key: "location",
       header: "Location",
-      render: (e) => <span className="text-sm text-muted-foreground">{e.location}</span>,
+      render: (e) => <span className="text-sm text-muted-foreground">{e.location || "—"}</span>,
     },
     {
       key: "condition",

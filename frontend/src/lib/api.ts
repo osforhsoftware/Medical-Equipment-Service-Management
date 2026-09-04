@@ -15,6 +15,50 @@ import { buildListQuery, EMPTY_PAGINATION_META } from "@/lib/listing";
 const API_BASE = import.meta.env.DEV ? "" : (import.meta.env.VITE_API_URL ?? "");
 
 const USER_KEY = "mesms.user";
+const SESSION_EXPIRED_KEY = "mesms.sessionExpired";
+export const SESSION_EXPIRED_EVENT = "mesms:session-expired";
+
+const PUBLIC_AUTH_PATHS = new Set([
+  "/api/auth/login",
+  "/api/auth/logout",
+  "/api/auth/forgot-password",
+  "/api/auth/reset-password",
+]);
+
+let handlingSessionExpiry = false;
+
+function requestPath(path: string): string {
+  return path.split("?")[0] ?? path;
+}
+
+function isPublicAuthPath(path: string): boolean {
+  return PUBLIC_AUTH_PATHS.has(requestPath(path));
+}
+
+function notifySessionExpired() {
+  if (handlingSessionExpiry) return;
+  const hadUser = getStoredUser() != null;
+  setStoredUser(null);
+  if (!hadUser || typeof window === "undefined") return;
+  handlingSessionExpiry = true;
+  sessionStorage.setItem(SESSION_EXPIRED_KEY, "1");
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+}
+
+export function consumeSessionExpiredNotice(): boolean {
+  if (typeof window === "undefined") return false;
+  const flagged = sessionStorage.getItem(SESSION_EXPIRED_KEY) === "1";
+  if (flagged) sessionStorage.removeItem(SESSION_EXPIRED_KEY);
+  handlingSessionExpiry = false;
+  return flagged;
+}
+
+export function markSessionActive() {
+  handlingSessionExpiry = false;
+  if (typeof window !== "undefined") {
+    sessionStorage.removeItem(SESSION_EXPIRED_KEY);
+  }
+}
 
 export type { PaginatedResult, PaginationMeta };
 
@@ -90,6 +134,13 @@ export function setStoredUser<T>(user: T | null) {
   else localStorage.removeItem(USER_KEY);
 }
 
+function throwApiError(path: string, status: number, message?: string, errors?: string[]): never {
+  if (status === 401 && !isPublicAuthPath(path)) {
+    notifySessionExpired();
+  }
+  throw new ApiError(message || "Request failed", status, errors);
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await rawFetch(path, options);
 
@@ -100,7 +151,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const json = await parseResponse<T>(response);
 
   if (!response.ok || !json.success) {
-    throw new ApiError(json.message || "Request failed", response.status, json.errors);
+    throwApiError(path, response.status, json.message, json.errors);
   }
 
   return json.data as T;
@@ -111,7 +162,7 @@ async function requestPaginated<T>(path: string, options: RequestInit = {}): Pro
   const json = await parseResponse<T[]>(response);
 
   if (!response.ok || !json.success) {
-    throw new ApiError(json.message || "Request failed", response.status, json.errors);
+    throwApiError(path, response.status, json.message, json.errors);
   }
 
   return {
@@ -225,12 +276,12 @@ export interface BackendEquipment {
   manufacturer: string;
   category: string;
   serialNumber: string;
-  customerId: string;
+  customerId: string | null;
   customerName: string;
   branchId: string;
   location: string;
-  installDate: string;
-  warrantyEnd: string;
+  installDate: string | null;
+  warrantyEnd: string | null;
   amcStatus: string;
   condition: string;
   lastServiceDate: string | null;
@@ -283,15 +334,15 @@ export interface UpdateTaxonomyInput {
 export interface CreateEquipmentInput {
   assetTag: string;
   name: string;
-  model: string;
-  manufacturer: string;
-  category: string;
+  model?: string;
+  manufacturer?: string;
+  category?: string;
   serialNumber: string;
-  customerId: string;
+  customerId?: string | null;
   branchId?: string;
-  location: string;
-  installDate: string;
-  warrantyEnd: string;
+  location?: string;
+  installDate?: string | null;
+  warrantyEnd?: string | null;
   amcStatus?: string;
   condition?: string;
   lastServiceDate?: string | null;
@@ -389,12 +440,16 @@ export interface CreateServiceRequestInput {
   description: string;
   assignedTo?: string;
   assignedName?: string;
+  /** Create-time intake role — must be inspector for Inspection flow. */
+  role?: "inspector";
   slaDue?: string;
 }
 
 export interface UpdateServiceRequestInput {
   status?: string;
   priority?: string;
+  type?: string | null;
+  typeOther?: string | null;
   assignedTo?: string | null;
   assignedName?: string | null;
   description?: string;
@@ -784,6 +839,7 @@ export interface BackendJobExtra {
   unitPrice: string | number;
   taxRate: string | number;
   status: string;
+  inventoryItemId?: string | null;
   inventoryItem?: { id: string; name: string; sku: string } | null;
   createdAt: string;
 }
@@ -1438,6 +1494,11 @@ export const api = {
 
   me: () => request<BackendUser>("/api/auth/me"),
 
+  refreshSession: () =>
+    request<null>("/api/auth/refresh", {
+      method: "POST",
+    }),
+
   forgotPassword: (email: string) =>
     request<{ resetToken?: string } | null>("/api/auth/forgot-password", {
       method: "POST",
@@ -1574,6 +1635,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+
+  deleteServiceRequest: (id: string) =>
+    request<void>(`/api/service-requests/${id}`, { method: "DELETE" }),
 
   assignServiceRequest: (id: string, data: AssignServiceRequestInput) =>
     request<BackendServiceRequest>(`/api/service-requests/${id}/assign`, {
@@ -2138,6 +2202,26 @@ export const api = {
 
   approveJobExtra: (id: string) =>
     request<BackendJobExtra>(`/api/domain/job-extras/${id}/approve`, { method: "POST" }),
+
+  updateJobExtra: (
+    id: string,
+    data: {
+      inventoryItemId?: string | null;
+      description: string;
+      type?: "product" | "equipment" | "machine" | "other";
+      reason: string;
+      quantity: number;
+      unitPrice: number;
+      taxRate: number;
+    },
+  ) =>
+    request<BackendJobExtra>(`/api/domain/job-extras/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteJobExtra: (id: string) =>
+    request<void>(`/api/domain/job-extras/${id}`, { method: "DELETE" }),
 
   createItemizedPurchaseOrder: (data: {
     supplierId?: string | null;

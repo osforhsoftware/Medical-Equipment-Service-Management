@@ -62,9 +62,13 @@ const filterRoles: (Role | "all")[] = ["all", "admin", "coordinator", "inspector
 const multiAssignableRoles: Role[] = ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing"];
 
 const roleHints: Partial<Record<Role, string>> = {
-  sales: "Record sales, add service amounts on the sale bill, and bill customers. Estimates stay on service tickets.",
-  estimator: "Create estimates on service tickets and jobs. Separate from product sale billing.",
-  billing: "Service-ticket invoices after jobs complete. Product sale invoices stay on the Sales desk.",
+  sales: "Record sales, bill and download sale invoices, manage customers, and view service tickets. Field ops and admin modules stay with other roles.",
+  estimator: "Build and send service estimates from tickets and the catalog. Invoicing stays with Billing Staff.",
+  billing: "Service-ticket invoices after jobs complete, plus sale invoice billing. Product catalog sales stay on the Sales desk for recording.",
+  inspector: "Run assigned inspections, update tickets, and scan equipment QR. Estimates and warehouse stock are handled by other roles.",
+  engineer: "Execute assigned jobs, request parts, and scan equipment. Estimates and sales are handled by other roles.",
+  inventory: "Manage stock, purchases, transfers, and fulfill sale deliveries.",
+  coordinator: "Own service intake, assignments, jobs, and approvals. Product sales desk stays with Sales Staff.",
 };
 
 type FormState = {

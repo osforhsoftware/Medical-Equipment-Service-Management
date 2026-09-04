@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { Camera, ClipboardList, Loader2, PackageMinus, PlusCircle, Wrench } from "lucide-react";
+import { Camera, ClipboardList, Loader2, PackageMinus, Pencil, PlusCircle, Trash2, Wrench } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PhotoCaptionTile } from "@/components/shared/PhotoCaptionTile";
@@ -31,6 +31,7 @@ import {
   ApiError,
   type BackendInventoryItem,
   type BackendJobActivity,
+  type BackendJobExtra,
   type BackendServiceJob,
   type JobPhotoInput,
 } from "@/lib/api";
@@ -90,6 +91,7 @@ export default function JobDetail() {
   const [error, setError] = useState<string | null>(null);
   const [photosOpen, setPhotosOpen] = useState(false);
   const [partsOpen, setPartsOpen] = useState(false);
+  const [editingExtraId, setEditingExtraId] = useState<string | null>(null);
   const [stockOpen, setStockOpen] = useState(false);
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoCaptions, setPhotoCaptions] = useState<string[]>([]);
@@ -271,6 +273,15 @@ export default function JobDetail() {
     }
   };
 
+  const resetPartsForm = () => {
+    setPartsNote("");
+    setPartsItemId("");
+    setPartsQty(1);
+    setExtraType("product");
+    setEditingExtraId(null);
+    scopeValidation.reset();
+  };
+
   const handleScopeChange = async () => {
     if (!job) return;
     const values = { partsNote };
@@ -281,45 +292,49 @@ export default function JobDetail() {
     setActionSaving(true);
     try {
       const selectedItem = inventory.find((item) => item.id === partsItemId);
-      await api.addJobExtra(job.id, {
-        inventoryItemId: selectedItem?.id,
+      const payload = {
+        inventoryItemId: selectedItem?.id ?? null,
         description: selectedItem?.name ?? partsNote.trim().slice(0, 120),
         type: extraType,
         reason: partsNote.trim(),
         quantity: partsQty,
         unitPrice: Number(selectedItem?.unitCost ?? 0),
         taxRate: 0,
-      });
-      const available = selectedItem ? Math.max(0, selectedItem.inStock - selectedItem.reserved) : 0;
-      if (selectedItem && partsQty > available) {
-        await api.createStockPurchaseRequest({
-          inventoryItemId: selectedItem.id,
-          quantity: partsQty - available,
-          serviceRequestId: job.serviceRequestId,
-          jobId: job.id,
-          note: `Shortage for ${job.reference}: ${partsNote.trim()}`,
-          force: true,
+      };
+
+      if (editingExtraId) {
+        await api.updateJobExtra(editingExtraId, payload);
+        toast({ title: "Parts / scope request updated" });
+      } else {
+        await api.addJobExtra(job.id, payload);
+        const available = selectedItem ? Math.max(0, selectedItem.inStock - selectedItem.reserved) : 0;
+        if (selectedItem && partsQty > available) {
+          await api.createStockPurchaseRequest({
+            inventoryItemId: selectedItem.id,
+            quantity: partsQty - available,
+            serviceRequestId: job.serviceRequestId,
+            jobId: job.id,
+            note: `Shortage for ${job.reference}: ${partsNote.trim()}`,
+            force: true,
+          });
+        }
+        await api.requestJobParts(job.id, partsNote.trim());
+        toast({
+          title: "Parts / scope request submitted",
+          description: selectedItem && partsQty > available
+            ? "The shortage was sent to the service coordinator and purchasing."
+            : "Sent to the service coordinator for approval.",
         });
       }
-      await api.requestJobParts(job.id, partsNote.trim());
-      toast({
-        title: "Parts / scope request submitted",
-        description: selectedItem && partsQty > available
-          ? "The shortage was sent to the service coordinator and purchasing."
-          : "Sent to the service coordinator for approval.",
-      });
-      setPartsNote("");
-      setPartsItemId("");
-      setPartsQty(1);
-      setExtraType("product");
+
+      resetPartsForm();
       setPartsOpen(false);
-      scopeValidation.reset();
       await refreshActivities(job.id);
       const refreshed = await api.getJob(job.id);
       setJob(refreshed);
     } catch (err) {
       if (!scopeValidation.applyApiErrors(err, scopeDialogRef.current)) {
-        toast.apiError(err, { fallback: "Request failed" });
+        toast.apiError(err, { fallback: editingExtraId ? "Unable to update request" : "Request failed" });
       }
     } finally {
       setActionSaving(false);
@@ -327,16 +342,42 @@ export default function JobDetail() {
   };
 
   const openPartsDialog = async () => {
-    setPartsNote("");
-    setPartsItemId("");
-    setPartsQty(1);
-    setExtraType("product");
+    resetPartsForm();
+    setPartsOpen(true);
+    try {
+      setInventory((await api.listInventory({ limit: 100, page: 1 })).data);
+    } catch {
+      setInventory([]);
+    }
+  };
+
+  const openEditExtra = async (item: BackendJobExtra) => {
+    setEditingExtraId(item.id);
+    setPartsNote(item.reason || item.description);
+    setPartsItemId(item.inventoryItemId ?? item.inventoryItem?.id ?? "");
+    setPartsQty(Number(item.quantity) || 1);
+    const type = (item.type || "product") as typeof extraType;
+    setExtraType(ENGINEER_EXTRA_TYPES.some((option) => option.value === type) ? type : "product");
     scopeValidation.reset();
     setPartsOpen(true);
     try {
       setInventory((await api.listInventory({ limit: 100, page: 1 })).data);
     } catch {
       setInventory([]);
+    }
+  };
+
+  const deleteExtra = async (extraId: string) => {
+    if (!window.confirm("Delete this pending parts / scope request?")) return;
+    setActionSaving(true);
+    try {
+      await api.deleteJobExtra(extraId);
+      toast({ title: "Parts / scope request deleted" });
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to delete request" });
+    } finally {
+      setActionSaving(false);
     }
   };
 
@@ -568,15 +609,40 @@ export default function JobDetail() {
                         <div className="flex flex-col items-end gap-2">
                           <StatusBadge status={item.status} />
                           <span className="text-xs font-medium">{formatCurrency(extraLineTotal(item))}</span>
-                          {canReviewExtras && item.status === "pending" ? (
-                            <Button
-                              size="sm"
-                              disabled={actionSaving}
-                              onClick={() => void approveExtra(item.id)}
-                            >
-                              Approve
-                            </Button>
-                          ) : null}
+                          <div className="flex flex-wrap justify-end gap-1.5">
+                            {item.status === "pending" && (canUpdateJob || canReviewExtras) ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={actionSaving}
+                                  onClick={() => void openEditExtra(item)}
+                                >
+                                  <Pencil className="mr-1 h-3.5 w-3.5" />
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-destructive hover:text-destructive"
+                                  disabled={actionSaving}
+                                  onClick={() => void deleteExtra(item.id)}
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  Delete
+                                </Button>
+                              </>
+                            ) : null}
+                            {canReviewExtras && item.status === "pending" ? (
+                              <Button
+                                size="sm"
+                                disabled={actionSaving}
+                                onClick={() => void approveExtra(item.id)}
+                              >
+                                Approve
+                              </Button>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -735,17 +801,15 @@ export default function JobDetail() {
       </Dialog>
 
       <Dialog open={partsOpen} onOpenChange={(open) => {
-        if (!open) {
-          scopeValidation.reset();
-          setPartsNote("");
-          setPartsItemId("");
-          setPartsQty(1);
-          setExtraType("product");
-        }
+        if (!open) resetPartsForm();
         setPartsOpen(open);
       }}>
         <DialogContent ref={scopeDialogRef} className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Request additional products / equipment</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>
+              {editingExtraId ? "Edit additional products / equipment" : "Request additional products / equipment"}
+            </DialogTitle>
+          </DialogHeader>
           <form
             noValidate
             onSubmit={(e) => {
@@ -826,7 +890,7 @@ export default function JobDetail() {
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setPartsOpen(false)}>Cancel</Button>
               <Button type="submit" disabled={actionSaving}>
-                {actionSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit"}
+                {actionSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : editingExtraId ? "Save changes" : "Submit"}
               </Button>
             </DialogFooter>
           </form>

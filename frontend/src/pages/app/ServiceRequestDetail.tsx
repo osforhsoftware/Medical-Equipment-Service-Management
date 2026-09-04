@@ -195,9 +195,10 @@ export default function ServiceRequestDetail() {
       assignValidation.reset();
       toast({
         title: "Staff assigned",
-        description: assignRole === "estimator" && request.status === "inspection"
-          ? `${assignTarget!.name} assigned. Ticket moved to Estimate.`
-          : assignTarget!.name,
+        description:
+          assignRole === "estimator" && updated.status === "estimate"
+            ? `${assignTarget!.name} assigned. Ticket moved to Estimate.`
+            : assignTarget!.name,
       });
       setTimeline(await api.getServiceRequestTimeline(request.id));
     } catch (err) {

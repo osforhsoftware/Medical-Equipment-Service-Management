@@ -28,9 +28,10 @@ type UpdateSettingsData = {
   rbacMatrix?: Record<string, string[]>;
 };
 
-function ensureRole(matrix: Record<string, string[]>, module: string, role: string) {
+function stripRole(matrix: Record<string, string[]>, module: string, role: string) {
   const roles = matrix[module] ?? [];
-  if (!roles.includes(role)) matrix[module] = [...roles, role];
+  if (!roles.includes(role)) return;
+  matrix[module] = roles.filter((entry) => entry !== role);
 }
 
 function normalizeRbac(raw: unknown): Record<string, string[]> {
@@ -41,21 +42,13 @@ function normalizeRbac(raw: unknown): Record<string, string[]> {
     if (Array.isArray(matrix[key])) merged[key] = matrix[key];
   }
 
-  const estimates = merged.Estimates ?? [];
-  const legacyEstimateRoles = ["admin", "coordinator", "estimator", "billing"];
-  const isLegacyEstimates =
-    estimates.length === legacyEstimateRoles.length &&
-    legacyEstimateRoles.every((role) => estimates.includes(role));
-  if (isLegacyEstimates) {
-    merged.Estimates = [...DEFAULT_RBAC_MATRIX.Estimates];
-  }
-
   const customers = merged.Customers ?? [];
   if (!customers.includes("estimator") && DEFAULT_RBAC_MATRIX.Customers.includes("estimator")) {
     merged.Customers = [...customers, "estimator"];
   }
 
-  const salesModules = ["Dashboard", "Sales", "Customers", "Notifications", "Reports"] as const;
+  // Sales desk: product sales, customers, ticket visibility — not ops/admin reports.
+  const salesModules = ["Dashboard", "Sales", "Customers", "Notifications", "Service Tickets", "Service Requests"] as const;
   for (const module of salesModules) {
     if (!DEFAULT_RBAC_MATRIX[module]?.includes("sales")) continue;
     const roles = merged[module] ?? [];
@@ -63,8 +56,22 @@ function normalizeRbac(raw: unknown): Record<string, string[]> {
     merged[module] = module === "Sales" ? [...roles.filter((role) => role !== "estimator"), "sales"] : [...roles, "sales"];
   }
 
-  if (DEFAULT_RBAC_MATRIX.Billing.includes("estimator")) {
-    ensureRole(merged, "Billing", "estimator");
+  // Drop legacy over-grants so existing tenant matrices match the lean role desks.
+  const prune: Array<[string, string]> = [
+    ["Reports", "sales"],
+    ["Sales", "coordinator"],
+    ["Estimates", "inspector"],
+    ["Estimates", "engineer"],
+    ["Billing", "estimator"],
+    ["Projects", "engineer"],
+    ["Inventory", "inspector"],
+    ["Inventory Items", "inspector"],
+    ["Stock Purchase Requests", "inspector"],
+  ];
+  for (const [module, role] of prune) {
+    if (!DEFAULT_RBAC_MATRIX[module]?.includes(role)) {
+      stripRole(merged, module, role);
+    }
   }
 
   return merged;

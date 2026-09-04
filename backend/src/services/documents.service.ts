@@ -74,6 +74,16 @@ function displayValue(value: unknown) {
 }
 
 export class DocumentsService {
+  private async resolveReporterName(tenantId: string, reportedBy: string): Promise<string> {
+    const value = displayValue(reportedBy);
+    if (!value) return "";
+    const user = await prisma.user.findFirst({
+      where: { tenantId, id: value },
+      select: { name: true },
+    });
+    return user?.name?.trim() || value;
+  }
+
   private async header(
     doc: PDFKit.PDFDocument,
     tenantId: string,
@@ -132,12 +142,13 @@ export class DocumentsService {
           { label: `${title} No`, value: reference },
         ];
 
-    doc.fillColor(INK).font("Helvetica-Bold").fontSize(24).text(title.toUpperCase(), 330, headerTop, {
-      width: WIDTH - 280,
+    const titleX = 300;
+    const titleWidth = RIGHT - titleX;
+    doc.fillColor(INK).font("Helvetica-Bold").fontSize(16).text(title.toUpperCase(), titleX, headerTop, {
+      width: titleWidth,
       align: "right",
-      lineBreak: false,
     });
-    let metaY = headerTop + 32;
+    let metaY = Math.max(headerTop + 26, doc.y + 4);
     for (const row of metaRows) {
       doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text(`${row.label}:`, 360, metaY, {
         width: 78,
@@ -447,10 +458,15 @@ export class DocumentsService {
 
   private sectionHeading(doc: PDFKit.PDFDocument, title: string) {
     this.ensureSpace(doc, 36);
-    doc.fillColor(ACCENT).font("Helvetica-Bold").fontSize(9).text(title.toUpperCase(), LEFT, doc.y);
+    doc.x = LEFT;
+    doc.fillColor(ACCENT).font("Helvetica-Bold").fontSize(9).text(title.toUpperCase(), LEFT, doc.y, {
+      width: WIDTH,
+    });
+    doc.x = LEFT;
     doc.moveDown(0.3);
     doc.moveTo(LEFT, doc.y).lineTo(RIGHT, doc.y).lineWidth(0.5).strokeColor(RULE).stroke();
     doc.moveDown(0.6);
+    doc.x = LEFT;
     doc.fillColor(INK);
   }
 
@@ -486,10 +502,12 @@ export class DocumentsService {
 
   private bodyParagraph(doc: PDFKit.PDFDocument, text: string) {
     this.ensureSpace(doc, 24);
-    doc.fillColor(INK).font("Helvetica").fontSize(9).text(text || " ", {
+    doc.x = LEFT;
+    doc.fillColor(INK).font("Helvetica").fontSize(9).text(text || " ", LEFT, doc.y, {
       width: WIDTH,
       align: "left",
     });
+    doc.x = LEFT;
     doc.moveDown(0.5);
   }
 
@@ -797,12 +815,13 @@ export class DocumentsService {
       const split = splitInspectionFindings(report.findings);
       const customer = sr.customer;
       const siteAddress = [customer?.address, customer?.city, customer?.country].filter(Boolean).join(", ");
+      const inspectorName = await this.resolveReporterName(tenantId, report.reportedBy);
 
       await this.header(doc, tenantId, "Inspection Report", reference);
       this.keyValueRows(doc, [
         { label: "Severity", value: report.severity.toUpperCase() },
         { label: "Inspection date", value: fmtDateTime(report.reportedAt) },
-        { label: "Inspector", value: report.reportedBy },
+        { label: "Inspector", value: inspectorName },
         { label: "Status", value: reportStatus },
       ]);
 
@@ -892,7 +911,7 @@ export class DocumentsService {
         this.bodyParagraph(doc, report.technicianRemarks);
       }
 
-      this.inspectionSignatures(doc, report.reportedBy, company);
+      this.inspectionSignatures(doc, inspectorName, company);
       kindLabel = "Inspection Report";
     } else {
       throw new AppError("Unsupported document kind", 400);

@@ -31,12 +31,16 @@ type CreateServiceRequestData = {
   description?: string;
   assignedTo?: string;
   assignedName?: string;
+  /** Create intake: inspector only (Inspection flow). */
+  role?: "inspector";
   slaDue?: string;
 };
 
 type UpdateServiceRequestData = {
   status?: string;
   priority?: string;
+  type?: string | null;
+  typeOther?: string | null;
   assignedTo?: string | null;
   assignedName?: string | null;
   description?: string;
@@ -350,7 +354,7 @@ export class ServiceRequestsService {
     for (const eqId of equipIds) {
       const equip = await equipmentRepository.findById(eqId, tenantId);
       if (!equip) throw new AppError(`Equipment ${eqId} not found`, 404);
-      if (equip.customerId !== customer.id) {
+      if (equip.customerId && equip.customerId !== customer.id) {
         throw new AppError("All selected equipment must belong to the selected customer", 400);
       }
       const label = `${equip.name} (${equip.model})`;
@@ -363,7 +367,6 @@ export class ServiceRequestsService {
     }
 
     let assignedInspectorId: string | undefined;
-    let assignedEstimatorId: string | undefined;
     if (!data.assignedTo) {
       const defaultInspector = await ticketAssignmentService.defaultInspectorOnCreate(tenantId);
       if (defaultInspector) {
@@ -372,14 +375,21 @@ export class ServiceRequestsService {
         assignedInspectorId = defaultInspector.id;
       }
     } else {
+      // Create Request is Stage 1 intake only — assign Inspection Technician, then Inspection flow.
+      // Do not allow direct assign to estimator/engineer/etc. (those happen in later steps).
+      if (data.role && data.role !== "inspector") {
+        throw new AppError("On create, only an Inspection Technician can be assigned", 400);
+      }
       const assignee = await this.validateAssignee(data.assignedTo, tenantId);
       data.assignedName = assignee.name;
-      if (await userHasAnyRoleKey(assignee.id, tenantId, assignee.role, ["inspector"])) {
-        assignedInspectorId = assignee.id;
+      const isInspector = await userHasAnyRoleKey(assignee.id, tenantId, assignee.role, ["inspector"]);
+      if (!isInspector) {
+        throw new AppError(
+          "Create Request can only assign an Inspection Technician. Use Assign / Reassign after inspection for estimate or engineer staff.",
+          400,
+        );
       }
-      if (await userHasAnyRoleKey(assignee.id, tenantId, assignee.role, ["estimator"])) {
-        assignedEstimatorId = assignee.id;
-      }
+      assignedInspectorId = assignee.id;
     }
 
     const type = data.type?.trim() ? data.type : null;
@@ -401,7 +411,6 @@ export class ServiceRequestsService {
       assignedTo: data.assignedTo,
       assignedName: data.assignedName,
       assignedInspectorId,
-      assignedEstimatorId,
       slaDue,
     });
 
@@ -413,7 +422,9 @@ export class ServiceRequestsService {
       sr.id,
       createdBy,
       "Service ticket created",
-      `Type: ${typeLabel ?? "unspecified"}, Priority: ${data.priority}`,
+      assignedInspectorId
+        ? `Type: ${typeLabel ?? "unspecified"}, Priority: ${data.priority}. Assigned to inspection — ticket ready for Inspection flow.`
+        : `Type: ${typeLabel ?? "unspecified"}, Priority: ${data.priority}. Awaiting inspection assignment.`,
     );
 
     if (data.assignedTo) {
@@ -498,9 +509,16 @@ export class ServiceRequestsService {
     if (assignmentRole === "estimator") {
       updateData.assignedEstimatorId = assignee.id;
       const status = normalizeTicketStatus(existing.status);
-      // After inspection, assignment moves the ticket into the estimate staff queue.
+      // Only move into Estimate after inspection is done (report submitted → estimate),
+      // or when the ticket is already past inspection. Never skip inspection from create/intake.
       if (status === "inspection") {
-        updateData.status = "estimate";
+        const report = await prisma.inspectionReport.findUnique({
+          where: { serviceRequestId: id },
+          select: { submittedAt: true },
+        });
+        if (report?.submittedAt) {
+          updateData.status = "estimate";
+        }
       }
     }
     const ticketStatus = normalizeTicketStatus(existing.status);
@@ -671,7 +689,14 @@ export class ServiceRequestsService {
 
   async delete(id: string, tenantId: string) {
     const sr = await this.getById(id, tenantId);
-    await serviceRequestsRepository.delete(id, tenantId);
+    try {
+      await serviceRequestsRepository.delete(id, tenantId);
+    } catch {
+      throw new AppError(
+        "This ticket cannot be deleted because related records are still linked. Close or remove related work first.",
+        409,
+      );
+    }
     await prisma.customer.update({
       where: { id: sr.customerId },
       data: { activeJobs: { decrement: 1 } },

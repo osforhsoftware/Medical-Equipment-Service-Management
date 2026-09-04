@@ -11,7 +11,7 @@ export const API_WRITE_ACCESS = {
   "tickets.assign": ["admin", "coordinator"],
   "tickets.workflow": ["admin", "coordinator", "inspector", "estimator", "engineer", "billing"],
   "tickets.reopen": ["admin", "coordinator"],
-  "tickets.delete": ["admin"],
+  "tickets.delete": ["admin", "coordinator"],
   "inspections.write": ["admin", "coordinator", "inspector"],
   "estimates.write": ["admin", "coordinator", "estimator"],
   "estimates.decide": ["admin", "coordinator", "customer"],
@@ -24,10 +24,10 @@ export const API_WRITE_ACCESS = {
   "purchaseReturns.write": ["admin", "inventory"],
   "stockTransfers.write": ["admin", "inventory"],
   "amc.write": ["admin", "coordinator", "billing"],
-  "sales.write": ["admin", "coordinator", "sales"],
-  "sales.fulfill": ["admin", "inventory", "coordinator"],
+  "sales.write": ["admin", "sales"],
+  "sales.fulfill": ["admin", "inventory"],
   "sales.bill": ["admin", "billing", "sales"],
-  "billing.write": ["admin", "billing", "estimator"],
+  "billing.write": ["admin", "billing"],
   "settings.write": ["admin"],
   "taxonomy.write": ["admin", "coordinator", "inventory"],
   "auditLogs.write": ["admin"],
@@ -51,12 +51,12 @@ export const ALL_ROLES = [
 
 export type AppRole = (typeof ALL_ROLES)[number];
 
-export const SALES_DESK_ROLES = ["admin", "coordinator", "sales", "billing", "inventory"] as const;
-export const SALES_WRITE_ROLES = ["admin", "coordinator", "sales"] as const;
+export const SALES_DESK_ROLES = ["admin", "sales", "billing", "inventory"] as const;
+export const SALES_WRITE_ROLES = ["admin", "sales"] as const;
 export const SALES_BILL_ROLES = ["admin", "billing", "sales"] as const;
-export const ESTIMATE_READ_ROLES = ["admin", "coordinator", "estimator", "billing", "inspector", "engineer"] as const;
+export const ESTIMATE_READ_ROLES = ["admin", "coordinator", "estimator", "billing"] as const;
 export const ESTIMATE_WRITE_ROLES = ["admin", "coordinator", "estimator"] as const;
-export const SERVICE_BILLING_ROLES = ["admin", "billing", "estimator"] as const;
+export const SERVICE_BILLING_ROLES = ["admin", "billing"] as const;
 export const CUSTOMER_READ_ROLES = ["admin", "coordinator", "estimator", "sales", "billing"] as const;
 export const CUSTOMER_WRITE_ROLES = ["admin", "coordinator", "estimator", "sales"] as const;
 

@@ -10,7 +10,7 @@ import {
   type BackendInspectionReport,
   type BackendServiceRequest,
 } from "@/lib/api";
-import { displayOrFallback, formatJsonField } from "@/lib/inspectionReport";
+import { displayOrFallback, formatErrorCodes, formatJsonField } from "@/lib/inspectionReport";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -25,8 +25,8 @@ interface InspectionReportDocumentProps {
 function InfoGrid({ items }: { items: Array<{ label: string; value: React.ReactNode }> }) {
   return (
     <dl className="doc-info-grid">
-      {items.map((item) => (
-        <div key={item.label} className="doc-info-item">
+      {items.map((item, index) => (
+        <div key={`${item.label}-${index}`} className="doc-info-item">
           <dt className="doc-field-label">{item.label}</dt>
           <dd className="doc-field-value">{item.value}</dd>
         </div>
@@ -115,7 +115,7 @@ export function InspectionReportDocument({
   const reportStatus = report.submittedAt ? "Submitted" : "Draft";
   const checklistFields = formatJsonField(report.checklist);
   const measurementFields = formatJsonField(report.measurements);
-  const errorCodeFields = formatJsonField(report.errorCodes);
+  const errorCodes = formatErrorCodes(report.errorCodes);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -156,7 +156,16 @@ export function InspectionReportDocument({
           </div>
           <div className="doc-title-block">
             <p className="doc-kind">Inspection Report</p>
-            <p className="doc-reference">{request.reference}</p>
+            <dl className="doc-invoice-meta">
+              <div>
+                <dt>Inspection Report No</dt>
+                <dd>{request.reference}</dd>
+              </div>
+              <div>
+                <dt>Inspection date</dt>
+                <dd>{formatDateTime(report.reportedAt)}</dd>
+              </div>
+            </dl>
           </div>
         </header>
 
@@ -168,11 +177,7 @@ export function InspectionReportDocument({
           <dl className="doc-report-summary-meta">
             <div>
               <dt>Inspector</dt>
-              <dd>{report.reportedBy}</dd>
-            </div>
-            <div>
-              <dt>Inspection date</dt>
-              <dd>{formatDateTime(report.reportedAt)}</dd>
+              <dd>{displayOrFallback(report.reportedBy)}</dd>
             </div>
             <div>
               <dt>Status</dt>
@@ -198,7 +203,7 @@ export function InspectionReportDocument({
 
         <Section title="Inspection Findings">
           <p className="doc-text-block whitespace-pre-wrap">
-            {split.findings.trim()}
+            {split.findings.trim() || "—"}
           </p>
         </Section>
 
@@ -210,34 +215,27 @@ export function InspectionReportDocument({
 
         <Section title="Recommendations">
           <p className="doc-text-block whitespace-pre-wrap">
-            {report.recommendation.trim()}
+            {report.recommendation.trim() || "—"}
           </p>
           {report.recommendations?.length ? (
-            <table className="doc-simple-table mt-3">
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th>Qty</th>
-                  <th>Priority</th>
-                  <th>Est. cost</th>
-                </tr>
-              </thead>
-              <tbody>
+            <div className="doc-parts-list">
+              <p className="doc-parts-heading">Recommended parts &amp; work</p>
+              <ul>
                 {report.recommendations.map((item) => (
-                  <tr key={item.id}>
-                    <td>
-                      <span className="font-medium">{item.title}</span>
-                      {item.description ? (
-                        <span className="mt-0.5 block text-xs text-slate-500">{item.description}</span>
-                      ) : null}
-                    </td>
-                    <td>{item.quantity}</td>
-                    <td className="capitalize">{item.priority}</td>
-                    <td>{formatCurrency(item.estimatedCost)}</td>
-                  </tr>
+                  <li key={item.id}>
+                    <span className="doc-parts-title">
+                      {item.title} · Qty {item.quantity} · {item.priority}
+                    </span>
+                    {item.description ? (
+                      <span className="doc-parts-desc">{item.description}</span>
+                    ) : null}
+                    {item.estimatedCost != null ? (
+                      <span className="doc-parts-cost">{formatCurrency(item.estimatedCost)}</span>
+                    ) : null}
+                  </li>
                 ))}
-              </tbody>
-            </table>
+              </ul>
+            </div>
           ) : null}
         </Section>
 
@@ -253,9 +251,13 @@ export function InspectionReportDocument({
           </Section>
         ) : null}
 
-        {errorCodeFields.length ? (
+        {errorCodes.length ? (
           <Section title="Error codes">
-            <InfoGrid items={errorCodeFields} />
+            <ul className="doc-error-codes">
+              {errorCodes.map((code) => (
+                <li key={code}>{code}</li>
+              ))}
+            </ul>
           </Section>
         ) : null}
 
@@ -287,6 +289,19 @@ export function InspectionReportDocument({
             <p className="doc-text-block whitespace-pre-wrap">{report.technicianRemarks}</p>
           </Section>
         ) : null}
+
+        <div className="doc-signatures">
+          <div className="doc-sign">
+            <p className="doc-label">Inspector Signature</p>
+            <div className="doc-sign-line" />
+            <p className="doc-sign-caption">{displayOrFallback(report.reportedBy)}</p>
+          </div>
+          <div className="doc-sign">
+            <p className="doc-label">Approval Signature</p>
+            <div className="doc-sign-line" />
+            <p className="doc-sign-caption">{company}</p>
+          </div>
+        </div>
       </div>
     </section>
   );
