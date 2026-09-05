@@ -248,7 +248,7 @@ export class SalesService {
       const lines = await this.resolveSaleLines(tx, tenantId, input.lines);
       await this.assertStockForLines(tx, tenantId, lines);
       const totals = this.totalsFromLines(lines);
-      const reference = await generateReference(tenantId, "SO", "salesOrder");
+      const reference = await generateReference(tenantId, "SO", "salesOrder", tx);
       const order = await tx.salesOrder.create({
         data: {
           tenantId,
@@ -399,7 +399,7 @@ export class SalesService {
         }
       }
 
-      const reference = await generateReference(tenantId, "SO", "salesOrder");
+      const reference = await generateReference(tenantId, "SO", "salesOrder", tx);
       const order = await tx.salesOrder.create({
         data: {
           tenantId,

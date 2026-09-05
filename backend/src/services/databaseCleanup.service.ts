@@ -21,8 +21,8 @@ export interface DatabaseCleanupSummary {
   removedUsers: number;
 }
 
-function assertCleanupAllowed(): void {
-  if (env.NODE_ENV === "production") {
+function assertCleanupAllowed(allowProduction = false): void {
+  if (env.NODE_ENV === "production" && !allowProduction) {
     throw new Error("Database cleanup is disabled in production");
   }
 }
@@ -163,14 +163,21 @@ async function deleteServiceRequests(
 
 export async function cleanTenantBusinessData(
   tenantId: string,
+  options?: { allowProduction?: boolean; keepAllStaff?: boolean },
 ): Promise<DatabaseCleanupSummary> {
-  assertCleanupAllowed();
+  assertCleanupAllowed(Boolean(options?.allowProduction));
 
+  const keepAllStaff = Boolean(options?.keepAllStaff);
   const preservedUsernames = [...DEFAULT_SYSTEM_USERNAMES];
-  const usersToRemove = await prisma.user.findMany({
-    where: { tenantId, username: { notIn: preservedUsernames } },
-    select: { id: true },
-  });
+  const usersToRemove = keepAllStaff
+    ? await prisma.user.findMany({
+        where: { tenantId, role: "customer" },
+        select: { id: true },
+      })
+    : await prisma.user.findMany({
+        where: { tenantId, username: { notIn: preservedUsernames } },
+        select: { id: true },
+      });
   const removeUserIds = usersToRemove.map((user) => user.id);
 
   await prisma.$transaction(
@@ -245,9 +252,11 @@ export async function cleanTenantBusinessData(
     { timeout: 120_000 },
   );
 
-  const preservedUsers = await prisma.user.count({
-    where: { tenantId, username: { in: preservedUsernames } },
-  });
+  const preservedUsers = keepAllStaff
+    ? await prisma.user.count({ where: { tenantId, role: { not: "customer" } } })
+    : await prisma.user.count({
+        where: { tenantId, username: { in: preservedUsernames } },
+      });
 
   return {
     tenantId,

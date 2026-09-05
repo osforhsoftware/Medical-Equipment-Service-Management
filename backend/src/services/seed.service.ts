@@ -169,7 +169,7 @@ export class SeedService {
       }
 
       for (const customer of DEMO_CUSTOMERS) {
-        const reference = await generateReference(tenantId, "CUST", "customer");
+        const reference = await generateReference(tenantId, "CUST", "customer", tx);
         const created = await tx.customer.create({
           data: {
             tenantId,

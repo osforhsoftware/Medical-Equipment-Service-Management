@@ -58,8 +58,16 @@ export class DomainService {
     return prisma.serviceCatalogItem.findMany({ where: { tenantId }, orderBy: { name: "asc" } });
   }
 
-  createCatalog(tenantId: string, data: JsonObject) {
-    return prisma.serviceCatalogItem.create({ data: { ...data, tenantId } as never });
+  async createCatalog(tenantId: string, data: JsonObject) {
+    const code = typeof data.code === "string" ? data.code.trim() : "";
+    if (code) {
+      const duplicate = await prisma.serviceCatalogItem.findFirst({
+        where: { tenantId, code },
+        select: { id: true },
+      });
+      if (duplicate) throw new AppError("A catalog item with that code already exists", 409);
+    }
+    return prisma.serviceCatalogItem.create({ data: { ...data, tenantId, ...(code ? { code } : {}) } as never });
   }
 
   async updateCatalog(tenantId: string, id: string, data: JsonObject) {
@@ -445,7 +453,7 @@ export class DomainService {
             where: { tenantId, OR: [{ serviceRequestId: sr.id }, { requestRef: sr.reference }] },
           });
           if (!job) {
-            const reference = await generateReference(tenantId, "JOB", "serviceJob");
+            const reference = await generateReference(tenantId, "JOB", "serviceJob", tx);
             const scheduledFor = input.scheduledFor
               ? new Date(input.scheduledFor)
               : new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -1512,8 +1520,18 @@ export class DomainService {
       return { ...asset, bookValue: money(asset.purchaseCost.minus(depreciation)), accumulatedDepreciation: money(depreciation) };
     });
   }
-  createOfficeAsset(tenantId: string, data: JsonObject) {
-    return prisma.officeAsset.create({ data: { ...data, tenantId } as never });
+  async createOfficeAsset(tenantId: string, data: JsonObject) {
+    const assetTag = typeof data.assetTag === "string" ? data.assetTag.trim() : "";
+    if (assetTag) {
+      const duplicate = await prisma.officeAsset.findFirst({
+        where: { tenantId, assetTag },
+        select: { id: true },
+      });
+      if (duplicate) throw new AppError("An office asset with that tag already exists", 409);
+    }
+    return prisma.officeAsset.create({
+      data: { ...data, tenantId, ...(assetTag ? { assetTag } : {}) } as never,
+    });
   }
   async updateOfficeAsset(tenantId: string, id: string, data: JsonObject) {
     const result = await prisma.officeAsset.updateMany({ where: { id, tenantId }, data: data as never });
@@ -1722,7 +1740,7 @@ export class DomainService {
       const item = request.inventoryItem;
       const unitCost = input.unitCost ?? Number(item.unitCost);
       const lineTotal = unitCost * request.quantity;
-      const reference = await generateReference(tenantId, "PO", "purchaseOrder");
+      const reference = await generateReference(tenantId, "PO", "purchaseOrder", tx);
       const po = await tx.purchaseOrder.create({
         data: {
           tenantId,

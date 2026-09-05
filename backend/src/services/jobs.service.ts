@@ -127,7 +127,7 @@ export class JobsService {
       });
 
       if (!job) {
-        const reference = await generateReference(tenantId, "JOB", "serviceJob");
+        const reference = await generateReference(tenantId, "JOB", "serviceJob", tx);
         job = await tx.serviceJob.create({
           data: {
             tenantId,
@@ -316,7 +316,6 @@ export class JobsService {
 
   async create(tenantId: string, data: CreateJobData, actorId: string) {
     const assignee = await this.resolveAssignee(data.engineerId, tenantId);
-    const reference = await generateReference(tenantId, "JOB", "serviceJob");
     const ticketId = data.serviceRequestId?.trim();
 
     if (!ticketId) {
@@ -328,6 +327,7 @@ export class JobsService {
       if (!equipment) throw new AppError("Equipment not found for this customer", 404);
 
       return prisma.$transaction(async (tx) => {
+        const reference = await generateReference(tenantId, "JOB", "serviceJob", tx);
         return tx.serviceJob.create({
           data: {
             tenantId,
@@ -380,6 +380,7 @@ export class JobsService {
         where: { tenantId, OR: [{ serviceRequestId: sr.id }, { requestRef: sr.reference }] },
       });
       if (duplicate) throw new AppError("A job already exists for this service request", 409);
+      const reference = await generateReference(tenantId, "JOB", "serviceJob", tx);
       const job = await tx.serviceJob.create({
         data: {
           tenantId,

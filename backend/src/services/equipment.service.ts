@@ -67,8 +67,15 @@ export class EquipmentService {
       conditionSlug,
     );
 
+    const assetTag = data.assetTag.trim();
+    const duplicate = await prisma.equipment.findFirst({
+      where: { tenantId, assetTag },
+      select: { id: true },
+    });
+    if (duplicate) throw new AppError("An asset with that tag already exists", 409);
+
     const equipment = await equipmentRepository.create(tenantId, {
-      assetTag: data.assetTag,
+      assetTag,
       name: data.name,
       model: data.model?.trim() || "",
       manufacturer: data.manufacturer?.trim() || "",
@@ -154,6 +161,16 @@ export class EquipmentService {
         slug,
         existing.condition,
       );
+    }
+
+    if (typeof next.assetTag === "string") {
+      const assetTag = next.assetTag.trim();
+      next.assetTag = assetTag;
+      const duplicate = await prisma.equipment.findFirst({
+        where: { tenantId, assetTag, id: { not: id } },
+        select: { id: true },
+      });
+      if (duplicate) throw new AppError("An asset with that tag already exists", 409);
     }
 
     const updated = await equipmentRepository.update(id, tenantId, next);

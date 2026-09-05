@@ -88,6 +88,11 @@ export class InventoryService {
     const { imageFileIds, ...rest } = data;
     const branchId = rest.branchId || await getDefaultBranchId(tenantId);
     const sku = rest.sku?.trim() || await this.nextSku(tenantId, branchId);
+    const duplicateSku = await prisma.inventoryItem.findFirst({
+      where: { tenantId, branchId, sku },
+      select: { id: true },
+    });
+    if (duplicateSku) throw new AppError("An inventory item with that SKU already exists in this branch", 409);
     const category = await this.resolveOptionalSlug(tenantId, "inventory_category", rest.category);
     const subcategory = await this.resolveOptionalSlug(tenantId, "inventory_subcategory", rest.subcategory);
     if (rest.supplierId) {

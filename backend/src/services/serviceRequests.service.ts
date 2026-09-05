@@ -9,6 +9,7 @@ import { userHasAnyRoleKey } from "@/utils/userRoles";
 import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
 import { prisma } from "@/db/prisma";
+import { Prisma } from "@prisma/client";
 import {
   assertTicketAdvance,
   assertTicketReopen,
@@ -332,7 +333,6 @@ export class ServiceRequestsService {
 
     const user = await usersRepository.findById(userId, tenantId);
     const createdBy = user?.name ?? userId;
-    const reference = await generateReference(tenantId, "SR", "serviceRequest");
 
     const slaDue = data.slaDue
       ? new Date(data.slaDue)
@@ -396,23 +396,37 @@ export class ServiceRequestsService {
     const typeOther = type === "Other" ? data.typeOther?.trim() || null : null;
     const typeLabel = typeOther ? `Other (${typeOther})` : type;
 
-    const sr = await serviceRequestsRepository.create(tenantId, {
-      reference,
-      customerId: data.customerId,
-      customerName: customer.name,
-      equipmentId: primaryEquipId,
-      equipmentName: primaryEquipName,
-      branchId,
-      type: type as never,
-      typeOther,
-      priority: data.priority as never,
-      description: data.description?.trim() ?? "",
-      createdBy,
-      assignedTo: data.assignedTo,
-      assignedName: data.assignedName,
-      assignedInspectorId,
-      slaDue,
-    });
+    let sr: Awaited<ReturnType<typeof serviceRequestsRepository.create>> | null = null;
+    let reference = "";
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      reference = await generateReference(tenantId, "SR", "serviceRequest");
+      try {
+        sr = await serviceRequestsRepository.create(tenantId, {
+          reference,
+          customerId: data.customerId,
+          customerName: customer.name,
+          equipmentId: primaryEquipId,
+          equipmentName: primaryEquipName,
+          branchId,
+          type: type as never,
+          typeOther,
+          priority: data.priority as never,
+          description: data.description?.trim() ?? "",
+          createdBy,
+          assignedTo: data.assignedTo,
+          assignedName: data.assignedName,
+          assignedInspectorId,
+          slaDue,
+        });
+        break;
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002" && attempt < 4) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!sr) throw new AppError("Unable to create service ticket. Please try again.", 409);
 
     if (equipmentItems.length > 0) {
       await serviceRequestsRepository.addEquipmentItems(sr.id, equipmentItems);
