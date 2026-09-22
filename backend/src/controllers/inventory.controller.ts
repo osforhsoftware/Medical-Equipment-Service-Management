@@ -9,6 +9,7 @@ export class InventoryController {
       const query = parseInventoryListQuery(req);
       const { data, total } = await inventoryService.getPaginated(req.tenantId!, {
         category: query.category,
+        itemClass: query.itemClass,
         stockStatus: query.stockStatus,
         supplierId: query.supplierId,
         search: query.search,

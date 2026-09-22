@@ -29,9 +29,27 @@ import inspectionsRoutes from "@/routes/inspections.routes";
 import domainRoutes from "@/routes/domain.routes";
 import filesRoutes from "@/routes/files.routes";
 import taxonomyRoutes from "@/routes/taxonomy.routes";
+import salesEnquiriesRoutes from "@/routes/salesEnquiries.routes";
+import rfqsRoutes from "@/routes/rfqs.routes";
+import warrantyClaimsRoutes from "@/routes/warrantyClaims.routes";
 
 const app = express();
 app.set("trust proxy", 1);
+
+function isPrivateLanHostname(hostname: string) {
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
+  // Allow phone/LAN access during local development (RFC1918).
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
+  const m = /^172\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(hostname);
+  if (m) {
+    const second = Number(m[1]);
+    return second >= 16 && second <= 31;
+  }
+  // Cloudflare quick tunnels used for phone testing.
+  if (hostname.endsWith(".trycloudflare.com")) return true;
+  return false;
+}
 
 function isAllowedOrigin(origin: string | undefined) {
   if (!origin) return true;
@@ -43,7 +61,7 @@ function isAllowedOrigin(origin: string | undefined) {
   if (env.NODE_ENV === "production") return false;
   try {
     const { hostname } = new URL(origin);
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+    return isPrivateLanHostname(hostname);
   } catch {
     return false;
   }
@@ -95,6 +113,9 @@ app.use("/api/inspections", inspectionsRoutes);
 app.use("/api/domain", domainRoutes);
 app.use("/api/files", filesRoutes);
 app.use("/api/taxonomy", taxonomyRoutes);
+app.use("/api/sales-enquiries", salesEnquiriesRoutes);
+app.use("/api/rfqs", rfqsRoutes);
+app.use("/api/warranty-claims", warrantyClaimsRoutes);
 
 // ── 404 Catch-All ─────────────────────────────────────────────
 app.use((_req, res) => {

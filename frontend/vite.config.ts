@@ -12,8 +12,11 @@ export default defineConfig(({ mode }) => {
 
   return {
     server: {
-      host: true,
+      host: "0.0.0.0",
       port,
+      strictPort: true,
+      // Allow phone access via LAN IP and Cloudflare quick tunnels.
+      allowedHosts: true,
       hmr: {
         overlay: false,
       },

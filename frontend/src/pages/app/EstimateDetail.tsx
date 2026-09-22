@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { Eye, FilePenLine, MoreHorizontal, ShoppingCart } from "lucide-react";
+import { Eye, FilePenLine, MoreHorizontal, PackageX, ShoppingCart } from "lucide-react";
 import { EstimateDecisionPanel } from "@/components/estimates/EstimateDecisionPanel";
 import { EstimateItemsTable } from "@/components/estimates/EstimateItemsTable";
+import { ReturnWithoutRepairDialog, type ReturnWithoutRepairData } from "@/components/estimates/ReturnWithoutRepairDialog";
+import { ShareButtons } from "@/components/shared/ShareButtons";
 import {
   ActivityTimeline,
   DetailInfoGrid,
@@ -48,6 +50,8 @@ export default function EstimateDetail() {
   const [decisionNote, setDecisionNote] = useState("");
   const [engineerId, setEngineerId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [returnSaving, setReturnSaving] = useState(false);
   const tab = searchParams.get("tab") ?? "overview";
   const decisionRef = useRef<HTMLDivElement>(null);
   const {
@@ -135,6 +139,25 @@ export default function EstimateDetail() {
     }
   };
 
+  const handleReturnWithoutRepair = async (data: ReturnWithoutRepairData) => {
+    if (!estimate) return;
+    setReturnSaving(true);
+    try {
+      // Record return details as a decision note on the estimate
+      await api.decideEstimate(estimate.id, "rejected", `RETURN WITHOUT REPAIR: ${data.returnReason} | Handed by: ${data.handedBy} on ${data.returnDate} | Customer acknowledged: ${data.customerAcknowledged ? "Yes" : "No"}`);
+      if (estimate.serviceRequestId) {
+        await api.updateServiceRequest(estimate.serviceRequestId, { status: "closed" }).catch(() => null);
+      }
+      toast.success("Return without repair recorded", { description: `Handed back by ${data.handedBy} on ${data.returnDate}` });
+      setReturnOpen(false);
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Failed to record return" });
+    } finally {
+      setReturnSaving(false);
+    }
+  };
+
   const canDecide = Boolean(estimate && isEstimatePendingDecision(estimate.status));
   const viewLines: EstimateLineInput[] = (estimate?.lineItems ?? []).map((line) => ({
     type: line.type as EstimateLineInput["type"],
@@ -169,7 +192,11 @@ export default function EstimateDetail() {
         notFoundDescription="The requested estimate could not be found."
         onRetry={() => void load()}
         actions={estimate ? (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <ShareButtons
+              subject={`Estimate ${estimate.reference} for ${estimate.customerName}`}
+              message={`Estimate Details:\nRef: ${estimate.reference}\nCustomer: ${estimate.customerName}\nEquipment: ${estimate.equipmentName}\nTotal Amount: ${formatCurrency(estimate.total)}\nStatus: ${estimate.status}`}
+            />
             <Button variant="outline" asChild>
               <Link to={`/app/estimates/${estimate.id}/preview`}>
                 <Eye className="mr-1 h-4 w-4" /> Preview
@@ -185,6 +212,15 @@ export default function EstimateDetail() {
             {canSell && isSalesQuote && estimate.status === "approved" ? (
               <Button variant="brand" disabled={saving} onClick={() => void convertToOrder()}>
                 <ShoppingCart className="mr-1 h-4 w-4" /> Convert to sales order
+              </Button>
+            ) : null}
+            {canApprove && estimate.status === "rejected" && estimate.serviceRequestId ? (
+              <Button
+                variant="outline"
+                className="border-amber-400 text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                onClick={() => setReturnOpen(true)}
+              >
+                <PackageX className="mr-1 h-4 w-4" /> Return Without Repair
               </Button>
             ) : null}
             {canBuild && estimate.serviceRequestId && canEditEstimate(estimate.status) ? (
@@ -319,6 +355,18 @@ export default function EstimateDetail() {
           </div>
         ) : undefined}
       />
+
+      {/* Return Without Repair Dialog */}
+      {estimate && (
+        <ReturnWithoutRepairDialog
+          open={returnOpen}
+          onOpenChange={setReturnOpen}
+          customerName={estimate.customerName ?? ""}
+          equipmentName={estimate.equipmentName ?? ""}
+          onConfirm={(data) => handleReturnWithoutRepair(data)}
+          saving={returnSaving}
+        />
+      )}
     </RoleGuard>
   );
 }

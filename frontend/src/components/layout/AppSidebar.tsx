@@ -1,21 +1,129 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { X } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { MesmsLogo } from "@/components/shared/MesmsLogo";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
-import { navGroups, navItems } from "@/config/nav";
+import { navGroups, navItems, type NavItem } from "@/config/nav";
 import { userCanAccessModule } from "@/lib/userRoles";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 interface AppSidebarProps {
   open: boolean;
   onClose: () => void;
 }
 
+function pathMatches(itemTo: string, pathname: string, search: string) {
+  if (itemTo === "/app") return pathname === "/app";
+  const [path, query = ""] = itemTo.split("?");
+  if (!(pathname === path || pathname.startsWith(`${path}/`))) return false;
+  if (!query) return true;
+  const want = new URLSearchParams(query);
+  const have = new URLSearchParams(search);
+  for (const [key, value] of want.entries()) {
+    if (have.get(key) !== value) return false;
+  }
+  return true;
+}
+
+function NavItemLink({
+  item,
+  pathname,
+  search,
+  onNavigate,
+}: {
+  item: NavItem;
+  pathname: string;
+  search: string;
+  onNavigate: () => void;
+}) {
+  const hasChildren = Boolean(item.children?.length);
+  const childActive = item.children?.some((c) => pathMatches(c.to, pathname, search)) ?? false;
+  const parentActive = pathMatches(item.to, pathname, search) || childActive;
+  const [open, setOpen] = useState(parentActive);
+
+  useEffect(() => {
+    if (parentActive) setOpen(true);
+  }, [parentActive]);
+
+  if (!hasChildren) {
+    return (
+      <NavLink
+        to={item.to}
+        onClick={onNavigate}
+        className={cn(
+          "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors",
+          parentActive
+            ? "bg-sidebar-accent text-sidebar-primary"
+            : "text-sidebar-foreground hover:bg-muted hover:text-foreground",
+        )}
+      >
+        <item.icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
+        <span className="truncate">{item.label}</span>
+      </NavLink>
+    );
+  }
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div
+        className={cn(
+          "flex items-center gap-0.5 rounded-md",
+          parentActive && !childActive ? "bg-sidebar-accent text-sidebar-primary" : "",
+        )}
+      >
+        <NavLink
+          to={item.to}
+          onClick={onNavigate}
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors",
+            parentActive
+              ? "text-sidebar-primary"
+              : "text-sidebar-foreground hover:bg-muted hover:text-foreground",
+          )}
+        >
+          <item.icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
+          <span className="truncate">{item.label}</span>
+        </NavLink>
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="mr-1 rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label={`Toggle ${item.label} stages`}
+          >
+            <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+          </button>
+        </CollapsibleTrigger>
+      </div>
+      <CollapsibleContent className="space-y-0.5 pb-1 pl-3">
+        {item.children!.map((child) => {
+          const active = pathMatches(child.to, pathname, search);
+          return (
+            <NavLink
+              key={child.to}
+              to={child.to}
+              onClick={onNavigate}
+              className={cn(
+                "block rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
+                active
+                  ? "bg-sidebar-accent text-sidebar-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              {child.label}
+            </NavLink>
+          );
+        })}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 export function AppSidebar({ open, onClose }: AppSidebarProps) {
   const { user } = useAuth();
-  const { rbacMatrix } = useSettings();
-  const { pathname } = useLocation();
+  const { rbacMatrix, settings } = useSettings();
+  const { pathname, search } = useLocation();
   if (!user) return null;
 
   const visible = navItems.filter((item) => userCanAccessModule(user, item.label, rbacMatrix, item.roles));
@@ -35,7 +143,7 @@ export function AppSidebar({ open, onClose }: AppSidebarProps) {
         )}
       >
         <div className="flex h-14 shrink-0 items-center justify-between border-b border-sidebar-border px-4">
-          <MesmsLogo size="md" />
+          <MesmsLogo size="sm" variant="horizontal" customLogoUrl={settings?.logoUrl} />
           <button
             onClick={onClose}
             className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -55,25 +163,15 @@ export function AppSidebar({ open, onClose }: AppSidebarProps) {
                   {group}
                 </p>
                 <div className="space-y-0.5">
-                  {items.map((item) => {
-                    const active = item.to === "/app" ? pathname === "/app" : pathname.startsWith(item.to);
-                    return (
-                      <NavLink
-                        key={item.to}
-                        to={item.to}
-                        onClick={closeIfOverlay}
-                        className={cn(
-                          "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors",
-                          active
-                            ? "bg-sidebar-accent text-sidebar-primary"
-                            : "text-sidebar-foreground hover:bg-muted hover:text-foreground",
-                        )}
-                      >
-                        <item.icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
-                        <span className="truncate">{item.label}</span>
-                      </NavLink>
-                    );
-                  })}
+                  {items.map((item) => (
+                    <NavItemLink
+                      key={item.to}
+                      item={item}
+                      pathname={pathname}
+                      search={search}
+                      onNavigate={closeIfOverlay}
+                    />
+                  ))}
                 </div>
               </div>
             );

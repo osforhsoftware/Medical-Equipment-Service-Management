@@ -27,6 +27,7 @@ import {
   demoSku,
   parseDemoDate,
 } from "@/seed/demoData";
+import { inferItemClassFromCategory } from "@/lib/inventoryItemClass";
 
 export interface DemoSeedCounts {
   branches: number;
@@ -320,6 +321,7 @@ export class SeedService {
             tenantId,
             sku: demoSku(item.sku),
             name: item.name,
+            itemClass: inferItemClassFromCategory(item.category),
             category: item.category,
             branchId: branchIds[item.branchKey],
             inStock: item.inStock,

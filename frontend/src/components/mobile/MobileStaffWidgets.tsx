@@ -3,19 +3,19 @@ import { cn } from "@/lib/utils";
 import type { MobileStat } from "@/lib/mobileStaffDashboard";
 
 const TONE_CARD: Record<MobileStat["tone"], string> = {
-  primary: "border-primary/20 bg-gradient-to-br from-primary/18 via-primary/10 to-info/6 shadow-primary/10",
-  accent: "border-accent/20 bg-gradient-to-br from-accent/18 via-accent/10 to-accent/5 shadow-accent/10",
-  warning: "border-warning/25 bg-gradient-to-br from-warning/20 via-warning/12 to-warning/5 shadow-warning/10",
-  destructive: "border-destructive/20 bg-gradient-to-br from-destructive/16 via-destructive/10 to-destructive/4 shadow-destructive/10",
-  success: "border-success/20 bg-gradient-to-br from-success/18 via-success/10 to-success/5 shadow-success/10",
+  primary: "border-primary/25 bg-gradient-to-br from-primary/15 via-primary/8 to-primary/4 shadow-sm text-foreground",
+  accent: "border-accent/25 bg-gradient-to-br from-accent/15 via-accent/8 to-accent/4 shadow-sm text-foreground",
+  warning: "border-warning/30 bg-gradient-to-br from-warning/20 via-warning/10 to-warning/4 shadow-sm text-foreground",
+  destructive: "border-destructive/25 bg-gradient-to-br from-destructive/15 via-destructive/8 to-destructive/4 shadow-sm text-foreground",
+  success: "border-success/25 bg-gradient-to-br from-success/15 via-success/8 to-success/4 shadow-sm text-foreground",
 };
 
 const TONE_ICON: Record<MobileStat["tone"], string> = {
-  primary: "border-primary/20 bg-gradient-to-br from-primary/30 to-info/12 text-primary",
-  accent: "border-accent/20 bg-gradient-to-br from-accent/30 to-accent/10 text-accent",
-  warning: "border-warning/25 bg-gradient-to-br from-warning/35 to-warning/12 text-warning-foreground",
-  destructive: "border-destructive/20 bg-gradient-to-br from-destructive/30 to-destructive/10 text-destructive",
-  success: "border-success/20 bg-gradient-to-br from-success/30 to-success/10 text-success",
+  primary: "border-primary/30 bg-primary/20 text-primary",
+  accent: "border-accent/30 bg-accent/20 text-accent",
+  warning: "border-warning/35 bg-warning/25 text-warning-foreground",
+  destructive: "border-destructive/30 bg-destructive/20 text-destructive",
+  success: "border-success/30 bg-success/20 text-success",
 };
 
 const TONE_VALUE: Record<MobileStat["tone"], string> = {
@@ -33,7 +33,7 @@ interface MobileStatGridProps {
 
 export function MobileStatGrid({ stats, onStatClick }: MobileStatGridProps) {
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-2 gap-2.5">
       {stats.map((stat) => (
         <StatTile key={stat.label} stat={stat} onClick={onStatClick ? () => onStatClick(stat) : undefined} />
       ))}
@@ -50,19 +50,19 @@ function StatTile({ stat, onClick }: { stat: MobileStat; onClick?: () => void })
       type={onClick ? "button" : undefined}
       onClick={onClick}
       className={cn(
-        "relative flex items-center gap-2.5 overflow-hidden rounded-[16px] border px-3 py-2.5 text-left shadow-sm transition-all active:scale-[0.97]",
+        "relative flex items-center gap-3 overflow-hidden rounded-2xl border px-3.5 py-3 text-left transition-all active:scale-[0.97]",
         TONE_CARD[stat.tone],
-        onClick && "cursor-pointer hover:shadow-md",
+        onClick && "cursor-pointer hover:shadow-md hover:border-primary/40",
       )}
     >
-      <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border", TONE_ICON[stat.tone])}>
-        <Icon className="h-3.5 w-3.5" />
+      <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border shadow-xs", TONE_ICON[stat.tone])}>
+        <Icon className="h-5 w-5" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className={cn("truncate font-display text-lg font-bold leading-none tracking-tight", TONE_VALUE[stat.tone])}>
+        <p className={cn("truncate font-display text-xl font-extrabold leading-none tracking-tight", TONE_VALUE[stat.tone])}>
           {stat.value}
         </p>
-        <p className="mt-1 truncate text-[10px] font-semibold text-foreground/65">{stat.label}</p>
+        <p className="mt-1 truncate text-xs font-semibold text-foreground/80">{stat.label}</p>
       </div>
     </Wrapper>
   );
@@ -73,9 +73,10 @@ interface MobileQuickActionsProps {
   onNavigate: (to: string) => void;
 }
 
+/** Vyapar Application Style Quick Action Grid */
 export function MobileQuickActions({ actions, onNavigate }: MobileQuickActionsProps) {
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="grid grid-cols-4 gap-2 sm:gap-2.5">
       {actions.map((action) => {
         const Icon = action.icon;
         return (
@@ -84,24 +85,32 @@ export function MobileQuickActions({ actions, onNavigate }: MobileQuickActionsPr
             type="button"
             onClick={() => onNavigate(action.to)}
             className={cn(
-              "flex min-w-[88px] shrink-0 flex-col items-center gap-2 rounded-[16px] border px-3 py-3 transition-all active:scale-95",
+              "flex flex-col items-center justify-center gap-2 rounded-2xl border p-2.5 text-center transition-all active:scale-92 hover:shadow-sm",
               action.primary
-                ? "border-primary/30 bg-primary text-primary-foreground shadow-md shadow-primary/20"
-                : "border-border/60 bg-card text-foreground",
+                ? "border-primary/40 bg-gradient-to-b from-primary to-primary/90 text-primary-foreground shadow-md shadow-primary/20"
+                : "border-border/60 bg-card text-foreground hover:border-primary/30 hover:bg-muted/30",
             )}
           >
             <span
               className={cn(
-                "flex h-11 w-11 items-center justify-center rounded-2xl",
-                action.primary ? "bg-primary-foreground/15" : "bg-primary/10 text-primary",
+                "flex h-11 w-11 items-center justify-center rounded-2xl shadow-xs transition-transform",
+                action.primary
+                  ? "bg-white/20 text-white"
+                  : "bg-primary/10 text-primary group-hover:scale-105",
               )}
             >
               <Icon className="h-5 w-5" />
             </span>
-            <span className="text-center text-[11px] font-semibold leading-tight">{action.label}</span>
+            <span className={cn(
+              "text-center text-[11px] font-bold leading-tight truncate w-full",
+              action.primary ? "text-white" : "text-foreground",
+            )}>
+              {action.label}
+            </span>
           </button>
         );
       })}
     </div>
   );
 }
+

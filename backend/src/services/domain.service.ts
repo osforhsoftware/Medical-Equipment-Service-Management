@@ -11,6 +11,7 @@ import { extraChargeType } from "@/utils/invoiceCharges";
 import { ESTIMATE_STAFF_APPROVER_ROLES } from "@/config/apiAccess";
 import { userHasAnyRoleKey } from "@/utils/userRoles";
 import { ticketAssignmentService } from "@/services/ticketAssignment.service";
+import { buildEquipmentWarrantyUpdate } from "@/lib/equipmentWarranty";
 
 type Actor = { userId: string; role: string };
 type JsonObject = Record<string, unknown>;
@@ -1195,6 +1196,27 @@ export class DomainService {
         },
         include: { lineItems: true },
       });
+
+      const equipmentIds = new Set<string>();
+      if (job.equipmentId) equipmentIds.add(job.equipmentId);
+      if (job.serviceRequestId) {
+        const linked = await tx.serviceRequestEquipment.findMany({
+          where: { serviceRequestId: job.serviceRequestId },
+          select: { equipmentId: true },
+        });
+        for (const row of linked) equipmentIds.add(row.equipmentId);
+      }
+      if (equipmentIds.size > 0) {
+        const warrantyPatch = buildEquipmentWarrantyUpdate({
+          ...(input.equipmentWarranty ?? {}),
+          touchLastService: true,
+        });
+        await tx.equipment.updateMany({
+          where: { tenantId, id: { in: Array.from(equipmentIds) } },
+          data: warrantyPatch as never,
+        });
+      }
+
       if (job.serviceRequestId) {
         const sr = await tx.serviceRequest.findFirst({ where: { id: job.serviceRequestId, tenantId } });
         if (sr) {

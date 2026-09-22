@@ -1,8 +1,10 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { domainController as c } from "@/controllers/domain.controller";
+import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
 import { authenticate, requireRole, requireStaff } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
 import { validate } from "@/middleware/validate";
+import { AppError } from "@/middleware/errorHandler";
 import {
   attachmentLinkSchema,
   catalogItemSchema,
@@ -59,7 +61,16 @@ router.post("/inspection-reports/:id/recommendations", requireRole("admin", "coo
 router.post("/inspection-reports/:id/attachments", requireRole("admin", "coordinator", "inspector"), validate(attachmentLinkSchema), c.inspectionAttachment);
 
 router.post("/estimates/:id/revisions", requireRole("admin", "coordinator", "estimator"), validate(estimateRevisionSchema), c.estimateRevision);
-router.post("/estimates/:id/decisions", requireRole("admin", "coordinator", "customer"), validate(estimateDecisionSchema), c.estimateDecision);
+router.post(
+  "/estimates/:id/decisions",
+  requireRole(
+    ...(CUSTOMER_PORTAL_ENABLED
+      ? (["admin", "coordinator", "customer"] as const)
+      : (["admin", "coordinator"] as const)),
+  ),
+  validate(estimateDecisionSchema),
+  c.estimateDecision,
+);
 
 router.post("/jobs/:id/assignments", operations, validate(jobAssignmentSchema), c.jobAssignment);
 router.post("/jobs/:id/work-logs", requireRole("admin", "coordinator", "engineer"), validate(workLogSchema), c.workLog);
@@ -94,7 +105,12 @@ router.post("/service-tickets/:id/finish", requireRole("admin", "coordinator", "
 router.get("/equipment-history/:assetTag", requireStaff, c.equipmentHistory);
 router.get("/projects/:requestId", requireStaff, c.projectDetails);
 router.post("/qr-scans", requireStaff, validate(qrScanSchema), c.qrScan);
-router.get("/portal", requireRole("customer"), c.customerPortal);
+router.get("/portal", (req, res, next) => {
+  if (!CUSTOMER_PORTAL_ENABLED) {
+    return next(new AppError("Customer Portal is temporarily unavailable.", 503));
+  }
+  return requireRole("customer")(req, res, next);
+}, c.customerPortal);
 
 router.get("/office-assets", requireRole("admin"), c.officeAssets);
 router.post("/office-assets", requireRole("admin"), validate(officeAssetSchema), c.officeAssetCreate);

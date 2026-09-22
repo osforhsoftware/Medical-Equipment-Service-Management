@@ -4,9 +4,11 @@
 Complete features list · Workflows · How to use every module
 
 **Audience:** company owners, administrators, and staff  
-**Last updated:** 4 September 2026
+**Last updated:** 17 September 2026
 
 Use this handbook to train your team. It lists **every feature**, shows **how work moves**, and gives **step-by-step usage** for each screen.
+
+**Colourful Word handbook (full workflow + staff update matrix):** open `docs/MEMS_FULL_WORKFLOW_STAFF_HANDBOOK.docx` (regenerate with `node docs/generate-full-workflow-handbook.mjs`).
 
 ---
 
@@ -217,7 +219,7 @@ Inspectors, estimators, and engineers mainly see **work assigned to them**. Coor
 | Estimates | Queue of tickets awaiting quote; builder (labor + parts); draft → send for approval; preview/print |
 | Estimate approval | Approve + engineer + schedule, or reject / send back |
 | Service Jobs | Board by status; schedule job; work report; photos; deduct stock; request extras; submit for review |
-| Projects | Assign lead / staff on a job (staffing view — not a separate multi-ticket project entity) |
+| Projects | Full project hub on a service job: workflow, team, work report, parts, activity timeline, and edits |
 | Service Catalog | Standard labor/services used on estimates |
 | QR Tracking | Camera or manual lookup of equipment |
 
@@ -349,24 +351,31 @@ Status: Estimate → **Pending approval**.
 3. **Reject:** reason; send back to Estimate or Inspection.  
 Portal customer may acknowledge; **staff approval unlocks the job**.
 
-### Stage 5 — Job
+### Stage 5 — Job (Repair → QA → Delivery)
 
-**Owner:** assigned Service Engineer
+**Owner:** assigned Service Engineer (Repair); Administrator / Coordinator (QA + Delivery)
 
-| Job status | Meaning |
-|------------|---------|
-| Assigned / Scheduled | Engineer has the job |
-| In progress | Work underway |
-| Waiting parts | Blocked on stock |
-| Customer review / pending review | Waiting sign-off / coordinator |
-| Completed | Engineer finished |
+| Job status | Stage | Meaning |
+|------------|-------|---------|
+| Scheduled | Repair | Engineer has the job |
+| In progress | Repair | Work underway |
+| Parts pending | Repair | Blocked on stock |
+| Review | QA | Work submitted; waiting coordinator/admin quality check |
+| Delivery | Delivery | QA passed; confirm customer handoff |
+| Completed | Done | Job finished; ready for billing |
 
-On site:
+On site (engineer):
 
 1. Start job; update status; write **work report** (work performed, testing, calibration, recommendation, photos).
 2. Deduct stock (or raise shortage / PO path if short).
 3. If estimate is not enough → **Request additional products / equipment** (change request) → Coordinator/Admin decide → back to engineer.
-4. Submit for review → Coordinator **Approve & Complete** (job) / **Confirm completed work** (ticket).
+4. Submit for QA → status **Review**.
+
+Coordinator / Admin:
+
+5. **QA:** Pass → Delivery · Fail → back to Repair for engineer.
+6. **Delivery:** confirm method / received by → job **Completed**.
+7. **Confirm completed work** on the ticket when required for billing handoff.
 
 ### Stage 6 — Final approval → Billing
 
@@ -545,14 +554,17 @@ Billing board tabs help you find work: Ready, Waiting verification, Draft, Waiti
 ### Service Jobs (`/app/jobs`)
 
 1. Find your job on the board.
-2. Update status; write work report; upload photos; deduct stock.
-3. Request additional products if needed; submit for review.
-4. Coordinator: **Approve & Complete**.
+2. **Repair:** update status; write work report; upload photos; deduct stock; request extras if needed.
+3. Submit for **QA** (status Review).
+4. Coordinator/Admin: **QA pass** → Delivery, or **QA fail** → back to Repair.
+5. Coordinator/Admin: confirm **Delivery** → job Completed → Continue to billing.
 
 ### Projects (`/app/projects`)
 
-1. Open a job from the list.
-2. Assign lead / staff for that job.
+1. Open a project from the list (same underlying service job as **Service Jobs**).
+2. Use tabs for **Overview**, **Repair / QA / Delivery**, **Work**, **Parts**, **Activity**, and **Team**.
+3. Edit registration, update status, work report, photos, stock, and QA/delivery when your role allows.
+4. On **Team**, Admin/Coordinator assign lead and staff.
 
 ### Service Catalog (`/app/service-catalog`)
 

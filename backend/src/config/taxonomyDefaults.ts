@@ -4,6 +4,7 @@ export const TAXONOMY_TYPES = [
   "customer_type",
   "inventory_category",
   "inventory_subcategory",
+  "expense_category",
 ] as const;
 
 export type TaxonomyTypeName = (typeof TAXONOMY_TYPES)[number];
@@ -39,6 +40,7 @@ export const DEFAULT_TAXONOMY_TERMS: Record<TaxonomyTypeName, DefaultTaxonomyTer
     { name: "Other", slug: "Other", sortOrder: 60 },
   ],
   inventory_category: [
+    { name: "Spare Parts", slug: "spare-parts", sortOrder: 5 },
     { name: "Modules", slug: "modules", sortOrder: 10 },
     { name: "Sensors", slug: "sensors", sortOrder: 20 },
     { name: "Consumables", slug: "consumables", sortOrder: 30 },
@@ -46,6 +48,7 @@ export const DEFAULT_TAXONOMY_TERMS: Record<TaxonomyTypeName, DefaultTaxonomyTer
     { name: "Tools", slug: "tools", sortOrder: 50 },
   ],
   inventory_subcategory: [
+    { name: "General spares", slug: "general-spares", sortOrder: 5, parentSlug: "spare-parts" },
     { name: "Pump modules", slug: "pump-modules", sortOrder: 10, parentSlug: "modules" },
     { name: "Control modules", slug: "control-modules", sortOrder: 20, parentSlug: "modules" },
     { name: "Probes", slug: "probes", sortOrder: 10, parentSlug: "sensors" },
@@ -54,6 +57,19 @@ export const DEFAULT_TAXONOMY_TERMS: Record<TaxonomyTypeName, DefaultTaxonomyTer
     { name: "Cables", slug: "cables", sortOrder: 20, parentSlug: "consumables" },
     { name: "Control boards", slug: "control-boards", sortOrder: 10, parentSlug: "boards" },
     { name: "Calibration kits", slug: "calibration-kits", sortOrder: 10, parentSlug: "tools" },
+  ],
+  expense_category: [
+    { name: "Parts & spares", slug: "parts", sortOrder: 10 },
+    { name: "Labor / subcontract", slug: "labor", sortOrder: 20 },
+    { name: "Travel", slug: "travel", sortOrder: 30 },
+    { name: "Transport / logistics", slug: "transport", sortOrder: 40 },
+    { name: "Tools & equipment", slug: "tools", sortOrder: 50 },
+    { name: "Subscription / software", slug: "subscription", sortOrder: 60 },
+    { name: "Rent", slug: "rent", sortOrder: 70 },
+    { name: "Utilities", slug: "utilities", sortOrder: 80 },
+    { name: "Marketing", slug: "marketing", sortOrder: 90 },
+    { name: "Commission payout", slug: "commission", sortOrder: 100 },
+    { name: "Other", slug: "other", sortOrder: 110 },
   ],
 };
 
@@ -81,8 +97,12 @@ export const TAXONOMY_LEGACY_ALIASES: Record<TaxonomyTypeName, Record<string, st
     Consumables: "consumables",
     Boards: "boards",
     Tools: "tools",
+    "Spare Parts": "spare-parts",
+    "spare_parts": "spare-parts",
+    spare_part: "spare-parts",
   },
   inventory_subcategory: {},
+  expense_category: {},
 };
 
 export function slugifyTerm(name: string): string {

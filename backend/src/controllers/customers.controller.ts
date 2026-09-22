@@ -49,8 +49,15 @@ export class CustomersController {
 
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      await customersService.delete(req.params.id, req.tenantId!);
-      res.status(204).send();
+      const data = await customersService.delete(req.params.id, req.tenantId!);
+      res.json(success("Customer removed successfully", data));
+    } catch (err) { next(err); }
+  }
+
+  async restore(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await customersService.restore(req.params.id, req.tenantId!);
+      res.json(success("Customer restored successfully", data));
     } catch (err) { next(err); }
   }
 }

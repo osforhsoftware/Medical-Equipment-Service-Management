@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { FormFieldError } from "@/components/shared/FormFieldError";
@@ -15,9 +15,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/AuthContext";
 import { api, ApiError, type BackendInventoryItem } from "@/lib/api";
+import { Eye, Package, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { parseCustomerAdditionalFields, sanitizeCustomerAdditionalFields } from "@/lib/customerFields";
+import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/format";
+import { formatInventoryItemClass } from "@/lib/inventoryItemClass";
 import { toast } from "@/lib/toast";
 
 const adjustSchema = z.object({
@@ -35,7 +42,60 @@ export default function InventoryDetail() {
   const [error, setError] = useState<string | null>(null);
   const [adjustDelta, setAdjustDelta] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
+  const [damagedOpen, setDamagedOpen] = useState(false);
+  const [damagedQty, setDamagedQty] = useState("1");
+  const [damagedReason, setDamagedReason] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const damagedCount = useMemo(() => {
+    if (!item?.additionalFields) return 0;
+    const fields = parseCustomerAdditionalFields(item.additionalFields);
+    return fields
+      .filter((f) => f.label === "Damaged Stock")
+      .reduce((sum, f) => {
+        const qtyStr = f.value.split(" ")[0];
+        return sum + (Number(qtyStr) || 0);
+      }, 0);
+  }, [item]);
+
+  const logDamagedStock = async () => {
+    if (!item) return;
+    const qty = Number(damagedQty);
+    if (isNaN(qty) || qty <= 0) {
+      toast({ title: "Invalid quantity", description: "Quantity must be at least 1", variant: "destructive" });
+      return;
+    }
+    if (!damagedReason.trim()) {
+      toast({ title: "Reason required", description: "Please enter a reason for damaged stock", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.adjustInventoryStock(item.id, -qty, `DAMAGED: ${damagedReason.trim()}`);
+      const existing = parseCustomerAdditionalFields(item.additionalFields);
+      const newFields = [
+        ...existing,
+        { label: "Damaged Stock", value: `${qty} units - ${damagedReason.trim()} (${new Date().toISOString().slice(0, 10)})` },
+      ];
+      const finalItem = await api.updateInventoryItem(item.id, {
+        additionalFields: sanitizeCustomerAdditionalFields(newFields),
+      });
+      setItem(finalItem);
+      setDamagedOpen(false);
+      setDamagedQty("1");
+      setDamagedReason("");
+      toast({ title: "Damaged stock logged", description: `${qty} units segregated and stock reduced.` });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Failed to log damaged stock" });
+    } finally {
+      setSaving(false);
+    }
+  };
+  const [previewState, setPreviewState] = useState<{
+    title: string;
+    images: string[];
+    index: number;
+  } | null>(null);
   const tab = searchParams.get("tab") ?? "overview";
   const adjustRef = useRef<HTMLDivElement>(null);
   const {
@@ -100,8 +160,9 @@ export default function InventoryDetail() {
         backTo="/app/inventory"
         backLabel="Back to Inventory"
         title={item?.name ?? "Inventory item"}
-        subtitle={item ? [item.sku, item.category].filter(Boolean).join(" · ") || undefined : undefined}
+        subtitle={item ? [item.sku, formatInventoryItemClass(item.itemClass), item.category].filter(Boolean).join(" · ") || undefined : undefined}
         meta={item ? [
+          { label: "Category", value: formatInventoryItemClass(item.itemClass) },
           { label: "In stock", value: String(item.inStock) },
           { label: "Reserved", value: String(item.reserved) },
           { label: "Supplier", value: item.supplier || "—" },
@@ -123,20 +184,55 @@ export default function InventoryDetail() {
                 <DetailSection title="Item details">
                   <DetailInfoGrid
                     items={[
-                      { label: "SKU", value: item.sku || "—" },
-                      { label: "Category", value: item.category || "—" },
+                      { label: "Part ID / SKU", value: item.sku || "—" },
+                      { label: "Category", value: formatInventoryItemClass(item.itemClass) },
+                      { label: "Technical category", value: item.category || "—" },
                       { label: "Subcategory", value: item.subcategory || "—" },
+                      { label: "Manufacturer", value: item.manufacturer || "—" },
+                      { label: "Compatible models", value: item.compatibleModels || "—" },
                       { label: "In stock", value: String(item.inStock) },
                       { label: "Reserved", value: String(item.reserved) },
-                      { label: "Reorder at", value: String(item.reorderLevel) },
-                      { label: "UoM", value: item.unitOfMeasure ?? "pcs" },
-                      { label: "Unit cost", value: formatCurrency(item.unitCost) },
-                      { label: "Selling price", value: formatCurrency(item.sellingPrice ?? 0) },
+                      { label: "Min/max level (min)", value: String(item.reorderLevel) },
+                      { label: "Min/max level (max)", value: String(item.maxLevel ?? 0) },
+                      { label: "Bin/location", value: item.binLocation || "—" },
+                      { label: "Stock unit", value: item.unitOfMeasure ?? "pcs" },
+                      { label: "Cost / selling price (cost)", value: formatCurrency(item.unitCost) },
+                      { label: "Cost / selling price (selling)", value: formatCurrency(item.sellingPrice ?? 0) },
                       { label: "Delivery", value: `${formatCurrency(item.deliveryCharge ?? 0)} (${item.deliveryChargeType ?? "flat"})` },
                       { label: "Supplier", value: item.supplier },
+                      { label: "Batch / serial tracking (batches)", value: item.trackBatches ? "Yes" : "No" },
+                      { label: "Batch / serial tracking (serials)", value: item.trackSerials ? "Yes" : "No" },
                     ]}
                   />
                 </DetailSection>
+                {item.images && item.images.length > 0 ? (
+                  <DetailSection title="Product Images">
+                    <div className="flex flex-wrap gap-3">
+                      {item.images.map((img, idx) => (
+                        <div
+                          key={img.id}
+                          className="group relative h-28 w-28 overflow-hidden rounded-xl border border-border shadow-2xs cursor-pointer transition-all hover:border-primary hover:shadow-xs bg-muted"
+                          onClick={() =>
+                            setPreviewState({
+                              title: item.name,
+                              images: item.images!.map((i) => api.fileDownloadUrl(i.fileId)),
+                              index: idx,
+                            })
+                          }
+                        >
+                          <img
+                            src={api.fileDownloadUrl(img.fileId)}
+                            alt={`${item.name} ${idx + 1}`}
+                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          />
+                          <div className="absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/25 flex items-center justify-center">
+                            <Eye className="h-5 w-5 text-white opacity-0 transition-opacity group-hover:opacity-100 drop-shadow-md" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </DetailSection>
+                ) : null}
                 {item.description ? (
                   <DetailSection title="Description">
                     <p className="text-sm text-muted-foreground">{item.description}</p>
@@ -155,11 +251,11 @@ export default function InventoryDetail() {
                     { label: "Available", value: String(item.inStock - item.reserved) },
                     { label: "On hand", value: String(item.inStock) },
                     { label: "Reserved", value: String(item.reserved) },
-                    { label: "Reorder level", value: String(item.reorderLevel) },
+                    { label: "Min/max level (min)", value: String(item.reorderLevel) },
                   ]}
                 />
                 {item.inStock <= item.reorderLevel ? (
-                  <p className="mt-3 text-sm text-warning-foreground">Stock is at or below reorder level.</p>
+                  <p className="mt-3 text-sm text-warning-foreground">Stock is at or below Min/max level (min).</p>
                 ) : null}
               </DetailSection>
             ),
@@ -228,10 +324,158 @@ export default function InventoryDetail() {
               ) : (
                 <p className="text-sm text-muted-foreground">Stock adjustments require admin access.</p>
               )}
+              {canAdjust && (
+                <div className="pt-2 border-t border-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-muted-foreground">Damaged Stock Segregation</span>
+                    {damagedCount > 0 && (
+                      <Badge variant="destructive" className="text-[10px]">
+                        🔴 {damagedCount} Damaged
+                      </Badge>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-destructive border-destructive/40 hover:bg-destructive/10"
+                    onClick={() => setDamagedOpen(true)}
+                  >
+                    <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />
+                    Log Damaged Stock
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         ) : undefined}
       />
+
+      <Dialog open={damagedOpen} onOpenChange={setDamagedOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" /> Log Damaged Stock
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-xs text-muted-foreground">
+              Logging damaged stock will reduce available stock and record the segregated items for inspection.
+            </p>
+            <div className="space-y-1">
+              <Label htmlFor="damaged-qty">Quantity Damaged</Label>
+              <Input
+                id="damaged-qty"
+                type="number"
+                min={1}
+                value={damagedQty}
+                onChange={(e) => setDamagedQty(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="damaged-reason">Reason / Damage Description</Label>
+              <Textarea
+                id="damaged-reason"
+                placeholder="e.g. Water damage in transit, cracked housing, burnt circuit board"
+                value={damagedReason}
+                onChange={(e) => setDamagedReason(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDamagedOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => void logDamagedStock()} disabled={saving}>
+              {saving ? "Saving…" : "Log Damaged Stock"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {previewState ? (
+        <Dialog open={Boolean(previewState)} onOpenChange={(open) => !open && setPreviewState(null)}>
+          <DialogContent className="sm:max-w-xl p-0 overflow-hidden bg-background border-border">
+            <DialogHeader className="p-4 border-b border-border flex flex-row items-center justify-between">
+              <div>
+                <DialogTitle className="text-base font-semibold">{previewState.title}</DialogTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Image {previewState.index + 1} of {previewState.images.length}
+                </p>
+              </div>
+            </DialogHeader>
+            <div className="relative flex items-center justify-center min-h-[340px] max-h-[520px] bg-black/95 p-4">
+              <img
+                src={previewState.images[previewState.index]}
+                alt={previewState.title}
+                className="max-h-[480px] max-w-full rounded-md object-contain shadow-2xl"
+              />
+              {previewState.images.length > 1 ? (
+                <>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/60 border-white/20 text-white hover:bg-black/80"
+                    onClick={() =>
+                      setPreviewState((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              index: (prev.index - 1 + prev.images.length) % prev.images.length,
+                            }
+                          : null
+                      )
+                    }
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/60 border-white/20 text-white hover:bg-black/80"
+                    onClick={() =>
+                      setPreviewState((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              index: (prev.index + 1) % prev.images.length,
+                            }
+                          : null
+                      )
+                    }
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </Button>
+                </>
+              ) : null}
+            </div>
+            <div className="p-3 border-t border-border flex justify-between items-center bg-muted/30">
+              <div className="flex gap-2 overflow-x-auto">
+                {previewState.images.map((url, i) => (
+                  <button
+                    key={url}
+                    type="button"
+                    onClick={() => setPreviewState((prev) => (prev ? { ...prev, index: i } : null))}
+                    className={cn(
+                      "h-10 w-10 overflow-hidden rounded-lg border transition-all cursor-pointer",
+                      i === previewState.index ? "border-primary ring-2 ring-primary/30" : "border-border opacity-60 hover:opacity-100"
+                    )}
+                  >
+                    <img src={url} alt="" className="h-full w-full object-cover" />
+                  </button>
+                ))}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs"
+                onClick={() => window.open(previewState.images[previewState.index], "_blank")}
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> Open original
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </RoleGuard>
   );
 }

@@ -6,6 +6,7 @@ import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable, type Column } from "@/components/shared/DataTable";
+import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,16 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
@@ -81,6 +72,7 @@ export default function Suppliers() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<BackendSupplier | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -133,6 +125,7 @@ export default function Suppliers() {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
+    setDeleting(true);
     try {
       await api.deleteSupplier(deleteTarget.id);
       toast({ title: "Supplier removed", description: `${deleteTarget.name} deleted.` });
@@ -140,6 +133,8 @@ export default function Suppliers() {
       await queryClient.invalidateQueries({ queryKey: ["suppliers"] });
     } catch (err) {
       toast.apiError(err, { fallback: "Unable to delete" });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -225,7 +220,6 @@ export default function Suppliers() {
           isFetching={suppliersQuery.isFetching}
           error={suppliersQuery.error as Error | null}
           onRetry={() => load()}
-          onRowClick={(s) => toast({ title: s.name, description: `${s.category} · ${s.email}` })}
         />
       </div>
 
@@ -345,22 +339,20 @@ export default function Suppliers() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove supplier?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently remove <strong>{deleteTarget?.name}</strong>.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Remove
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="Remove supplier?"
+        description={
+          <p>
+            This will permanently remove{" "}
+            <span className="font-medium text-foreground">{deleteTarget?.name}</span>.
+          </p>
+        }
+        confirmLabel="Remove supplier"
+        loading={deleting}
+        onConfirm={() => void confirmDelete()}
+      />
     </RoleGuard>
   );
 }

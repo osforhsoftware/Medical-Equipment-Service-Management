@@ -14,13 +14,17 @@ type CreateEquipmentData = {
   manufacturer?: string;
   category?: string;
   serialNumber: string;
+  partNumber?: string | null;
   customerId?: string | null;
   branchId?: string;
   location?: string;
   installDate?: string | null;
+  warrantyStart?: string | null;
   warrantyEnd?: string | null;
   amcStatus?: string;
   condition?: string;
+  currentStatus?: string;
+  purchaseSaleHistory?: string | null;
   lastServiceDate?: string | null;
 };
 
@@ -81,14 +85,18 @@ export class EquipmentService {
       manufacturer: data.manufacturer?.trim() || "",
       category,
       serialNumber: data.serialNumber,
+      partNumber: data.partNumber?.trim() || null,
       customerId,
       customerName: customer?.name ?? "",
       branchId,
       location: data.location?.trim() || "",
       installDate: parseOptionalDate(data.installDate),
+      warrantyStart: parseOptionalDate(data.warrantyStart),
       warrantyEnd: parseOptionalDate(data.warrantyEnd),
       amcStatus: (data.amcStatus ?? "none") as never,
       condition,
+      currentStatus: (data.currentStatus ?? "in_service") as never,
+      purchaseSaleHistory: data.purchaseSaleHistory?.trim() || null,
       lastServiceDate: parseOptionalDate(data.lastServiceDate),
     });
 
@@ -128,6 +136,11 @@ export class EquipmentService {
     } else if (next.installDate === "") {
       next.installDate = null;
     }
+    if (typeof next.warrantyStart === "string") {
+      next.warrantyStart = parseOptionalDate(next.warrantyStart);
+    } else if (next.warrantyStart === "") {
+      next.warrantyStart = null;
+    }
     if (typeof next.warrantyEnd === "string") {
       next.warrantyEnd = parseOptionalDate(next.warrantyEnd);
     } else if (next.warrantyEnd === "") {
@@ -141,6 +154,16 @@ export class EquipmentService {
 
     if (typeof next.model === "string") next.model = next.model.trim();
     if (typeof next.manufacturer === "string") next.manufacturer = next.manufacturer.trim();
+    if (typeof next.partNumber === "string") {
+      next.partNumber = next.partNumber.trim() || null;
+    } else if (next.partNumber === "") {
+      next.partNumber = null;
+    }
+    if (typeof next.purchaseSaleHistory === "string") {
+      next.purchaseSaleHistory = next.purchaseSaleHistory.trim() || null;
+    } else if (next.purchaseSaleHistory === "") {
+      next.purchaseSaleHistory = null;
+    }
 
     if (typeof next.category === "string") {
       const slug = next.category.trim();

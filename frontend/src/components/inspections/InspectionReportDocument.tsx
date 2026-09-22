@@ -11,6 +11,7 @@ import {
   type BackendServiceRequest,
 } from "@/lib/api";
 import { displayOrFallback, formatErrorCodes, formatJsonField } from "@/lib/inspectionReport";
+import { parseCustomerAdditionalFields } from "@/lib/customerFields";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -116,6 +117,7 @@ export function InspectionReportDocument({
   const checklistFields = formatJsonField(report.checklist);
   const measurementFields = formatJsonField(report.measurements);
   const errorCodes = formatErrorCodes(report.errorCodes);
+  const additionalFields = parseCustomerAdditionalFields(report.additionalFields);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -140,12 +142,8 @@ export function InspectionReportDocument({
       <div className="doc-sheet inspection-doc-sheet">
         <header className="doc-header">
           <div className="doc-brand">
-            <div className="doc-logo">
-              {settings?.logoUrl ? (
-                <img src={settings.logoUrl} alt="" />
-              ) : (
-                <MesmsLogo size="lg" className="h-10 max-w-[8.5rem]" />
-              )}
+            <div className="doc-logo flex items-center">
+              <MesmsLogo size="sm" variant="horizontal" customLogoUrl={settings?.logoUrl} />
             </div>
             <div className="doc-company">
               <p className="doc-company-name">{company}</p>
@@ -264,6 +262,17 @@ export function InspectionReportDocument({
         {report.calibrationStatus ? (
           <Section title="Calibration">
             <p className="doc-text-block">{report.calibrationStatus}</p>
+          </Section>
+        ) : null}
+
+        {additionalFields.length ? (
+          <Section title="Additional fields">
+            <InfoGrid
+              items={additionalFields.map((field) => ({
+                label: field.label,
+                value: field.value || "—",
+              }))}
+            />
           </Section>
         ) : null}
 

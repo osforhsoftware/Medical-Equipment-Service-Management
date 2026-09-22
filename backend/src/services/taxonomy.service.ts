@@ -210,6 +210,7 @@ export class TaxonomyService {
     if (type === "equipment_condition") return "Select a valid equipment condition.";
     if (type === "inventory_category") return "Select a valid inventory category.";
     if (type === "inventory_subcategory") return "Select a valid inventory subcategory.";
+    if (type === "expense_category") return "Select a valid expense category.";
     return "Select a valid customer type.";
   }
 
@@ -276,6 +277,11 @@ export class TaxonomyService {
         await prisma.inventoryItem.updateMany({
           where: { tenantId, subcategory: from },
           data: { subcategory: to },
+        });
+      } else if (type === "expense_category") {
+        await prisma.projectExpense.updateMany({
+          where: { tenantId, category: from },
+          data: { category: to },
         });
       } else {
         await prisma.customer.updateMany({
@@ -366,6 +372,14 @@ export class TaxonomyService {
       });
       return rows.map((r) => r.subcategory).filter((value): value is string => Boolean(value));
     }
+    if (type === "expense_category") {
+      const rows = await prisma.projectExpense.findMany({
+        where: { tenantId },
+        select: { category: true },
+        distinct: ["category"],
+      });
+      return rows.map((r) => r.category);
+    }
     const rows = await prisma.customer.findMany({
       where: { tenantId },
       select: { type: true, typeOther: true },
@@ -399,6 +413,10 @@ export class TaxonomyService {
     }
     if (type === "inventory_subcategory") {
       await prisma.inventoryItem.updateMany({ where: { tenantId, subcategory: from }, data: { subcategory: to } });
+      return;
+    }
+    if (type === "expense_category") {
+      await prisma.projectExpense.updateMany({ where: { tenantId, category: from }, data: { category: to } });
       return;
     }
     await prisma.customer.updateMany({ where: { tenantId, type: from }, data: { type: to } });
@@ -454,6 +472,19 @@ export class TaxonomyService {
       return counts;
     }
 
+    if (type === "expense_category") {
+      const rows = await prisma.projectExpense.groupBy({
+        by: ["category"],
+        where: { tenantId },
+        _count: { _all: true },
+      });
+      for (const row of rows) {
+        const term = terms.find((t) => t.slug === row.category || t.name === row.category);
+        if (term) counts.set(term.id, (counts.get(term.id) ?? 0) + row._count._all);
+      }
+      return counts;
+    }
+
     const rows = await prisma.equipment.groupBy({
       by: ["condition"],
       where: { tenantId },
@@ -489,6 +520,11 @@ export class TaxonomyService {
     if (type === "inventory_subcategory") {
       return prisma.inventoryItem.count({
         where: { tenantId, OR: [{ subcategory: term.slug }, { subcategory: term.name }] },
+      });
+    }
+    if (type === "expense_category") {
+      return prisma.projectExpense.count({
+        where: { tenantId, OR: [{ category: term.slug }, { category: term.name }] },
       });
     }
     return prisma.customer.count({

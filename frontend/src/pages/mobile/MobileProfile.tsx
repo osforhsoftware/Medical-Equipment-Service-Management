@@ -1,36 +1,55 @@
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
   Boxes,
   ChevronRight,
   ClipboardList,
+  FileText,
   LogOut,
   QrCode,
   Receipt,
   Search,
   Settings,
   User,
+  UserCheck,
   Wrench,
+  type LucideIcon,
 } from "lucide-react";
 import { MobileHeader } from "@/components/mobile/MobileHeader";
 import { useMobileUnreadCount } from "@/hooks/useMobilePullRefresh";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
 import { roleLabels } from "@/data/mock";
+import { userCanAccessPath } from "@/lib/userRoles";
 import { cn } from "@/lib/utils";
 
-const MENU_SECTIONS = [
+interface ProfileMenuItem {
+  label: string;
+  icon: LucideIcon;
+  to: string;
+}
+
+interface ProfileMenuSection {
+  title: string;
+  items: ProfileMenuItem[];
+}
+
+const MENU_SECTIONS: ProfileMenuSection[] = [
   {
     title: "Field Service",
     items: [
       { label: "Service Jobs", icon: Wrench, to: "/app/jobs" },
       { label: "Service Tickets", icon: ClipboardList, to: "/app/service-tickets" },
       { label: "Inspections", icon: Search, to: "/app/inspections" },
+      { label: "Estimates", icon: FileText, to: "/app/estimates" },
       { label: "QR Scanner", icon: QrCode, to: "/app/qr-tracking" },
     ],
   },
   {
     title: "Operations",
     items: [
+      { label: "Customers", icon: UserCheck, to: "/app/customers" },
       { label: "Inventory", icon: Boxes, to: "/app/inventory" },
       { label: "Billing", icon: Receipt, to: "/app/billing" },
       { label: "Notifications", icon: Bell, to: "/app/notifications" },
@@ -42,12 +61,21 @@ const MENU_SECTIONS = [
       { label: "Settings", icon: Settings, to: "/app/settings" },
     ],
   },
-] as const;
+];
 
 export default function MobileProfile() {
   const { user, logout } = useAuth();
+  const { rbacMatrix } = useSettings();
   const navigate = useNavigate();
   const unread = useMobileUnreadCount();
+
+  const visibleSections = useMemo(() => {
+    if (!user) return [];
+    return MENU_SECTIONS.map((section) => ({
+      ...section,
+      items: section.items.filter((item) => userCanAccessPath(user, item.to, rbacMatrix)),
+    })).filter((section) => section.items.length > 0);
+  }, [user, rbacMatrix]);
 
   if (!user) return null;
 
@@ -78,8 +106,8 @@ export default function MobileProfile() {
         </div>
       </div>
 
-      {/* Menu sections */}
-      {MENU_SECTIONS.map((section) => (
+      {/* Menu sections — only modules the staff role can access */}
+      {visibleSections.map((section) => (
         <section key={section.title} className="mt-6">
           <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {section.title}

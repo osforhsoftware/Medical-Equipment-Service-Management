@@ -30,6 +30,7 @@ export const SERVICE_TYPE_OPTIONS: FixedOption[] = [
 ];
 
 export const INVENTORY_CATEGORY_OPTIONS: FixedOption[] = [
+  { value: "Spare Parts", label: "Spare Parts" },
   { value: "Modules", label: "Modules" },
   { value: "Sensors", label: "Sensors" },
   { value: "Consumables", label: "Consumables" },

@@ -3,18 +3,20 @@ export const BILLING_CHARGE_GROUPS = [
   { key: "equipment", label: "Equipment", types: ["equipment"] },
   { key: "machines", label: "Machines", types: ["machine"] },
   { key: "serviceCharges", label: "Service Charges", types: ["service", "labor", "labour"] },
+  { key: "customCharges", label: "Custom", types: ["custom"] },
   { key: "otherCharges", label: "Other Charges", types: ["other", "extra", "adjustment", "transport", "testing", "calibration"] },
 ] as const;
 
 export type BillingChargeGroupKey = (typeof BILLING_CHARGE_GROUPS)[number]["key"];
 
-export const BILLING_ADD_LINE_TYPES = ["product", "part", "equipment", "machine", "service", "labor", "other"] as const;
+export const BILLING_ADD_LINE_TYPES = ["product", "part", "equipment", "machine", "service", "labor", "custom", "other"] as const;
 
 export const INVOICE_LINE_TYPES = [
   "product",
   "equipment",
   "machine",
   "service",
+  "custom",
   "other",
   "part",
   "labor",
@@ -42,6 +44,7 @@ const emptyGroups = (): Record<BillingChargeGroupKey, number> => ({
   equipment: 0,
   machines: 0,
   serviceCharges: 0,
+  customCharges: 0,
   otherCharges: 0,
 });
 

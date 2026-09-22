@@ -5,6 +5,7 @@ import { signToken } from "@/middleware/auth";
 import { AppError } from "@/middleware/errorHandler";
 import { prisma } from "@/db/prisma";
 import { env } from "@/config/env";
+import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
 import { enrichUserWithRoles } from "@/utils/userRoles";
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -21,6 +22,10 @@ export class AuthService {
 
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) throw new AppError("Invalid username or password", 401);
+
+    if (!CUSTOMER_PORTAL_ENABLED && user.role === "customer") {
+      throw new AppError("Customer Portal is temporarily unavailable.", 403);
+    }
 
     const token = signToken({
       userId: user.id,

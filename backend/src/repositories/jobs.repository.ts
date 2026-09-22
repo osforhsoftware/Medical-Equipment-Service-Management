@@ -2,6 +2,7 @@ import { prisma } from "@/db/prisma";
 import type { ServiceJob, Prisma } from "@prisma/client";
 import type { PaginatedResult } from "@/types";
 import { searchContains } from "@/utils/searchFilter";
+import { COMPLETED_BOARD_RETENTION_DAYS, type CompletedScope } from "@/lib/ticketBoardArchive";
 
 const jobIncludes = {
   assignments: { where: { endedAt: null }, include: { user: true } },
@@ -18,6 +19,11 @@ export interface JobListFilters {
   engineer?: string;
   engineerId?: string;
   search?: string;
+  scheduledFrom?: string;
+  scheduledTo?: string;
+  overdue?: boolean;
+  /** recent (default) = hide completed older than 7 days; archive = only those; all = no hide */
+  completedScope?: CompletedScope;
   skip: number;
   take: number;
   orderBy: Prisma.ServiceJobOrderByWithRelationInput;
@@ -28,6 +34,20 @@ function buildWhere(tenantId: string, filters: Omit<JobListFilters, "skip" | "ta
 
   if (filters.status) {
     where.status = filters.status as ServiceJob["status"];
+  } else if (filters.overdue) {
+    where.status = { not: "completed" };
+  }
+
+  const scheduledFor: Prisma.DateTimeFilter = {};
+  if (filters.scheduledFrom) scheduledFor.gte = new Date(filters.scheduledFrom);
+  if (filters.scheduledTo) scheduledFor.lte = new Date(`${filters.scheduledTo}T23:59:59.999Z`);
+  if (filters.overdue) {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    scheduledFor.lt = startOfToday;
+  }
+  if (Object.keys(scheduledFor).length > 0) {
+    where.scheduledFor = scheduledFor;
   }
 
   if (filters.engineerId) {
@@ -55,6 +75,26 @@ function buildWhere(tenantId: string, filters: Omit<JobListFilters, "skip" | "ta
       delete where.OR;
     } else {
       where.OR = searchClause.OR;
+    }
+  }
+
+  const scope = filters.completedScope ?? "recent";
+  if (scope !== "all") {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - COMPLETED_BOARD_RETENTION_DAYS);
+    const archiveClause: Prisma.ServiceJobWhereInput =
+      scope === "archive"
+        ? { status: "completed", completedAt: { lt: cutoff } }
+        : {
+            OR: [
+              { status: { not: "completed" } },
+              { status: "completed", OR: [{ completedAt: null }, { completedAt: { gte: cutoff } }] },
+            ],
+          };
+    if (where.AND) {
+      where.AND = [...(Array.isArray(where.AND) ? where.AND : [where.AND]), archiveClause];
+    } else {
+      where.AND = [archiveClause];
     }
   }
 

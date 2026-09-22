@@ -18,7 +18,16 @@ export class SalesController {
 
   async listOrders(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await salesService.listOrders(req.tenantId!);
+      const { customerId, status, deliveryStatus, paymentStatus, from, to, search } = req.query;
+      const data = await salesService.listOrders(req.tenantId!, {
+        customerId: typeof customerId === "string" ? customerId : undefined,
+        status: typeof status === "string" ? status : undefined,
+        deliveryStatus: typeof deliveryStatus === "string" ? deliveryStatus : undefined,
+        paymentStatus: typeof paymentStatus === "string" ? paymentStatus : undefined,
+        from: typeof from === "string" ? from : undefined,
+        to: typeof to === "string" ? to : undefined,
+        search: typeof search === "string" ? search : undefined,
+      });
       res.json(success("Sales orders fetched successfully", data));
     } catch (err) {
       next(err);
@@ -81,7 +90,9 @@ export class SalesController {
 
   async getReports(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await salesService.getReports(req.tenantId!);
+      const from = typeof req.query.from === "string" ? req.query.from : undefined;
+      const to = typeof req.query.to === "string" ? req.query.to : undefined;
+      const data = await salesService.getReports(req.tenantId!, { from, to });
       res.json(success("Sales reports fetched successfully", data));
     } catch (err) {
       next(err);

@@ -1,12 +1,25 @@
 import { z } from "zod";
 
 export const amcStatusSchema = z.enum(["active", "expiring", "expired", "none"]);
+export const equipmentCurrentStatusSchema = z.enum([
+  "in_service",
+  "in_repair",
+  "in_storage",
+  "decommissioned",
+  "disposed",
+]);
 export const conditionSchema = z.string().trim().max(80);
 
 const optionalText = (max: number) =>
   z.preprocess(
     (v) => (v == null ? "" : v),
     z.string().trim().max(max),
+  );
+
+const optionalNullableText = (max: number) =>
+  z.preprocess(
+    (v) => (v == null || v === "" ? null : v),
+    z.string().trim().max(max).nullable(),
   );
 
 const optionalNullableId = z.preprocess(
@@ -26,15 +39,22 @@ export const createEquipmentSchema = z.object({
   manufacturer: optionalText(120),
   category: optionalText(80),
   serialNumber: z.string().min(1, "Serial number is required").max(120),
+  partNumber: optionalNullableText(120),
   customerId: optionalNullableId,
   branchId: z.string().optional(),
   location: z.string().max(200).optional(),
   installDate: optionalNullableDate,
+  warrantyStart: optionalNullableDate,
   warrantyEnd: optionalNullableDate,
   amcStatus: amcStatusSchema.optional().default("none"),
   condition: z.preprocess(
     (v) => (v == null || v === "" ? undefined : v),
     conditionSchema.optional(),
+  ),
+  currentStatus: equipmentCurrentStatusSchema.optional().default("in_service"),
+  purchaseSaleHistory: z.preprocess(
+    (v) => (v == null || v === "" ? null : v),
+    z.string().trim().max(10000).nullable(),
   ),
   lastServiceDate: z.string().optional().nullable(),
 });

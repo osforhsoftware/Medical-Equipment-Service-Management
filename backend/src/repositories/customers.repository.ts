@@ -64,8 +64,27 @@ export class CustomersRepository {
     return prisma.customer.update({ where: { id }, data });
   }
 
-  async delete(id: string, tenantId: string): Promise<void> {
-    await prisma.customer.deleteMany({ where: { id, tenantId } });
+  /** Soft-delete: mark inactive so related equipment, jobs, and invoices stay linked. */
+  async softDelete(id: string, tenantId: string): Promise<Customer> {
+    const result = await prisma.customer.updateMany({
+      where: { id, tenantId },
+      data: { status: "inactive" },
+    });
+    if (result.count === 0) {
+      throw new Error("Customer not found");
+    }
+    return (await this.findById(id, tenantId))!;
+  }
+
+  async restore(id: string, tenantId: string): Promise<Customer> {
+    const result = await prisma.customer.updateMany({
+      where: { id, tenantId },
+      data: { status: "active" },
+    });
+    if (result.count === 0) {
+      throw new Error("Customer not found");
+    }
+    return (await this.findById(id, tenantId))!;
   }
 
   async count(tenantId: string): Promise<number> {

@@ -42,6 +42,11 @@ export interface JobListParams extends BaseListParams {
   priority?: string;
   assignee?: string;
   customerId?: string;
+  scheduledFrom?: string;
+  scheduledTo?: string;
+  overdue?: boolean;
+  /** recent | archive | all — soft-hide completed older than 7 days */
+  completedScope?: "recent" | "archive" | "all";
 }
 
 export interface ServiceRequestListParams extends BaseListParams {
@@ -50,7 +55,12 @@ export interface ServiceRequestListParams extends BaseListParams {
   priority?: string;
   assignee?: string;
   overdue?: boolean;
+  mine?: boolean;
   customerId?: string;
+  slaDueFrom?: string;
+  slaDueTo?: string;
+  /** recent | archive | all — soft-hide completed older than 7 days */
+  completedScope?: "recent" | "archive" | "all";
 }
 
 export interface EstimateListParams extends BaseListParams {
@@ -63,6 +73,7 @@ export interface EstimateListParams extends BaseListParams {
 
 export interface InventoryListParams extends BaseListParams {
   category?: string;
+  itemClass?: string;
   stockStatus?: string;
   supplierId?: string;
 }
@@ -76,10 +87,10 @@ export interface AuditLogListParams extends BaseListParams {
 }
 
 /** Build query string from list params — skips empty / "all" values. */
-export function buildListQuery(params?: Record<string, string | number | boolean | undefined | null>): string {
+export function buildListQuery<T extends object>(params?: T): string {
   if (!params) return "";
   const search = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
+  Object.entries(params as Record<string, unknown>).forEach(([key, value]) => {
     if (value === undefined || value === null || value === "" || value === "all") return;
     if (typeof value === "boolean") {
       if (value) search.set(key, "true");

@@ -1,4 +1,4 @@
-import { ArrowRight, Loader2, MapPin } from "lucide-react";
+import { ArrowRight, ChevronRight, Loader2, MapPin } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDate, formatJobStatus } from "@/lib/format";
 import { WorkflowStatusChip } from "./WorkflowStatusChip";
@@ -28,21 +28,28 @@ export function StaffWorkCard({
   return (
     <article
       className={cn(
-        "mobile-card overflow-hidden transition-all",
-        featured && "border-0 bg-gradient-primary text-primary-foreground shadow-elevated",
-        overdue && !featured && "border-destructive/30 bg-destructive/[0.03]",
+        "mobile-card overflow-hidden transition-all hover:shadow-md",
+        featured && "border-0 bg-gradient-to-br from-primary via-primary/95 to-accent text-primary-foreground shadow-lg shadow-primary/20",
+        overdue && !featured && "border-destructive/40 bg-destructive/[0.04]",
       )}
     >
       <button type="button" onClick={onOpen} className="w-full text-left">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className={cn("font-mono text-[11px]", featured ? "text-primary-foreground/70" : "text-muted-foreground")}>
-              {item.reference}
-            </p>
-            <h3 className={cn("mt-0.5 font-display text-base font-semibold leading-snug", featured ? "text-primary-foreground" : "text-foreground")}>
+            <div className="flex items-center gap-1.5">
+              <span className={cn("font-mono text-[11px] font-bold tracking-tight px-2 py-0.5 rounded-md", featured ? "bg-white/15 text-white" : "bg-muted text-muted-foreground")}>
+                {item.reference}
+              </span>
+              {item.kind && (
+                <span className={cn("text-[10px] font-bold uppercase tracking-wider", featured ? "text-white/80" : "text-primary")}>
+                  • {item.kind}
+                </span>
+              )}
+            </div>
+            <h3 className={cn("mt-1.5 font-display text-base font-bold leading-snug", featured ? "text-primary-foreground" : "text-foreground")}>
               {item.title}
             </h3>
-            <p className={cn("mt-1 flex items-center gap-1 text-sm", featured ? "text-primary-foreground/85" : "text-muted-foreground")}>
+            <p className={cn("mt-1 flex items-center gap-1 text-xs font-medium", featured ? "text-primary-foreground/90" : "text-muted-foreground")}>
               <MapPin className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">{item.subtitle}</span>
             </p>
@@ -51,7 +58,7 @@ export function StaffWorkCard({
             <WorkflowStatusChip
               status={displayStatus}
               overdue={overdue}
-              className={featured ? "border-primary-foreground/30 bg-primary-foreground text-primary" : undefined}
+              className={featured ? "border-white/30 bg-white/20 text-white font-bold" : undefined}
             />
             {item.priority && item.priority !== "low" && (
               <WorkflowStatusChip status={item.priority} label={item.priority} />
@@ -60,24 +67,24 @@ export function StaffWorkCard({
         </div>
 
         {item.dueAt && (
-          <p className={cn("mt-2 text-xs font-medium", overdue ? "text-destructive" : featured ? "text-primary-foreground/75" : "text-muted-foreground")}>
-            {overdue ? "Overdue · " : "Due · "}{formatDate(item.dueAt)}
+          <p className={cn("mt-2.5 text-xs font-semibold", overdue ? "text-destructive font-bold" : featured ? "text-primary-foreground/85" : "text-muted-foreground")}>
+            {overdue ? "⚠️ Overdue · " : "📅 Due · "}{formatDate(item.dueAt)}
           </p>
         )}
 
-        <div className={cn("mt-3 rounded-xl p-2.5", featured ? "bg-primary-foreground/10" : "bg-muted/40")}>
+        <div className={cn("mt-3 rounded-xl p-2.5 backdrop-blur-xs", featured ? "bg-white/10 border border-white/10" : "bg-muted/50 border border-border/40")}>
           <WorkflowTimeline status={displayStatus} kind={item.kind === "job" ? "job" : "request"} compact />
         </div>
 
         {typeof item.progress === "number" && item.progress > 0 && (
           <div className="mt-3">
-            <div className="mb-1 flex justify-between text-[10px] font-medium">
-              <span className={featured ? "text-primary-foreground/70" : "text-muted-foreground"}>Progress</span>
+            <div className="mb-1 flex justify-between text-[10px] font-bold">
+              <span className={featured ? "text-primary-foreground/80" : "text-muted-foreground"}>Work Progress</span>
               <span className={featured ? "text-primary-foreground" : "text-foreground"}>{item.progress}%</span>
             </div>
-            <div className={cn("h-1.5 overflow-hidden rounded-full", featured ? "bg-primary-foreground/20" : "bg-muted")}>
+            <div className={cn("h-2 overflow-hidden rounded-full p-0.5", featured ? "bg-white/20" : "bg-muted")}>
               <div
-                className={cn("h-full rounded-full transition-all", featured ? "bg-primary-foreground" : "bg-primary")}
+                className={cn("h-full rounded-full transition-all duration-300", featured ? "bg-white shadow-xs" : "bg-primary")}
                 style={{ width: `${item.progress}%` }}
               />
             </div>
@@ -85,7 +92,7 @@ export function StaffWorkCard({
         )}
       </button>
 
-      <div className="mt-4 flex gap-2">
+      <div className="mt-3.5 flex items-center gap-2 pt-1 border-t border-border/30">
         {onQuickUpdate && quickUpdateLabel && (
           <button
             type="button"
@@ -95,31 +102,38 @@ export function StaffWorkCard({
               onQuickUpdate();
             }}
             className={cn(
-              "mobile-btn-primary flex-1 !h-12 !min-h-[48px] !text-sm",
-              featured && "!bg-primary-foreground !text-primary",
+              "flex-1 inline-flex h-11 min-h-[44px] items-center justify-center gap-1.5 rounded-xl text-xs font-bold shadow-xs transition-all active:scale-95",
+              featured
+                ? "bg-white text-primary hover:bg-white/90"
+                : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-primary/20",
             )}
           >
-            {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : quickUpdateLabel}
+            {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : (
+              <>
+                <span>⚡ {quickUpdateLabel}</span>
+              </>
+            )}
           </button>
         )}
         <button
           type="button"
           onClick={onOpen}
           className={cn(
-            "inline-flex h-12 min-h-[48px] items-center justify-center gap-1 rounded-[14px] px-4 text-sm font-semibold transition-colors",
+            "inline-flex h-11 min-h-[44px] items-center justify-center gap-1 rounded-xl px-4 text-xs font-bold transition-all active:scale-95",
             onQuickUpdate
               ? featured
-                ? "border border-primary-foreground/30 text-primary-foreground"
-                : "mobile-btn-secondary !h-12 !min-h-[48px] flex-1"
+                ? "border border-white/40 text-white hover:bg-white/10"
+                : "border border-border/80 bg-card text-foreground hover:bg-muted/60"
               : featured
-                ? "w-full bg-primary-foreground text-primary"
-                : "mobile-btn-primary w-full !h-12 !min-h-[48px]",
+                ? "w-full bg-white text-primary font-extrabold hover:bg-white/90"
+                : "w-full bg-primary text-primary-foreground font-extrabold hover:bg-primary/90 shadow-md shadow-primary/20",
           )}
         >
-          Open
-          <ArrowRight className="h-4 w-4" />
+          View Details
+          <ChevronRight className="h-4 w-4" />
         </button>
       </div>
     </article>
   );
 }
+

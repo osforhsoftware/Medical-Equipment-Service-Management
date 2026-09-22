@@ -17,6 +17,8 @@ import {
   resolveTicketEventStatus,
   type TicketEvent,
 } from "@/services/workflow/serviceTicketStateMachine";
+import { completedAtForStatusChange } from "@/lib/ticketBoardArchive";
+import { normalizeAdditionalFields } from "@/lib/additionalFields";
 
 const ASSIGNABLE_STAFF_ROLES = ["coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
 const ASSIGNMENT_SCOPED_ROLES = ["inspector", "engineer", "inventory", "billing"];
@@ -35,6 +37,7 @@ type CreateServiceRequestData = {
   /** Create intake: inspector only (Inspection flow). */
   role?: "inspector";
   slaDue?: string;
+  additionalFields?: { label: string; value: string }[] | null;
 };
 
 type UpdateServiceRequestData = {
@@ -46,6 +49,7 @@ type UpdateServiceRequestData = {
   assignedName?: string | null;
   description?: string;
   timelineNote?: string;
+  additionalFields?: { label: string; value: string }[] | null;
 };
 
 type ServiceRequestRecord = Awaited<ReturnType<typeof serviceRequestsRepository.findById>>;
@@ -152,6 +156,7 @@ export class ServiceRequestsService {
     const names = new Map(users.map((user) => [user.id, user.name]));
     return {
       ...withCreator,
+      additionalFields: normalizeAdditionalFields(withCreator.additionalFields) ?? [],
       assignedInspectorName: withCreator.assignedInspectorId
         ? names.get(withCreator.assignedInspectorId) ?? null
         : null,
@@ -244,9 +249,17 @@ export class ServiceRequestsService {
     if (!existing) throw new AppError("Service ticket not found", 404);
     const status = resolveTicketEventStatus(existing.status, event);
     if (status === existing.status) return existing;
+    const completedAt = completedAtForStatusChange({
+      previousStatus: existing.status,
+      nextStatus: status,
+      existingCompletedAt: (existing as { completedAt?: Date | null }).completedAt ?? null,
+    });
     return client.serviceRequest.update({
       where: { id },
-      data: { status: status as never },
+      data: {
+        status: status as never,
+        ...(completedAt !== undefined ? { completedAt } : {}),
+      },
     });
   }
 
@@ -277,7 +290,14 @@ export class ServiceRequestsService {
     actorId: string,
     actorRole: string,
     statuses: string[],
-    filters?: { overdue?: boolean; priority?: string; assignee?: string; search?: string },
+    filters?: {
+      overdue?: boolean;
+      priority?: string;
+      assignee?: string;
+      search?: string;
+      mineUserId?: string;
+      completedScope?: import("@/lib/ticketBoardArchive").CompletedScope;
+    },
   ) {
     const assignedTo = actorRole === "engineer" || actorRole === "inspector" ? undefined : ASSIGNMENT_SCOPED_ROLES.includes(actorRole) ? actorId : undefined;
     return serviceRequestsRepository.countByStatus(tenantId, {
@@ -289,6 +309,8 @@ export class ServiceRequestsService {
       assignee: filters?.assignee,
       overdue: filters?.overdue,
       search: filters?.search,
+      mineUserId: filters?.mineUserId,
+      completedScope: filters?.completedScope,
     }, statuses);
   }
 
@@ -313,13 +335,13 @@ export class ServiceRequestsService {
     const sr = await serviceRequestsRepository.findById(id, tenantId);
     if (!sr) throw new AppError("Service ticket not found", 404);
     await this.assertActorAccess(sr, actorId, actorRole);
-    return this.enrichCreatedBy(tenantId, sr);
+    return this.enrichServiceRequest(tenantId, sr);
   }
 
   async getWithTimeline(id: string, tenantId: string) {
     const sr = await serviceRequestsRepository.findWithTimeline(id, tenantId);
     if (!sr) throw new AppError("Service ticket not found", 404);
-    return this.enrichCreatedBy(tenantId, sr);
+    return this.enrichServiceRequest(tenantId, sr);
   }
 
   async getTimeline(id: string, tenantId: string, actorId?: string, actorRole?: string) {
@@ -412,6 +434,7 @@ export class ServiceRequestsService {
           typeOther,
           priority: data.priority as never,
           description: data.description?.trim() ?? "",
+          additionalFields: normalizeAdditionalFields(data.additionalFields) ?? Prisma.JsonNull,
           createdBy,
           assignedTo: data.assignedTo,
           assignedName: data.assignedName,
@@ -464,7 +487,11 @@ export class ServiceRequestsService {
     const user = await usersRepository.findById(actorId, tenantId);
     const actor = user?.name ?? actorId;
 
-    const { timelineNote, status, ...updateData } = data;
+    const { timelineNote, status, additionalFields, ...rest } = data;
+    const updateData: Record<string, unknown> = { ...rest };
+    if (additionalFields !== undefined) {
+      updateData.additionalFields = normalizeAdditionalFields(additionalFields) ?? Prisma.JsonNull;
+    }
     if (
       !["admin", "coordinator"].includes(actorRole) &&
       Object.keys(updateData).length > 0
@@ -703,6 +730,37 @@ export class ServiceRequestsService {
 
   async delete(id: string, tenantId: string) {
     const sr = await this.getById(id, tenantId);
+    const [inspection, estimates, jobs, invoices, changeRequests] = await Promise.all([
+      prisma.inspectionReport.count({ where: { serviceRequestId: id } }),
+      prisma.estimate.count({ where: { tenantId, OR: [{ serviceRequestId: id }, { requestRef: sr.reference }] } }),
+      prisma.serviceJob.count({ where: { tenantId, OR: [{ serviceRequestId: id }, { requestRef: sr.reference }] } }),
+      prisma.invoice.count({ where: { tenantId, serviceRequestId: id } }),
+      prisma.serviceTicketChangeRequest.count({ where: { serviceRequestId: id } }),
+    ]);
+
+    const blockers: string[] = [];
+    if (inspection > 0) blockers.push("inspection report");
+    if (estimates > 0) blockers.push(`${estimates} estimate(s)`);
+    if (jobs > 0) blockers.push(`${jobs} service job(s)`);
+    if (invoices > 0) blockers.push(`${invoices} invoice(s)`);
+    if (changeRequests > 0) blockers.push("change request(s)");
+
+    if (blockers.length > 0) {
+      throw new AppError(
+        `Cannot delete ticket ${sr.reference}: linked ${blockers.join(", ")} still exist. Close or remove related work first.`,
+        409,
+      );
+    }
+
+    // Early intake only — avoid wiping tickets that already left New without linked rows yet.
+    const status = normalizeTicketStatus(sr.status);
+    if (!["new", "inspection"].includes(status)) {
+      throw new AppError(
+        `Cannot delete ticket ${sr.reference} in status “${sr.status}”. Only New / Inspection tickets without linked work can be deleted.`,
+        409,
+      );
+    }
+
     try {
       await serviceRequestsRepository.delete(id, tenantId);
     } catch {

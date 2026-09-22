@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { CheckCircle2, ChevronRight, Circle, FileText, Loader2, UserCheck } from "lucide-react";
+import { CheckCircle2, ChevronRight, Circle, FileText, Loader2, Pencil, Trash2, UserCheck } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
+import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import {
   ActivityTimeline,
   DetailInfoGrid,
@@ -17,18 +18,26 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ESTIMATE_WRITE_ROLES } from "@/config/roles";
+import { ESTIMATE_WRITE_ROLES, TICKET_CREATE_ROLES } from "@/config/roles";
+import { CustomerAdditionalFieldsEditor } from "@/components/customers/CustomerAdditionalFieldsEditor";
 import { useAuth } from "@/context/AuthContext";
 import {
   api,
   ApiError,
+  type BackendCustomer,
   type BackendServiceRequest,
   type BackendTimelineEvent,
   type BackendUser,
 } from "@/lib/api";
+import {
+  parseCustomerAdditionalFields,
+  sanitizeCustomerAdditionalFields,
+  type CustomerAdditionalField,
+} from "@/lib/customerFields";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
 import { formatDate, formatDateTime, formatServiceStatus } from "@/lib/format";
 import { roleLabels } from "@/data/mock";
@@ -60,6 +69,17 @@ const assignSchema = z.object({
   assignNote: fieldRules.optionalString(),
 });
 
+const editSchema = z.object({
+  type: z.string().optional(),
+  typeOther: z.string().optional(),
+  priority: z.string().min(1, "Select priority"),
+  description: z.string().trim().max(500),
+}).superRefine((data, ctx) => {
+  if (data.type === "Other" && !data.typeOther?.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["typeOther"], message: "Please specify the service type" });
+  }
+});
+
 function formatServiceType(type?: string | null, typeOther?: string | null) {
   if (!type) return "—";
   return formatFixedOption(SERVICE_TYPE_OPTIONS, type, typeOther);
@@ -67,9 +87,11 @@ function formatServiceType(type?: string | null, typeOther?: string | null) {
 
 export default function ServiceRequestDetail() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasRole } = useAuth();
   const [request, setRequest] = useState<BackendServiceRequest | null>(null);
+  const [customer, setCustomer] = useState<BackendCustomer | null>(null);
   const [timeline, setTimeline] = useState<BackendTimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,8 +106,20 @@ export default function ServiceRequestDetail() {
   const [assignNote, setAssignNote] = useState("");
   const [assignSaving, setAssignSaving] = useState(false);
   const [loadingAssignStaff, setLoadingAssignStaff] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editForm, setEditForm] = useState({
+    type: "",
+    typeOther: "",
+    priority: "",
+    description: "",
+    additionalFields: [{ label: "", value: "" }] as CustomerAdditionalField[],
+  });
   const workflowDialogRef = useRef<HTMLDivElement>(null);
   const assignDialogRef = useRef<HTMLDivElement>(null);
+  const editDialogRef = useRef<HTMLDivElement>(null);
   const tab = searchParams.get("tab") ?? "overview";
 
   const workflowValidation = useFormValidation({
@@ -98,10 +132,17 @@ export default function ServiceRequestDetail() {
     schema: assignSchema,
   });
 
+  const editValidation = useFormValidation({
+    fieldOrder: ["type", "typeOther", "priority", "description"],
+    schema: editSchema,
+  });
+
   const canCreate = hasRole(["admin", "coordinator"]);
   const canAssign = hasRole(["admin", "coordinator"]);
   const canBuildEstimate = hasRole(ESTIMATE_WRITE_ROLES);
   const canApproveEstimate = hasRole(["admin", "coordinator"]);
+  const canEdit = hasRole(TICKET_CREATE_ROLES);
+  const canDelete = hasRole(TICKET_CREATE_ROLES);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -114,6 +155,15 @@ export default function ServiceRequestDetail() {
       ]);
       setRequest(record);
       setTimeline(events);
+      if (record.customerId) {
+        try {
+          setCustomer(await api.getCustomer(record.customerId));
+        } catch {
+          setCustomer(null);
+        }
+      } else {
+        setCustomer(null);
+      }
     } catch (err) {
       setRequest(null);
       setError(err instanceof ApiError && err.status === 404 ? null : "Please try again.");
@@ -219,11 +269,72 @@ export default function ServiceRequestDetail() {
       });
       setRequest(updated);
       setTimeline(await api.getServiceRequestTimeline(request.id));
-      toast({ title: "Completed work confirmed", description: "The ticket is ready for invoicing." });
+      toast({
+        title: "Completed work confirmed",
+        description: "Invoice path opened — continue in Billing to print, collect payment, and confirm warranty.",
+      });
     } catch (err) {
       toast.apiError(err, { fallback: "Unable to confirm completed work" });
     } finally {
       setWorkflowSaving(false);
+    }
+  };
+
+  const openEditTicket = () => {
+    if (!request) return;
+    const fields = parseCustomerAdditionalFields(request.additionalFields);
+    setEditForm({
+      type: request.type ?? "",
+      typeOther: request.typeOther ?? "",
+      priority: request.priority,
+      description: request.description ?? "",
+      additionalFields: fields.length ? fields : [{ label: "", value: "" }],
+    });
+    editValidation.reset();
+    setEditOpen(true);
+  };
+
+  const submitEdit = async () => {
+    if (!request) return;
+    if (!editValidation.validateAll(editForm, undefined, editDialogRef.current)) return;
+    const parsed = editSchema.safeParse(editForm);
+    if (!parsed.success) return;
+
+    setEditSaving(true);
+    try {
+      const updated = await api.updateServiceRequest(request.id, {
+        type: parsed.data.type || null,
+        typeOther: parsed.data.type === "Other" ? parsed.data.typeOther?.trim() || null : null,
+        priority: parsed.data.priority,
+        description: parsed.data.description,
+        additionalFields: sanitizeCustomerAdditionalFields(editForm.additionalFields),
+      });
+      setRequest(updated);
+      toast.success("Ticket updated");
+      setEditOpen(false);
+      editValidation.reset();
+      setTimeline(await api.getServiceRequestTimeline(request.id));
+    } catch (err) {
+      if (!editValidation.applyApiErrors(err, editDialogRef.current)) {
+        toast.apiError(err, { fallback: "Unable to update ticket" });
+      }
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const deleteTicket = async () => {
+    if (!request) return;
+    setDeleting(true);
+    try {
+      await api.deleteServiceRequest(request.id);
+      toast.success("Ticket deleted", { description: request.reference });
+      setDeleteOpen(false);
+      navigate("/app/service-tickets");
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to delete ticket" });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -254,10 +365,31 @@ export default function ServiceRequestDetail() {
         notFoundTitle="Service ticket not found"
         notFoundDescription="The requested service ticket could not be found."
         onRetry={() => void load()}
-        actions={request?.customerId ? (
-          <Button asChild variant="outline">
-            <Link to={`/app/customers/${request.customerId}`}>View customer</Link>
-          </Button>
+        actions={request ? (
+          <div className="flex flex-wrap gap-2">
+            {canEdit ? (
+              <Button variant="outline" onClick={openEditTicket}>
+                <Pencil className="mr-1.5 h-4 w-4" />
+                Edit
+              </Button>
+            ) : null}
+            {canDelete ? (
+              <Button
+                variant="outline"
+                className="text-destructive hover:text-destructive"
+                disabled={deleting}
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2 className="mr-1.5 h-4 w-4" />
+                Delete
+              </Button>
+            ) : null}
+            {request.customerId ? (
+              <Button asChild variant="outline">
+                <Link to={`/app/customers/${request.customerId}`}>View customer</Link>
+              </Button>
+            ) : null}
+          </div>
         ) : undefined}
         activeTab={tab}
         onTabChange={(value) => setSearchParams(value === "overview" ? {} : { tab: value })}
@@ -312,6 +444,15 @@ export default function ServiceRequestDetail() {
                       </AlertDescription>
                     </Alert>
                   ) : null}
+                  {request.status === "closed" ? (
+                    <Alert className="mt-4 border-amber-500/50 bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200 [&>svg]:text-amber-600">
+                      <FileText className="h-4 w-4" />
+                      <AlertTitle className="font-semibold text-amber-700 dark:text-amber-400">Returned Without Repair</AlertTitle>
+                      <AlertDescription>
+                        This service request was closed and equipment returned to the customer without repair.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
                 </DetailSection>
                 <DetailSection title="Ticket details">
                   <DetailInfoGrid
@@ -328,6 +469,18 @@ export default function ServiceRequestDetail() {
                       { label: "Customer", value: request.customerId ? (
                         <Link className="text-primary hover:underline normal-case" to={`/app/customers/${request.customerId}`}>{request.customerName}</Link>
                       ) : request.customerName },
+                      ...(customer?.paymentTerms?.trim()
+                        ? [{ label: "Payment terms", value: customer.paymentTerms }]
+                        : []),
+                      ...(customer?.deliveryAddress?.trim()
+                        ? [{ label: "Delivery address", value: customer.deliveryAddress }]
+                        : []),
+                      ...(customer?.priceCategory?.trim()
+                        ? [{ label: "Price category", value: customer.priceCategory }]
+                        : []),
+                      ...parseCustomerAdditionalFields(customer?.additionalFields)
+                        .slice(0, 5)
+                        .map((field) => ({ label: field.label, value: field.value || "—" })),
                     ]}
                   />
                 </DetailSection>
@@ -347,6 +500,16 @@ export default function ServiceRequestDetail() {
                     {request.description || "No description provided."}
                   </p>
                 </DetailSection>
+                {parseCustomerAdditionalFields(request.additionalFields).length > 0 ? (
+                  <DetailSection title="Additional registration fields">
+                    <DetailInfoGrid
+                      items={parseCustomerAdditionalFields(request.additionalFields).map((field) => ({
+                        label: field.label,
+                        value: field.value || "—",
+                      }))}
+                    />
+                  </DetailSection>
+                ) : null}
               </div>
             ),
           },
@@ -439,6 +602,11 @@ export default function ServiceRequestDetail() {
                 >
                   {workflowSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   Confirm completed work
+                </Button>
+              ) : null}
+              {["pending_invoice", "invoiced", "pending_final_approval"].includes(request.status) ? (
+                <Button asChild variant="outline" className="w-full">
+                  <Link to="/app/billing">Open billing queue</Link>
                 </Button>
               ) : null}
               <Button asChild variant="outline" className="w-full">
@@ -607,6 +775,151 @@ export default function ServiceRequestDetail() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={editOpen}
+        onOpenChange={(open) => {
+          if (!open) editValidation.reset();
+          setEditOpen(open);
+        }}
+      >
+        <DialogContent ref={editDialogRef} className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit ticket</DialogTitle>
+            <DialogDescription>
+              {request
+                ? `Update registration details for ${request.reference}.`
+                : "Update ticket details."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2" data-field="type">
+                <Label>Type</Label>
+                <Select
+                  value={editForm.type || undefined}
+                  onValueChange={(v) => {
+                    const next = { ...editForm, type: v, typeOther: v === "Other" ? editForm.typeOther : "" };
+                    setEditForm(next);
+                    editValidation.clearError("type");
+                    if (v !== "Other") editValidation.clearError("typeOther");
+                    editValidation.handleChange("type", next);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SERVICE_TYPE_OPTIONS.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2" data-field="priority">
+                <Label className={editValidation.shouldShow("priority") ? "text-destructive" : undefined}>
+                  Priority
+                  <RequiredMark />
+                </Label>
+                <Select
+                  value={editForm.priority}
+                  onValueChange={(v) => {
+                    const next = { ...editForm, priority: v };
+                    setEditForm(next);
+                    editValidation.clearError("priority");
+                    editValidation.handleChange("priority", next);
+                  }}
+                >
+                  <SelectTrigger
+                    className={fieldErrorClass(editValidation.shouldShow("priority"))}
+                    {...fieldAria("priority", editValidation.shouldShow("priority") ? editValidation.errors.priority : null)}
+                  >
+                    <SelectValue placeholder="Priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["low", "medium", "high", "critical"].map((p) => (
+                      <SelectItem key={p} value={p} className="capitalize">{p}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {editValidation.shouldShow("priority") && (
+                  <FormFieldError field="priority" message={editValidation.errors.priority} />
+                )}
+              </div>
+            </div>
+            {editForm.type === "Other" && (
+              <div className="grid gap-2" data-field="typeOther">
+                <Label className={editValidation.shouldShow("typeOther") ? "text-destructive" : undefined}>
+                  Specify type
+                  <RequiredMark />
+                </Label>
+                <Input
+                  value={editForm.typeOther}
+                  onChange={(e) => {
+                    const next = { ...editForm, typeOther: e.target.value };
+                    setEditForm(next);
+                    editValidation.handleChange("typeOther", next);
+                  }}
+                  onBlur={() => editValidation.handleBlur("typeOther", editForm)}
+                  className={fieldErrorClass(editValidation.shouldShow("typeOther"))}
+                  {...fieldAria("typeOther", editValidation.shouldShow("typeOther") ? editValidation.errors.typeOther : null)}
+                  placeholder="e.g. Relocation, Decommission"
+                />
+                {editValidation.shouldShow("typeOther") && (
+                  <FormFieldError field="typeOther" message={editValidation.errors.typeOther} />
+                )}
+              </div>
+            )}
+            <div className="grid gap-2" data-field="description">
+              <Label>Description</Label>
+              <Textarea
+                value={editForm.description}
+                onChange={(e) => {
+                  const next = { ...editForm, description: e.target.value.slice(0, 500) };
+                  setEditForm(next);
+                  editValidation.handleChange("description", next);
+                }}
+                onBlur={() => editValidation.handleBlur("description", editForm)}
+                className={fieldErrorClass(editValidation.shouldShow("description"))}
+                {...fieldAria("description", editValidation.shouldShow("description") ? editValidation.errors.description : null)}
+                rows={3}
+              />
+              {editValidation.shouldShow("description") && (
+                <FormFieldError field="description" message={editValidation.errors.description} />
+              )}
+            </div>
+            <CustomerAdditionalFieldsEditor
+              value={editForm.additionalFields}
+              onChange={(additionalFields) => setEditForm({ ...editForm, additionalFields })}
+              title="Additional registration fields"
+              description="Optional custom fields (site contact, accessories received, PO reference, etc.)."
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button onClick={() => void submitEdit()} disabled={editSaving || deleting} variant="brand">
+              {editSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Save changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <DeleteConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete ticket?"
+        description={
+          <p>
+            Delete ticket{" "}
+            <span className="font-medium text-foreground">{request?.reference}</span>? This cannot be
+            undone.
+          </p>
+        }
+        confirmLabel="Delete ticket"
+        loading={deleting}
+        onConfirm={() => void deleteTicket()}
+      />
     </>
   );
 }

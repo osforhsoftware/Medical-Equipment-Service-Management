@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Pencil } from "lucide-react";
+import { Pencil, ShieldAlert } from "lucide-react";
 import { EquipmentFormDialog } from "@/components/equipment/EquipmentFormDialog";
 import {
   ActivityTimeline,
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/context/AuthContext";
 import { api, ApiError, type BackendEquipment, type BackendEquipmentHistory } from "@/lib/api";
+import { formatEquipmentCurrentStatus } from "@/lib/equipmentWarranty";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { termLabel } from "@/lib/taxonomy";
@@ -79,10 +80,19 @@ export default function EquipmentDetail() {
       subtitle={equipment ? `${equipment.assetTag}${equipment.customerName ? ` · ${equipment.customerName}` : ""}` : undefined}
       status={equipment ? equipment.condition : undefined}
       statusLabel={equipment ? conditionName : undefined}
-      actions={canManage && equipment ? (
-        <Button variant="outline" onClick={() => setEditOpen(true)}>
-          <Pencil className="mr-1 h-4 w-4" /> Edit
-        </Button>
+      actions={equipment ? (
+        <div className="flex gap-2">
+          <Link to="/app/warranty-claims">
+            <Button variant="outline" className="gap-1 border-amber-400 text-amber-700">
+              <ShieldAlert className="h-4 w-4 text-amber-600" /> Claim Warranty
+            </Button>
+          </Link>
+          {canManage && (
+            <Button variant="outline" onClick={() => setEditOpen(true)}>
+              <Pencil className="mr-1 h-4 w-4" /> Edit
+            </Button>
+          )}
+        </div>
       ) : undefined}
       meta={equipment ? [
         { label: "Category", value: categoryName },
@@ -107,6 +117,7 @@ export default function EquipmentDetail() {
                 items={[
                   { label: "Manufacturer", value: equipment.manufacturer },
                   { label: "Model", value: equipment.model },
+                  { label: "Part number", value: equipment.partNumber || "—" },
                   { label: "Category", value: categoryName },
                   { label: "Serial no.", value: equipment.serialNumber },
                   { label: "Location", value: equipment.location || "—" },
@@ -116,11 +127,19 @@ export default function EquipmentDetail() {
                     </Link>
                   ) : (equipment.customerName || "—") },
                   { label: "Installed", value: formatDate(equipment.installDate) },
+                  { label: "Warranty start", value: formatDate(equipment.warrantyStart) },
                   { label: "Warranty ends", value: formatDate(equipment.warrantyEnd) },
+                  { label: "Current status", value: formatEquipmentCurrentStatus(equipment.currentStatus) },
                   { label: "Last service", value: formatDate(equipment.lastServiceDate) },
                   { label: "Asset tag", value: equipment.assetTag },
                 ]}
               />
+              {equipment.purchaseSaleHistory ? (
+                <div className="mt-4 space-y-1">
+                  <p className="text-sm font-medium">Purchase / sale history</p>
+                  <p className="whitespace-pre-wrap text-sm text-muted-foreground">{equipment.purchaseSaleHistory}</p>
+                </div>
+              ) : null}
             </DetailSection>
           ),
         },
@@ -189,6 +208,7 @@ export default function EquipmentDetail() {
             <CardHeader className="pb-3"><CardTitle className="text-base">Summary</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Condition</span><StatusBadge status={equipment.condition} label={conditionName} /></div>
+              <div className="flex justify-between gap-2"><span className="text-muted-foreground">Current status</span><span>{formatEquipmentCurrentStatus(equipment.currentStatus)}</span></div>
               <div className="flex justify-between gap-2"><span className="text-muted-foreground">Tickets</span><span>{history?.requests?.length ?? "—"}</span></div>
               <div className="flex justify-between gap-2"><span className="text-muted-foreground">Jobs</span><span>{history?.jobs?.length ?? "—"}</span></div>
               <div className="flex justify-between gap-2"><span className="text-muted-foreground">Invoices</span><span>{history?.invoices?.length ?? "—"}</span></div>

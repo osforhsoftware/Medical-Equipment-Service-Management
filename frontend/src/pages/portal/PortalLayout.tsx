@@ -5,6 +5,7 @@ import { MesmsLogo } from "@/components/shared/MesmsLogo";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
 import { useAuth } from "@/context/AuthContext";
 
 const links = [
@@ -29,6 +30,7 @@ export function PortalLayout() {
     );
   }
 
+  if (!CUSTOMER_PORTAL_ENABLED) return <Navigate to="/login" replace />;
   if (!user) return <Navigate to="/login" replace />;
   if (user.role !== "customer") return <Navigate to="/app" replace />;
 
@@ -36,7 +38,7 @@ export function PortalLayout() {
     <div className="min-h-screen bg-background">
       <header className="no-print sticky top-0 z-30 border-b border-border bg-card">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4 sm:px-6">
-          <MesmsLogo size="md" />
+          <MesmsLogo size="sm" variant="horizontal" />
 
           <nav className="ml-4 hidden items-center gap-0.5 md:flex">
             {links.map((l) => {

@@ -1,5 +1,5 @@
 import { prisma } from "@/db/prisma";
-import type { User } from "@prisma/client";
+import type { Prisma, User } from "@prisma/client";
 
 export type SafeUser = Omit<User, "passwordHash">;
 
@@ -55,6 +55,7 @@ export class UsersRepository {
     branchId?: string;
     avatarColor?: string;
     customerId?: string;
+    permissions?: Prisma.InputJsonValue;
   }): Promise<User> {
     return prisma.user.create({
       data: {
@@ -79,6 +80,7 @@ export class UsersRepository {
       branchId: string | null;
       avatarColor: string;
       customerId: string | null;
+      permissions: Prisma.InputJsonValue;
     }>,
   ): Promise<User> {
     const existing = await this.findById(id, tenantId);

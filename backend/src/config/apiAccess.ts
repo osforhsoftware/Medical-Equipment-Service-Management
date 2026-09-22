@@ -1,7 +1,12 @@
 /**
  * Canonical API write-access matrix used by route guards and RBAC tests.
  * Read endpoints may be broader; mutations must match these roles.
+ *
+ * Note: `customer` on estimates.decide is included only when Customer Portal is enabled
+ * (see `CUSTOMER_PORTAL_ENABLED` in config/features.ts and docs/CUSTOMER_PORTAL.md).
  */
+import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
+
 export const API_WRITE_ACCESS = {
   "users.write": ["admin"],
   "customers.write": ["admin", "coordinator", "estimator", "sales"],
@@ -14,7 +19,9 @@ export const API_WRITE_ACCESS = {
   "tickets.delete": ["admin", "coordinator"],
   "inspections.write": ["admin", "coordinator", "inspector"],
   "estimates.write": ["admin", "coordinator", "estimator"],
-  "estimates.decide": ["admin", "coordinator", "customer"],
+  "estimates.decide": CUSTOMER_PORTAL_ENABLED
+    ? (["admin", "coordinator", "customer"] as const)
+    : (["admin", "coordinator"] as const),
   "jobs.write": ["admin", "coordinator", "engineer"],
   "inventory.write": ["admin", "inventory"],
   "inventory.adjust": ["admin", "inventory"],

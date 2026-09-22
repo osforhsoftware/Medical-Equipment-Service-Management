@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { ArrowLeft, Loader2, Send } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Loader2, Send, Tag, TrendingDown } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { EstimateItemsTable } from "@/components/estimates/EstimateItemsTable";
 import { EstimateSummary } from "@/components/estimates/EstimateSummary";
 import { EstimateWorkflowSteps } from "@/components/estimates/EstimateWorkflowSteps";
 import { FormFieldError } from "@/components/shared/FormFieldError";
+import { CreditExposureBanner } from "@/components/shared/CreditExposureBanner";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -14,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,6 +47,26 @@ import { toast } from "@/lib/toast";
 const estimateSchema = z.object({
   validUntil: fieldRules.requiredString("Valid until"),
 });
+
+/**
+ * Price-category multiplier.
+ * Adjusts inventory selling price based on customer's assigned price tier.
+ * Extend this map to add more tiers as needed.
+ */
+const PRICE_CATEGORY_MULTIPLIER: Record<string, number> = {
+  retail: 1.0,       // standard retail price (default)
+  wholesale: 0.85,   // 15% discount for bulk / resellers
+  vip: 0.90,         // 10% discount for VIP customers
+  government: 0.92,  // 8% discount for government accounts
+  standard: 1.0,     // same as retail
+};
+
+function priceForCategory(basePrice: number, category: string | null | undefined): number {
+  if (!category) return basePrice;
+  const key = category.toLowerCase().trim();
+  const multiplier = PRICE_CATEGORY_MULTIPLIER[key] ?? 1.0;
+  return Math.round(basePrice * multiplier * 100) / 100;
+}
 
 function validateEstimateLines(lines: EstimateLineInput[]): FieldErrors {
   if (lines.some((line) => !line.description.trim() || line.quantity <= 0)) {
@@ -201,6 +224,29 @@ export default function EstimateBuilder() {
   }, [load]);
 
   const totals = useMemo(() => summarizeLines(lines, discount), [lines, discount]);
+  const marginAnalysis = useMemo(() => {
+    const belowCost: { name: string; unitPrice: number; unitCost: number }[] = [];
+    const lowMargin: { name: string; marginPct: number }[] = [];
+
+    lines.forEach((line) => {
+      if (!line.inventoryItemId) return;
+      const item = inventory.find((i) => i.id === line.inventoryItemId);
+      if (!item) return;
+      const cost = Number(item.unitCost) || 0;
+      const price = line.unitPrice;
+      if (price < cost) {
+        belowCost.push({ name: line.description || item.name, unitPrice: price, unitCost: cost });
+      } else if (price > 0 && cost > 0) {
+        const margin = ((price - cost) / price) * 100;
+        if (margin < 20) {
+          lowMargin.push({ name: line.description || item.name, marginPct: Math.round(margin) });
+        }
+      }
+    });
+
+    return { belowCost, lowMargin };
+  }, [lines, inventory]);
+
   const formValues = useMemo(() => ({ validUntil, lines }), [validUntil, lines]);
   const inspection = ticket?.inspectionReport;
   const step = workflowStepIndex(estimate?.status, lines.some((l) => l.description.trim()), Boolean(validUntil));
@@ -285,6 +331,21 @@ export default function EstimateBuilder() {
                   ? `${ticket.customerName} · ${ticket.equipmentName ?? "Equipment"} · ${ticket.reference}`
                   : `${party?.name ?? "Customer"} · ${equipmentLabel}`}
               </p>
+              {/* Price category banner */}
+              {party?.priceCategory && (
+                <div className="flex items-center gap-1.5 mt-1">
+                  <Tag className="h-3.5 w-3.5 text-primary" />
+                  <span className="text-xs text-primary font-medium">
+                    Price category: <strong className="capitalize">{party.priceCategory}</strong>
+                  </span>
+                  {PRICE_CATEGORY_MULTIPLIER[party.priceCategory.toLowerCase()] !== undefined &&
+                    PRICE_CATEGORY_MULTIPLIER[party.priceCategory.toLowerCase()] !== 1.0 && (
+                    <Badge variant="outline" className="border-primary/40 text-primary text-[10px] py-0">
+                      {((1 - PRICE_CATEGORY_MULTIPLIER[party.priceCategory.toLowerCase()]) * 100).toFixed(0)}% tier discount applied
+                    </Badge>
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" disabled={saving} onClick={() => void persist(false)}>
@@ -335,6 +396,11 @@ export default function EstimateBuilder() {
 
         {shouldShow("lines") && <FormFieldError field="lines" message={errors.lines} />}
 
+        <CreditExposureBanner
+          customerId={party?.id || ticket?.customerId}
+          currentTotal={lines.reduce((acc, l) => acc + l.quantity * l.unitPrice, 0)}
+        />
+
         <div data-field="lines">
           <EstimateItemsTable
             mode="edit"
@@ -349,6 +415,40 @@ export default function EstimateBuilder() {
             }}
           />
         </div>
+
+        {marginAnalysis.belowCost.length > 0 && (
+          <Alert variant="destructive" className="mt-3">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle className="font-semibold">Negative Margin Warning — Sold Below Cost</AlertTitle>
+            <AlertDescription>
+              The following item(s) are priced below unit cost:
+              <ul className="mt-1 list-disc pl-5 text-xs">
+                {marginAnalysis.belowCost.map((item, idx) => (
+                  <li key={idx}>
+                    <strong>{item.name}</strong>: Unit Price ${item.unitPrice.toFixed(2)} vs Unit Cost ${item.unitCost.toFixed(2)}
+                  </li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {marginAnalysis.lowMargin.length > 0 && marginAnalysis.belowCost.length === 0 && (
+          <Alert className="mt-3 border-amber-500/50 bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200 [&>svg]:text-amber-600">
+            <TrendingDown className="h-4 w-4" />
+            <AlertTitle className="font-semibold">Low Margin Alert (&lt; 20%)</AlertTitle>
+            <AlertDescription>
+              The following item(s) have profit margin under 20%:
+              <ul className="mt-1 list-disc pl-5 text-xs">
+                {marginAnalysis.lowMargin.map((item, idx) => (
+                  <li key={idx}>
+                    <strong>{item.name}</strong>: Margin {item.marginPct}%
+                  </li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )}
 
         <form
           noValidate

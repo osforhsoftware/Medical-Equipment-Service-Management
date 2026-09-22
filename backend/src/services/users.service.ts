@@ -1,8 +1,9 @@
 import bcrypt from "bcryptjs";
-import { usersRepository, toSafeUser } from "@/repositories/users.repository";
+import { usersRepository } from "@/repositories/users.repository";
 import { authRepository } from "@/repositories/auth.repository";
 import { AppError } from "@/middleware/errorHandler";
 import { enrichUserWithRoles, ensureSystemRoles, syncUserRoleAssignments } from "@/utils/userRoles";
+import { normalizeUserPermissions, parseUserPermissions } from "@/lib/userPermissions";
 
 function resolveRoleSelection(data: { role?: string; roles?: string[]; primaryRole?: string }) {
   const roles = data.roles?.length ? data.roles : data.role ? [data.role] : undefined;
@@ -12,6 +13,12 @@ function resolveRoleSelection(data: { role?: string; roles?: string[]; primaryRo
     throw new AppError("Primary role must be one of the selected roles", 400);
   }
   return { roles, primaryRole };
+}
+
+function assertAdminNotReadOnly(roleKeys: string[], permissions: unknown) {
+  if (roleKeys.includes("admin") && parseUserPermissions(permissions).mode === "read") {
+    throw new AppError("Administrator accounts cannot be set to read-only", 400);
+  }
 }
 
 export class UsersService {
@@ -42,6 +49,7 @@ export class UsersService {
       branchId?: string;
       avatarColor?: string;
       customerId?: string;
+      permissions?: unknown;
     },
   ) {
     const username = data.username.toLowerCase();
@@ -57,6 +65,8 @@ export class UsersService {
     const roleSelection = resolveRoleSelection(data);
     const primaryRole = roleSelection?.primaryRole ?? data.role;
     const roleKeys = roleSelection?.roles ?? [primaryRole];
+    const permissions = normalizeUserPermissions(data.permissions);
+    assertAdminNotReadOnly(roleKeys, permissions);
 
     await ensureSystemRoles(tenantId);
     const passwordHash = await bcrypt.hash(data.password, 10);
@@ -72,6 +82,7 @@ export class UsersService {
       branchId: data.branchId,
       avatarColor: data.avatarColor,
       customerId: data.customerId,
+      permissions,
     });
 
     await syncUserRoleAssignments(tenantId, user.id, roleKeys);
@@ -94,6 +105,7 @@ export class UsersService {
       avatarColor?: string;
       customerId?: string | null;
       password?: string;
+      permissions?: unknown;
     },
   ) {
     const existing = await usersRepository.findById(id, tenantId);
@@ -111,6 +123,17 @@ export class UsersService {
 
     const roleSelection = resolveRoleSelection(data);
     const primaryRole = roleSelection?.primaryRole ?? data.role;
+    const existingEnriched = await enrichUserWithRoles(existing, tenantId);
+    const nextRoleKeys = roleSelection?.roles
+      ?? (primaryRole
+        ? [...new Set(existingEnriched.roles.map((role) => (role === existing.role ? primaryRole : role)))]
+        : existingEnriched.roles);
+
+    const permissions =
+      data.permissions !== undefined ? normalizeUserPermissions(data.permissions) : undefined;
+    if (permissions) {
+      assertAdminNotReadOnly(nextRoleKeys, permissions);
+    }
 
     const passwordHash = data.password ? await bcrypt.hash(data.password, 10) : undefined;
     const user = await usersRepository.update(id, tenantId, {
@@ -124,15 +147,14 @@ export class UsersService {
       avatarColor: data.avatarColor,
       customerId: data.customerId,
       ...(passwordHash ? { passwordHash } : {}),
+      ...(permissions ? { permissions } : {}),
     });
 
     await ensureSystemRoles(tenantId);
     if (roleSelection) {
       await syncUserRoleAssignments(tenantId, id, roleSelection.roles);
     } else if (primaryRole && primaryRole !== existing.role) {
-      const currentRoles = await enrichUserWithRoles(existing, tenantId);
-      const nextRoles = [...new Set(currentRoles.roles.map((role) => (role === existing.role ? primaryRole : role)))];
-      await syncUserRoleAssignments(tenantId, id, nextRoles);
+      await syncUserRoleAssignments(tenantId, id, nextRoleKeys);
     }
 
     return enrichUserWithRoles(user, tenantId);

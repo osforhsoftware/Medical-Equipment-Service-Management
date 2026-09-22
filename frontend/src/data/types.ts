@@ -10,6 +10,7 @@ export type Role =
   | "engineer"
   | "inventory"
   | "billing"
+  | "qa"
   | "customer";
 
 export interface AppUser {
@@ -25,6 +26,10 @@ export interface AppUser {
   branchId?: string;
   avatarColor: string;
   customerId?: string; // for customer portal users
+  permissions?: {
+    mode: "crud" | "read";
+    modules?: Record<string, "none" | "read" | "crud">;
+  };
 }
 
 export interface Branch {
@@ -62,14 +67,18 @@ export interface Equipment {
   manufacturer: string;
   category: string;
   serialNumber: string;
+  partNumber?: string | null;
   customerId: string | null;
   customerName: string;
   branchId: string;
   location: string;
   installDate: string | null;
+  warrantyStart?: string | null;
   warrantyEnd: string | null;
   amcStatus: "active" | "expiring" | "expired" | "none";
   condition: string;
+  currentStatus?: "in_service" | "in_repair" | "in_storage" | "decommissioned" | "disposed";
+  purchaseSaleHistory?: string | null;
   lastServiceDate: string;
 }
 
@@ -230,7 +239,7 @@ export interface ServiceJob {
   equipmentName: string;
   engineer: string;
   type: ServiceRequest["type"];
-  status: "scheduled" | "in-progress" | "parts-pending" | "review" | "completed";
+  status: "scheduled" | "in-progress" | "parts-pending" | "review" | "delivery" | "completed";
   scheduledFor: string;
   progress: number;
 }

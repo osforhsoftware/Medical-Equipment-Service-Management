@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
 
 const userRoleSchema = z.enum([
   "admin",
@@ -11,6 +12,25 @@ const userRoleSchema = z.enum([
   "billing",
   "customer",
 ]);
+
+const permissionLevelSchema = z.enum(["none", "read", "crud"]);
+
+const userPermissionsSchema = z
+  .object({
+    mode: z.enum(["crud", "read"]).default("crud"),
+    modules: z.record(z.string(), permissionLevelSchema).optional().default({}),
+  })
+  .optional();
+
+function rejectCustomerPortalRole(roles: string[], ctx: z.RefinementCtx) {
+  if (!CUSTOMER_PORTAL_ENABLED && roles.includes("customer")) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Customer Portal is temporarily unavailable; customer role cannot be assigned.",
+      path: ["roles"],
+    });
+  }
+}
 
 export const createUserSchema = z
   .object({
@@ -30,6 +50,7 @@ export const createUserSchema = z
     branchId: z.string().optional(),
     avatarColor: z.string().optional(),
     customerId: z.string().optional(),
+    permissions: userPermissionsSchema,
   })
   .superRefine((data, ctx) => {
     const roles = data.roles ?? [data.role];
@@ -47,6 +68,14 @@ export const createUserSchema = z
         path: ["roles"],
       });
     }
+    if (roles.includes("admin") && data.permissions?.mode === "read") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Administrator accounts cannot be set to read-only",
+        path: ["permissions", "mode"],
+      });
+    }
+    rejectCustomerPortalRole(roles, ctx);
   });
 
 export const updateUserSchema = z
@@ -68,9 +97,19 @@ export const updateUserSchema = z
     avatarColor: z.string().optional(),
     customerId: z.string().nullable().optional(),
     password: z.string().min(8).optional(),
+    permissions: userPermissionsSchema,
   })
   .superRefine((data, ctx) => {
-    if (!data.roles?.length) return;
+    if (!data.roles?.length) {
+      if (data.permissions?.mode === "read" && (data.role === "admin" || data.primaryRole === "admin")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Administrator accounts cannot be set to read-only",
+          path: ["permissions", "mode"],
+        });
+      }
+      return;
+    }
     if (data.primaryRole && !data.roles.includes(data.primaryRole)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -85,4 +124,12 @@ export const updateUserSchema = z
         path: ["roles"],
       });
     }
+    if (data.roles.includes("admin") && data.permissions?.mode === "read") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Administrator accounts cannot be set to read-only",
+        path: ["permissions", "mode"],
+      });
+    }
+    rejectCustomerPortalRole(data.roles, ctx);
   });

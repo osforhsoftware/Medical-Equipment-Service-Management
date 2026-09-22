@@ -470,6 +470,8 @@ export default function Inspections() {
         setWorkDetails={editor.setWorkDetails}
         severity={editor.severity}
         setSeverity={editor.setSeverity}
+        additionalFields={editor.additionalFields}
+        setAdditionalFields={editor.setAdditionalFields}
         machineImages={editor.machineImages}
         setMachineImages={editor.setMachineImages}
         setMachineImage={editor.setMachineImage}

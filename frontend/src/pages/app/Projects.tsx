@@ -1,16 +1,19 @@
-import { useMemo } from "react";
-import { FolderKanban } from "lucide-react";
+import { useMemo, useState } from "react";
+import { FileSpreadsheet, FolderKanban, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useListingUrlState } from "@/hooks/useListingUrlState";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { api, type BackendServiceJob } from "@/lib/api";
+import { downloadSpreadsheet } from "@/lib/exportSpreadsheet";
 import { formatDate } from "@/lib/format";
 import { EMPTY_PAGINATION_META } from "@/lib/listing";
+import { toast } from "@/lib/toast";
 
 const JOB_STATUS_FILTERS = [
   { label: "Scheduled", value: "scheduled" },
@@ -22,6 +25,7 @@ const JOB_STATUS_FILTERS = [
 
 export default function Projects() {
   const navigate = useNavigate();
+
   const {
     search,
     setSearch,
@@ -34,7 +38,11 @@ export default function Projects() {
 
   const debouncedSearch = useDebouncedValue(search);
   const queryParams = useMemo(
-    () => ({ ...listParams, search: debouncedSearch || undefined }),
+    () => ({
+      ...listParams,
+      search: debouncedSearch || undefined,
+      completedScope: "all" as const,
+    }),
     [listParams, debouncedSearch],
   );
 
@@ -46,6 +54,45 @@ export default function Projects() {
 
   const jobs = jobsQuery.data?.data ?? [];
   const pagination = jobsQuery.data?.meta ?? EMPTY_PAGINATION_META;
+  const [exporting, setExporting] = useState(false);
+
+  const exportProjects = async () => {
+    setExporting(true);
+    try {
+      const rows: BackendServiceJob[] = [];
+      let page = 1;
+      let hasNext = true;
+      while (hasNext && page <= 50) {
+        const result = await api.listJobs({
+          ...queryParams,
+          page,
+          limit: 100,
+        });
+        rows.push(...result.data);
+        hasNext = result.meta.hasNextPage;
+        page += 1;
+      }
+      downloadSpreadsheet(
+        "projects",
+        [
+          { header: "Project", value: (j) => j.reference },
+          { header: "Ticket Ref", value: (j) => j.requestRef },
+          { header: "Customer", value: (j) => j.customerName },
+          { header: "Equipment", value: (j) => j.equipmentName },
+          { header: "Lead", value: (j) => j.engineer },
+          { header: "Scheduled", value: (j) => formatDate(j.scheduledFor) },
+          { header: "Progress %", value: (j) => j.progress },
+          { header: "Status", value: (j) => j.status },
+        ],
+        rows,
+      );
+      toast.success("Export ready", { description: `${rows.length} project(s) exported for Excel.` });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to export projects" });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const columns: Column<BackendServiceJob>[] = [
     { key: "reference", header: "Project", render: (job) => <div className="flex items-center gap-2"><FolderKanban className="h-4 w-4 text-primary" /><div><p className="font-mono text-sm font-medium">{job.reference}</p><p className="text-xs text-muted-foreground">{job.requestRef}</p></div></div> },
@@ -58,7 +105,16 @@ export default function Projects() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Projects" description="Assign staff to service jobs. Use Service Jobs for work logs, parts, and billing." />
+      <PageHeader
+        title="Projects"
+        description="Full service projects: workflow, team, work reports, parts, and activity. Open a row for details and edits."
+        actions={
+          <Button type="button" variant="outline" disabled={exporting} onClick={() => void exportProjects()}>
+            {exporting ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-1 h-4 w-4" />}
+            Export Excel
+          </Button>
+        }
+      />
       <DataTable
         mode="server"
         data={jobs}

@@ -11,6 +11,7 @@ import {
   type BackendUser,
 } from "@/lib/api";
 import { userHasAnyRole } from "@/lib/userRoles";
+import { parseUserPermissions, userMayMutate } from "@/lib/userPermissions";
 
 interface AuthState {
   user: AppUser | null;
@@ -18,6 +19,7 @@ interface AuthState {
   login: (username: string, password: string) => Promise<AppUser>;
   logout: () => Promise<void>;
   hasRole: (roles: Role[]) => boolean;
+  canMutate: boolean;
   refreshUser: () => Promise<void>;
 }
 
@@ -25,6 +27,7 @@ const AuthContext = createHmrContext<AuthState>("__MESMS_AUTH_CONTEXT__");
 const SESSION_REFRESH_MS = 10 * 60 * 1000;
 
 function mapUser(user: BackendUser): AppUser {
+  const permissions = parseUserPermissions(user.permissions);
   return {
     id: user.id,
     tenantId: user.tenantId,
@@ -33,9 +36,12 @@ function mapUser(user: BackendUser): AppUser {
     email: user.email,
     role: user.role as Role,
     roles: user.roles?.length ? (user.roles as Role[]) : undefined,
+    phone: user.phone,
+    isActive: user.isActive,
     branchId: user.branchId ?? undefined,
     avatarColor: user.avatarColor,
     customerId: user.customerId ?? undefined,
+    permissions,
   };
 }
 
@@ -114,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         persist(null);
       },
       hasRole: (roles: Role[]) => (user ? userHasAnyRole(user, roles) : false),
+      canMutate: userMayMutate(user),
       refreshUser: async () => {
         const profile = await api.me();
         persist(mapUser(profile));

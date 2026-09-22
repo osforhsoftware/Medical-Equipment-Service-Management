@@ -63,7 +63,9 @@ function normalizeRbac(raw: unknown): Record<string, string[]> {
     ["Estimates", "inspector"],
     ["Estimates", "engineer"],
     ["Billing", "estimator"],
+    // Projects uses the jobs API (admin/coordinator/engineer only); engineers use Service Jobs instead.
     ["Projects", "engineer"],
+    ["Projects", "estimator"],
     ["Inventory", "inspector"],
     ["Inventory Items", "inspector"],
     ["Stock Purchase Requests", "inspector"],

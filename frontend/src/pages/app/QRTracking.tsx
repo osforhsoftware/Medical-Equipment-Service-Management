@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { QrCode, Loader2, Printer } from "lucide-react";
+import { QrCode, Loader2, Download } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { QrCameraScanner } from "@/components/shared/QrCameraScanner";
 import { ScannedEquipmentDetails } from "@/components/shared/ScannedEquipmentDetails";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiError, type BackendEquipmentHistory } from "@/lib/api";
+import { downloadEquipmentQrPng } from "@/lib/equipmentQr";
 import { lookupScannedEquipment } from "@/lib/equipmentQrLookup";
 import { toast } from "@/lib/toast";
 
@@ -78,25 +79,16 @@ export default function QRTracking() {
           <CardHeader><CardTitle className="text-base">Equipment Detail</CardTitle></CardHeader>
           <CardContent>
             {history && scanned ? (
-              <>
-                <div className="no-print space-y-4">
-                  <ScannedEquipmentDetails history={history} qrDataUrl={qrDataUrl} />
-                  <Button variant="outline" onClick={() => window.print()} disabled={!qrDataUrl}>
-                    <Printer className="mr-2 h-4 w-4" /> Print equipment label
-                  </Button>
-                </div>
-                <div className="qr-print-label hidden rounded-xl border-2 border-slate-900 bg-white p-6 text-slate-950 print:block">
-                  <div className="flex items-center gap-6">
-                    {qrDataUrl ? <img src={qrDataUrl} alt={`QR code for ${scanned.assetTag}`} className="h-40 w-40" /> : null}
-                    <div>
-                      <p className="text-xl font-bold">{scanned.name}</p>
-                      <p>{scanned.manufacturer} · {scanned.model}</p>
-                      <p className="mt-3 font-mono text-lg font-bold">{scanned.assetTag}</p>
-                      <p className="mt-1 text-sm">Serial: {scanned.serialNumber}</p>
-                    </div>
-                  </div>
-                </div>
-              </>
+              <div className="space-y-4">
+                <ScannedEquipmentDetails history={history} qrDataUrl={qrDataUrl} />
+                <Button
+                  variant="outline"
+                  onClick={() => void downloadEquipmentQrPng(scanned.assetTag)}
+                  disabled={!scanned.assetTag}
+                >
+                  <Download className="mr-2 h-4 w-4" /> Download equipment label
+                </Button>
+              </div>
             ) : (
               <div className="flex flex-col items-center gap-2 py-16 text-muted-foreground">
                 <QrCode className="h-10 w-10" />

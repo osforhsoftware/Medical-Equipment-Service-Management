@@ -2,18 +2,21 @@ import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { Building2, Loader2, Plus } from "lucide-react";
+import { Building2, Loader2, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
+import { CustomerAdditionalFieldsEditor } from "@/components/customers/CustomerAdditionalFieldsEditor";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useListingUrlState } from "@/hooks/useListingUrlState";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { fieldRules } from "@/lib/formValidation";
+import { sanitizeCustomerAdditionalFields, type CustomerAdditionalField } from "@/lib/customerFields";
 import { EMPTY_PAGINATION_META } from "@/lib/listing";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
+import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,6 +56,14 @@ const customerSchema = z
     city: fieldRules.optionalString(),
     country: fieldRules.optionalString(),
     licenseGst: fieldRules.optionalString(),
+    paymentTerms: fieldRules.optionalString(),
+    creditLimit: z
+      .string()
+      .trim()
+      .optional()
+      .refine((value) => !value || (!Number.isNaN(Number(value)) && Number(value) >= 0), "Enter a valid credit limit"),
+    priceCategory: fieldRules.optionalString(),
+    deliveryAddress: fieldRules.optionalString(),
     note: z.string().trim().max(5000).optional(),
     status: z.string(),
   });
@@ -67,8 +78,13 @@ type FormState = {
   city: string;
   country: string;
   licenseGst: string;
+  paymentTerms: string;
+  creditLimit: string;
+  priceCategory: string;
+  deliveryAddress: string;
   note: string;
   status: string;
+  additionalFields: CustomerAdditionalField[];
 };
 
 const emptyForm: FormState = {
@@ -81,8 +97,13 @@ const emptyForm: FormState = {
   city: "",
   country: "",
   licenseGst: "",
+  paymentTerms: "",
+  creditLimit: "",
+  priceCategory: "",
+  deliveryAddress: "",
   note: "",
   status: "active",
+  additionalFields: [{ label: "", value: "" }],
 };
 
 export default function Customers() {
@@ -137,6 +158,9 @@ export default function Customers() {
   const [nextReference, setNextReference] = useState("");
   const [loadingReference, setLoadingReference] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<BackendCustomer | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -149,7 +173,19 @@ export default function Customers() {
     applyApiErrors,
     clearError,
   } = useFormValidation({
-    fieldOrder: ["name", "type", "email", "phone", "address", "city", "country", "note"],
+    fieldOrder: [
+      "name",
+      "type",
+      "email",
+      "phone",
+      "address",
+      "city",
+      "country",
+      "paymentTerms",
+      "creditLimit",
+      "priceCategory",
+      "note",
+    ],
     schema: customerSchema,
   });
 
@@ -159,7 +195,7 @@ export default function Customers() {
 
   const openCreate = async () => {
     if (!canCreate) return;
-    setForm({ ...emptyForm });
+    setForm({ ...emptyForm, additionalFields: [{ label: "", value: "" }] });
     setNextReference("");
     resetValidation();
     setDialogOpen(true);
@@ -179,6 +215,7 @@ export default function Customers() {
 
     setSaving(true);
     try {
+      const creditLimitValue = form.creditLimit.trim();
       const created = await api.createCustomer({
         name: form.name.trim(),
         type: form.type.trim(),
@@ -189,6 +226,11 @@ export default function Customers() {
         city: form.city.trim(),
         country: form.country.trim(),
         licenseGst: form.licenseGst.trim() || null,
+        paymentTerms: form.paymentTerms.trim() || null,
+        creditLimit: creditLimitValue ? Number(creditLimitValue) : null,
+        priceCategory: form.priceCategory.trim() || null,
+        deliveryAddress: form.address.trim() || null,
+        additionalFields: sanitizeCustomerAdditionalFields(form.additionalFields),
         note: form.note.trim() || null,
         status: form.status,
       });
@@ -204,6 +246,47 @@ export default function Customers() {
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openDelete = (customer: BackendCustomer) => {
+    setDeleteTarget(customer);
+  };
+
+  const closeDelete = () => {
+    if (deleting) return;
+    setDeleteTarget(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.deleteCustomer(deleteTarget.id);
+      toast.success("Customer removed", {
+        description: `${deleteTarget.name} is inactive. Related equipment and jobs remain available for history.`,
+      });
+      setDeleteTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ["customers"] });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to remove customer" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const restoreCustomer = async (customer: BackendCustomer) => {
+    setRestoringId(customer.id);
+    try {
+      await api.restoreCustomer(customer.id);
+      toast.success("Customer restored", {
+        description: `${customer.name} is active again.`,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["customers"] });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to restore customer" });
+    } finally {
+      setRestoringId(null);
     }
   };
 
@@ -268,6 +351,54 @@ export default function Customers() {
       header: "Status",
       render: (c) => <StatusBadge status={c.status as "active" | "inactive"} />,
     },
+    ...(canCreate
+      ? [
+          {
+            key: "actions" as keyof BackendCustomer,
+            header: "Actions",
+            className: "w-[1%] whitespace-nowrap text-right",
+            render: (c: BackendCustomer) => (
+              <div
+                className="flex items-center justify-end gap-1"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/app/customers/${c.id}?edit=1`)}
+                >
+                  <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
+                </Button>
+                {c.status === "inactive" ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={restoringId === c.id}
+                    onClick={() => void restoreCustomer(c)}
+                  >
+                    {restoringId === c.id ? (
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                    )}
+                    Restore
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => openDelete(c)}
+                  >
+                    <Trash2 className="mr-1 h-3.5 w-3.5" /> Remove
+                  </Button>
+                )}
+              </div>
+            ),
+          } satisfies Column<BackendCustomer>,
+        ]
+      : []),
   ];
 
   return (
@@ -282,7 +413,7 @@ export default function Customers() {
             </Button>
           ) : undefined
         }
-      />
+      />  
 
       <DataTable
         mode="server"
@@ -321,7 +452,7 @@ export default function Customers() {
       />
 
       <Dialog open={canCreate && dialogOpen} onOpenChange={(open) => { if (!open) resetValidation(); setDialogOpen(open); }}>
-        <DialogContent ref={dialogRef} className="sm:max-w-lg">
+        <DialogContent ref={dialogRef} className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Building2 className="h-5 w-5" /> Add Customer
@@ -463,13 +594,13 @@ export default function Customers() {
             </div>
             <div className="grid gap-2" data-field="address">
               <Label htmlFor="site-address" className={shouldShow("address") ? "text-destructive" : undefined}>
-                Site address
+                Billing & delivery addresses
               </Label>
               <Input
                 id="site-address"
                 value={form.address}
                 onChange={(e) => {
-                  const next = { ...form, address: e.target.value };
+                  const next = { ...form, address: e.target.value, deliveryAddress: e.target.value };
                   setForm(next);
                   handleChange("address", next);
                 }}
@@ -517,17 +648,69 @@ export default function Customers() {
               </div>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="license-gst">License / GST number</Label>
+              <Label htmlFor="license-gst">License / GST / VAT (TRN)</Label>
               <Input
                 id="license-gst"
                 value={form.licenseGst}
                 onChange={(e) => setForm({ ...form, licenseGst: e.target.value })}
-                placeholder="Optional — GST, trade license, or local tax ID"
+                placeholder="Optional — GST, trade license, VAT, TRN"
               />
-              <p className="text-xs text-muted-foreground">
-                Optional. Use whichever ID applies for this country (GST, license, VAT, etc.).
-              </p>
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2" data-field="paymentTerms">
+                <Label htmlFor="payment-terms">Payment terms</Label>
+                <Input
+                  id="payment-terms"
+                  value={form.paymentTerms}
+                  onChange={(e) => {
+                    const next = { ...form, paymentTerms: e.target.value };
+                    setForm(next);
+                    handleChange("paymentTerms", next);
+                  }}
+                  onBlur={() => handleBlur("paymentTerms", form)}
+                  placeholder="e.g. Net 30"
+                />
+              </div>
+              <div className="grid gap-2" data-field="priceCategory">
+                <Label htmlFor="price-category">Price category</Label>
+                <Input
+                  id="price-category"
+                  value={form.priceCategory}
+                  onChange={(e) => {
+                    const next = { ...form, priceCategory: e.target.value };
+                    setForm(next);
+                    handleChange("priceCategory", next);
+                  }}
+                  onBlur={() => handleBlur("priceCategory", form)}
+                  placeholder="e.g. Hospital / Dealer"
+                />
+              </div>
+            </div>
+            <div className="grid gap-2" data-field="creditLimit">
+              <Label htmlFor="credit-limit">Credit limit</Label>
+              <Input
+                id="credit-limit"
+                type="number"
+                min={0}
+                step="0.01"
+                value={form.creditLimit}
+                onChange={(e) => {
+                  const next = { ...form, creditLimit: e.target.value };
+                  setForm(next);
+                  handleChange("creditLimit", next);
+                }}
+                onBlur={() => handleBlur("creditLimit", form)}
+                aria-invalid={shouldShow("creditLimit") || undefined}
+                className={cn(shouldShow("creditLimit") && "border-destructive focus-visible:ring-destructive")}
+                placeholder="Optional"
+              />
+              {shouldShow("creditLimit") && <FormFieldError field="creditLimit" message={errors.creditLimit} />}
+            </div>
+            <CustomerAdditionalFieldsEditor
+              value={form.additionalFields}
+              onChange={(additionalFields) => setForm({ ...form, additionalFields })}
+              disabled={saving}
+            />
             <div className="grid gap-2">
               <Label htmlFor="customer-note">Note</Label>
               <Textarea
@@ -558,6 +741,33 @@ export default function Customers() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <DeleteConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) closeDelete();
+        }}
+        title="Remove customer?"
+        description={
+          <div className="space-y-2">
+            <p>
+              This soft-removes{" "}
+              <span className="font-medium text-foreground">{deleteTarget?.name}</span> (
+              {deleteTarget?.reference}). The record is marked inactive — not permanently erased.
+            </p>
+            <p>
+              Related work stays linked for history
+              {deleteTarget
+                ? `: ${deleteTarget.equipmentCount} equipment · ${deleteTarget.activeJobs} active jobs`
+                : ""}
+              . Existing jobs, estimates, invoices, and sales are not deleted.
+            </p>
+          </div>
+        }
+        confirmLabel="Remove customer"
+        loading={deleting}
+        onConfirm={() => void confirmDelete()}
+      />
     </div>
   );
 }

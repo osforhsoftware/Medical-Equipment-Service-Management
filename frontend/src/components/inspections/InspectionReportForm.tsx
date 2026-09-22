@@ -1,5 +1,6 @@
 import { useRef, type Dispatch, type SetStateAction } from "react";
 import { AlertTriangle, Camera, ImagePlus, Loader2, Plus } from "lucide-react";
+import { CustomerAdditionalFieldsEditor } from "@/components/customers/CustomerAdditionalFieldsEditor";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { PhotoCaptionTile } from "@/components/shared/PhotoCaptionTile";
@@ -8,6 +9,7 @@ import {
   type BackendInspectionReport,
   type BackendServiceRequest,
 } from "@/lib/api";
+import type { CustomerAdditionalField } from "@/lib/customerFields";
 import { cn } from "@/lib/utils";
 import { InspectionSection } from "./InspectionSection";
 
@@ -42,6 +44,8 @@ const SEVERITY_OPTIONS = [
   },
 ] as const;
 
+import { InspectionSignaturePanel } from "./InspectionSignaturePanel";
+
 interface InspectionReportFormProps {
   active: BackendServiceRequest;
   existingReport: BackendInspectionReport | null;
@@ -54,6 +58,8 @@ interface InspectionReportFormProps {
   setWorkDetails: (v: string) => void;
   severity: string;
   setSeverity: (v: string) => void;
+  additionalFields: CustomerAdditionalField[];
+  setAdditionalFields: Dispatch<SetStateAction<CustomerAdditionalField[]>>;
   machineImages: File[];
   setMachineImages: Dispatch<SetStateAction<File[]>>;
   setMachineImage: (file: File | null) => void;
@@ -75,6 +81,8 @@ export function InspectionReportForm({
   setWorkDetails,
   severity,
   setSeverity,
+  additionalFields,
+  setAdditionalFields,
   setMachineImages,
   setMachineImage,
   imageCaptions,
@@ -340,6 +348,51 @@ export function InspectionReportForm({
             placeholder="e.g. Replace compressor filter and schedule follow-up calibration…"
           />
         </div>
+      </InspectionSection>
+
+      <InspectionSection
+        step="05"
+        title="Signatures"
+        description="Inspector & Admin / Coordinator digital signatures."
+        optional
+      >
+        <InspectionSignaturePanel
+          inspectorName={active.assignedName ?? "Inspector"}
+          signatures={(() => {
+            const insp = additionalFields.find((f) => f.label === "Inspector Signature")?.value;
+            const adm = additionalFields.find((f) => f.label === "Admin Signature")?.value;
+            return {
+              inspectorSignature: { name: active.assignedName ?? "Inspector", dataUrl: insp || null, capturedAt: insp ? new Date().toISOString() : null },
+              approvalSignature: { name: "Admin / Coordinator", dataUrl: adm || null, capturedAt: adm ? new Date().toISOString() : null },
+            };
+          })()}
+          onSave={(sigs) => {
+            setAdditionalFields((prev) => {
+              const filtered = prev.filter((f) => f.label !== "Inspector Signature" && f.label !== "Admin Signature");
+              const next = [...filtered];
+              if (sigs.inspectorSignature.dataUrl) {
+                next.push({ label: "Inspector Signature", value: sigs.inspectorSignature.dataUrl });
+              }
+              if (sigs.approvalSignature.dataUrl) {
+                next.push({ label: "Admin Signature", value: sigs.approvalSignature.dataUrl });
+              }
+              return next;
+            });
+          }}
+        />
+      </InspectionSection>
+
+      <InspectionSection
+        title="Additional fields"
+        description="Optional custom notes for the report and PDF."
+        optional
+      >
+        <CustomerAdditionalFieldsEditor
+          value={additionalFields}
+          onChange={setAdditionalFields}
+          title="Additional inspection fields"
+          description="Optional label/value rows (accessories received, site notes, meter readings, etc.)."
+        />
       </InspectionSection>
     </div>
   );

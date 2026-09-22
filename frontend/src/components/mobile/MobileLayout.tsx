@@ -36,7 +36,7 @@ export function MobileLayout({ children }: MobileLayoutProps) {
   const [refreshing, setRefreshing] = useState(false);
 
   const canCreate = user
-    ? canCreateFromMobileFab(getUserRoles(user), rbacMatrix)
+    ? canCreateFromMobileFab(getUserRoles(user), rbacMatrix, user)
     : false;
   const fab = resolveFab(location.pathname, canCreate);
   const showFab = fab && !location.pathname.startsWith("/app/profile");

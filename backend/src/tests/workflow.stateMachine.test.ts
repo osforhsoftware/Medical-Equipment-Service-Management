@@ -66,10 +66,13 @@ test("revision request returns ticket to estimate stage", () => {
   assert.equal(resolveTicketEventStatus("pending_approval", "estimatePendingApproval"), "pending_approval");
 });
 
-test("job transitions require review before completed", () => {
+test("job transitions require QA then delivery before completed", () => {
   assert.doesNotThrow(() => assertJobTransition("scheduled", "inProgress"));
   assert.doesNotThrow(() => assertJobTransition("inProgress", "review"));
-  assert.doesNotThrow(() => assertJobTransition("review", "completed"));
+  assert.doesNotThrow(() => assertJobTransition("review", "delivery"));
+  assert.doesNotThrow(() => assertJobTransition("delivery", "completed"));
+  assert.doesNotThrow(() => assertJobTransition("review", "inProgress"));
+  expectAppError(() => assertJobTransition("review", "completed"), 409);
   expectAppError(() => assertJobTransition("scheduled", "completed"), 409);
   expectAppError(() => assertJobTransition("inProgress", "completed"), 409);
   expectAppError(() => assertJobTransition("completed", "inProgress"), 409);

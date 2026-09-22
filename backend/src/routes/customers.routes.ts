@@ -17,6 +17,7 @@ router.get("/next-reference", canManage, customersController.previewReference);
 router.get("/:id", canRead, customersController.getById);
 router.post("/", canManage, validate(createCustomerSchema), customersController.create);
 router.put("/:id", canManage, validate(updateCustomerSchema), customersController.update);
-router.delete("/:id", requireRole("admin"), customersController.delete);
+router.post("/:id/restore", canManage, customersController.restore);
+router.delete("/:id", canManage, customersController.delete);
 
 export default router;

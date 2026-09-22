@@ -19,3 +19,9 @@ yarn-error.log
 backend/storage/private/**
 !backend/storage/private/.gitkeep
 frontend/wellen.sql
+apply-warranty.sql
+.tmp*
+*.tmp
+frontend/.tmp*
+scripts/.tmp*
+

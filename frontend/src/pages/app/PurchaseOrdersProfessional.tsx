@@ -21,6 +21,7 @@ import { useListingUrlState } from "@/hooks/useListingUrlState";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { api, type BackendPurchaseOrder } from "@/lib/api";
 import { defaultDatePlusDays, formatCurrency, formatDate } from "@/lib/format";
+import { formatInventoryItemClass, INVENTORY_ITEM_CLASS_OPTIONS, type InventoryItemClass } from "@/lib/inventoryItemClass";
 import { EMPTY_PAGINATION_META } from "@/lib/listing";
 import { toast } from "@/lib/toast";
 
@@ -77,14 +78,23 @@ export default function PurchaseOrdersProfessional() {
   const orders = ordersQuery.data?.data ?? [];
   const pagination = ordersQuery.data?.meta ?? EMPTY_PAGINATION_META;
   const suppliers = suppliersQuery.data ?? [];
-  const inventory = inventoryQuery.data ?? [];
+  const inventory = useMemo(() => inventoryQuery.data ?? [], [inventoryQuery.data]);
 
   const [saving, setSaving] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [supplierId, setSupplierId] = useState("");
   const [expectedDate, setExpectedDate] = useState(defaultDatePlusDays(7));
   const [lines, setLines] = useState<Line[]>([blankLine()]);
+  const [poItemClassFilter, setPoItemClassFilter] = useState<"all" | InventoryItemClass>("all");
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  const purchaseInventoryOptions = useMemo(
+    () =>
+      poItemClassFilter === "all"
+        ? inventory
+        : inventory.filter((item) => (item.itemClass ?? "spare_part") === poItemClassFilter),
+    [inventory, poItemClassFilter],
+  );
   const {
     errors,
     shouldShow,
@@ -184,13 +194,40 @@ export default function PurchaseOrdersProfessional() {
             </div>
             {shouldShow("lines") && <FormFieldError field="lines" message={errors.lines} />}
             <div className="space-y-3" data-field="lines">
-              <div className="flex justify-between"><Label>PO lines</Label><Button type="button" size="sm" variant="outline" onClick={() => updateLines((current) => [...current, blankLine()])}><Plus className="mr-1 h-3.5 w-3.5" /> Line</Button></div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label>PO lines</Label>
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={poItemClassFilter}
+                    onValueChange={(value) => setPoItemClassFilter(value as "all" | InventoryItemClass)}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Item class" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All classes</SelectItem>
+                      {INVENTORY_ITEM_CLASS_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" size="sm" variant="outline" onClick={() => updateLines((current) => [...current, blankLine()])}>
+                    <Plus className="mr-1 h-3.5 w-3.5" /> Line
+                  </Button>
+                </div>
+              </div>
               {lines.map((line, index) => (
                 <div key={index} className="space-y-2 rounded-lg border p-3">
                   <div className="flex gap-2">
                     <Select value={line.inventoryItemId} onValueChange={(id) => { const item = inventory.find((row) => row.id === id); if (!item) return; updateLines((current) => current.map((row, i) => i === index ? { ...row, inventoryItemId: item.id, sku: item.sku, description: item.name, unitCost: Number(item.unitCost) } : row)); }}>
                       <SelectTrigger><SelectValue placeholder="Link inventory item" /></SelectTrigger>
-                      <SelectContent>{inventory.map((item) => <SelectItem key={item.id} value={item.id}>{item.sku} · {item.name}</SelectItem>)}</SelectContent>
+                      <SelectContent>
+                        {purchaseInventoryOptions.map((item) => (
+                          <SelectItem key={item.id} value={item.id}>
+                            {formatInventoryItemClass(item.itemClass)} · {item.sku} · {item.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
                     </Select>
                     <Button type="button" size="icon" variant="ghost" disabled={lines.length === 1} onClick={() => updateLines((current) => current.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4" /></Button>
                   </div>

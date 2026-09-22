@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type BackendInspectionReport, type BackendServiceRequest } from "@/lib/api";
+import {
+  parseCustomerAdditionalFields,
+  sanitizeCustomerAdditionalFields,
+  type CustomerAdditionalField,
+} from "@/lib/customerFields";
 import { formatServiceStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
@@ -26,6 +31,9 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
   const [machineImages, setMachineImages] = useState<File[]>([]);
   const [imageCaptions, setImageCaptions] = useState<string[]>([]);
   const [severity, setSeverity] = useState("medium");
+  const [additionalFields, setAdditionalFields] = useState<CustomerAdditionalField[]>([
+    { label: "", value: "" },
+  ]);
   const [saving, setSaving] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
 
@@ -49,6 +57,7 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
     setMachineImages([]);
     setImageCaptions([]);
     setSeverity("medium");
+    setAdditionalFields([{ label: "", value: "" }]);
     setExistingReport(null);
   };
 
@@ -75,11 +84,13 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
       const report = await api.getInspectionReport(task.id);
       if (report) {
         const split = splitInspectionFindings(report.findings ?? "");
+        const fields = parseCustomerAdditionalFields(report.additionalFields);
         setExistingReport(report);
         setFindings(split.findings);
         setWorkDetails(split.workDetails);
         setRecommendation(report.recommendation);
         setSeverity(report.severity);
+        setAdditionalFields(fields.length ? fields : [{ label: "", value: "" }]);
       }
     } catch {
       /* no report yet */
@@ -114,6 +125,7 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
         severity,
         attachments,
         attachmentFileIds: attachments.map((item) => item.fileId),
+        additionalFields: sanitizeCustomerAdditionalFields(additionalFields),
         submit: true,
       });
 
@@ -142,6 +154,8 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
     setWorkDetails,
     severity,
     setSeverity,
+    additionalFields,
+    setAdditionalFields,
     machineImages,
     setMachineImages,
     setMachineImage,

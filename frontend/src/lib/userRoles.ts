@@ -18,7 +18,11 @@ export function userCanAccessModule(
 ): boolean {
   const allowed = rbacMatrix[module] ?? fallbackRoles ?? [];
   if (!allowed.length) return false;
-  return getUserRoles(user).some((role) => allowed.includes(role));
+  if (!getUserRoles(user).some((role) => allowed.includes(role))) return false;
+
+  const override = user.permissions?.modules?.[module];
+  if (override === "none") return false;
+  return true;
 }
 
 export function userCanAccessPath(

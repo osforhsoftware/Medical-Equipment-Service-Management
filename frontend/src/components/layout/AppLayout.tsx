@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, Outlet } from "react-router-dom";
+import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
 import { useAuth } from "@/context/AuthContext";
 import { SettingsProvider } from "@/context/SettingsContext";
 import { MobileLayout } from "@/components/mobile/MobileLayout";
@@ -70,7 +71,9 @@ export function AppLayout() {
   }
 
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role === "customer") return <Navigate to="/portal" replace />;
+  if (user.role === "customer") {
+    return <Navigate to={CUSTOMER_PORTAL_ENABLED ? "/portal" : "/login"} replace />;
+  }
 
   return (
     <SettingsProvider>

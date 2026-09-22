@@ -72,7 +72,10 @@ export default function MobileJobs() {
   const load = () => void jobsQuery.refetch();
   useMobilePullRefresh(load);
 
-  const jobs = jobsQuery.data?.pages.flatMap((page) => page.data) ?? [];
+  const jobs = useMemo(
+    () => jobsQuery.data?.pages.flatMap((page) => page.data) ?? [],
+    [jobsQuery.data?.pages],
+  );
 
   const filtered = useMemo(() => {
     if (filter !== "overdue") return jobs;

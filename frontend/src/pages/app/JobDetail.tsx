@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { Camera, ClipboardList, Loader2, PackageMinus, Pencil, PlusCircle, Trash2, Wrench } from "lucide-react";
+import { Camera, ClipboardList, Loader2, PackageMinus, Pencil, PlusCircle, Trash2, UserPlus, Wrench } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
+import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import { PhotoCaptionTile } from "@/components/shared/PhotoCaptionTile";
+import { CustomerAdditionalFieldsEditor } from "@/components/customers/CustomerAdditionalFieldsEditor";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { fieldAria, fieldErrorClass, fieldRules, type FieldErrors } from "@/lib/formValidation";
 import {
@@ -18,14 +20,16 @@ import { JobWorkReportPanel } from "@/components/jobs/JobWorkReportPanel";
 import { pickWorkReportLog, useJobWorkReportEditor } from "@/components/jobs/useJobWorkReportEditor";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/AuthContext";
+import { JOB_CREATE_ROLES } from "@/config/roles";
 import {
   api,
   ApiError,
@@ -33,22 +37,72 @@ import {
   type BackendJobActivity,
   type BackendJobExtra,
   type BackendServiceJob,
+  type BackendUser,
   type JobPhotoInput,
 } from "@/lib/api";
+import {
+  parseCustomerAdditionalFields,
+  sanitizeCustomerAdditionalFields,
+  type CustomerAdditionalField,
+} from "@/lib/customerFields";
 import { ENGINEER_EXTRA_TYPES, billingLineTypeLabel, extraLineTotal } from "@/lib/billingCharges";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
 import { defaultDatePlusDays, formatCurrency, formatDate, formatDateTime, formatJobStatus } from "@/lib/format";
+import { formatInventoryItemClass, INVENTORY_ITEM_CLASS_OPTIONS, type InventoryItemClass } from "@/lib/inventoryItemClass";
+import {
+  DELIVERY_METHOD_OPTIONS,
+  JOB_WORKFLOW_STAGES,
+  jobWorkflowStageIndex,
+  parseJobStageDetails,
+} from "@/lib/jobStages";
+import { roleLabels } from "@/data/mock";
+import type { Role } from "@/data/types";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 
 const JOB_STATUS_OPTIONS = [
   { value: "scheduled", label: "Scheduled" },
   { value: "inProgress", label: "In Progress" },
   { value: "partsPending", label: "Parts Pending" },
-  { value: "review", label: "Review" },
+  { value: "review", label: "QA" },
+  { value: "delivery", label: "Delivery" },
   { value: "completed", label: "Completed" },
 ] as const;
 
-const ENGINEER_STATUS_OPTIONS = JOB_STATUS_OPTIONS.filter((o) => o.value !== "completed");
+const ENGINEER_STATUS_OPTIONS = JOB_STATUS_OPTIONS.filter(
+  (o) => o.value !== "completed" && o.value !== "delivery",
+);
+
+const ASSIGNABLE_JOB_ROLES: Role[] = ["coordinator", "engineer"];
+const PROJECT_TEAM_ROLES: Role[] = ["admin", "coordinator", "engineer", "inspector"];
+
+const assignTeamSchema = z.object({
+  userId: fieldRules.selectRequired("a staff member"),
+});
+
+const editRegistrationSchema = z
+  .object({
+    type: z.string().optional(),
+    typeOther: z.string().optional(),
+    engineerId: fieldRules.selectRequired("assignee"),
+    scheduledFor: fieldRules.requiredString("Scheduled date"),
+  })
+  .superRefine((data, ctx) => {
+    if (data.type === "Other" && !data.typeOther?.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["typeOther"], message: "Please specify the service type." });
+    }
+  });
+
+export type ServiceJobDetailVariant = "job" | "project";
+
+type ServiceJobDetailProps = {
+  variant?: ServiceJobDetailVariant;
+};
+
+function toDateInput(value: string | null | undefined) {
+  if (!value) return "";
+  return value.slice(0, 10);
+}
 
 function toApiJobStatus(display: string) {
   if (display === "in-progress") return "inProgress";
@@ -81,10 +135,19 @@ function validateStock(
   return errors;
 }
 
-export default function JobDetail() {
+export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasRole } = useAuth();
+  const isProject = variant === "project";
+  const backTo = isProject ? "/app/projects" : "/app/jobs";
+  const backLabel = isProject ? "Back to Projects" : "Back to Jobs";
+  const recordLabel = isProject ? "Project" : "Job";
+  const guardRoles = isProject
+    ? (["admin", "coordinator", "estimator"] as Role[])
+    : (["admin", "coordinator", "engineer"] as Role[]);
+  const canAssignTeam = isProject && hasRole(["admin", "coordinator"]);
   const [job, setJob] = useState<BackendServiceJob | null>(null);
   const [activities, setActivities] = useState<BackendJobActivity[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,12 +160,49 @@ export default function JobDetail() {
   const [photoCaptions, setPhotoCaptions] = useState<string[]>([]);
   const [partsNote, setPartsNote] = useState("");
   const [partsItemId, setPartsItemId] = useState("");
+  const [registrationOpen, setRegistrationOpen] = useState(false);
+  const [registrationSaving, setRegistrationSaving] = useState(false);
+  const [deletingJob, setDeletingJob] = useState(false);
+  const [deleteJobOpen, setDeleteJobOpen] = useState(false);
+  const [deleteExtraId, setDeleteExtraId] = useState<string | null>(null);
+  const [deletingExtra, setDeletingExtra] = useState(false);
+  const [assignableStaff, setAssignableStaff] = useState<BackendUser[]>([]);
+  const [projectTeamStaff, setProjectTeamStaff] = useState<BackendUser[]>([]);
+  const [teamAssignment, setTeamAssignment] = useState({ userId: "", isLead: false });
+  const [teamSaving, setTeamSaving] = useState(false);
+  const [loadingStaff, setLoadingStaff] = useState(false);
+  const [registrationForm, setRegistrationForm] = useState({
+    type: "",
+    typeOther: "",
+    engineerId: "",
+    scheduledFor: "",
+    additionalFields: [{ label: "", value: "" }] as CustomerAdditionalField[],
+  });
+  const registrationDialogRef = useRef<HTMLDivElement>(null);
+  const teamAssignRef = useRef<HTMLDivElement>(null);
   const [partsQty, setPartsQty] = useState(1);
   const [extraType, setExtraType] = useState<(typeof ENGINEER_EXTRA_TYPES)[number]["value"]>("product");
   const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
   const [stockItemId, setStockItemId] = useState("");
+  const [stockClassFilter, setStockClassFilter] = useState<"all" | InventoryItemClass>("all");
   const [stockQty, setStockQty] = useState(1);
   const [actionSaving, setActionSaving] = useState(false);
+  const [qaNotes, setQaNotes] = useState("");
+  const [qaChecklistOpen, setQaChecklistOpen] = useState(false);
+  const [qaChecklist, setQaChecklist] = useState({
+    repairVerified: false,
+    testingPassed: false,
+    calibrationChecked: false,
+    cleanlinessOk: false,
+    docsReady: false,
+  });
+  const [deliveryMethod, setDeliveryMethod] = useState("site_return");
+  const [deliveryNote, setDeliveryNote] = useState("");
+  const [deliveryReceivedBy, setDeliveryReceivedBy] = useState("");
+  const [courierName, setCourierName] = useState("");
+  const [waybillNumber, setWaybillNumber] = useState("");
+  const [dispatchDate, setDispatchDate] = useState("");
+  const [estimatedDeliveryDate, setEstimatedDeliveryDate] = useState("");
   const photoInputRef = useRef<HTMLInputElement>(null);
   const photosDialogRef = useRef<HTMLDivElement>(null);
   const scopeDialogRef = useRef<HTMLDivElement>(null);
@@ -139,39 +239,103 @@ export default function JobDetail() {
     fieldOrder: ["stockItemId", "stockQty"],
   });
 
+  const registrationValidation = useFormValidation({
+    fieldOrder: ["type", "typeOther", "engineerId", "scheduledFor"],
+    schema: editRegistrationSchema,
+  });
+
+  const teamValidation = useFormValidation({
+    fieldOrder: ["userId"],
+    schema: assignTeamSchema,
+  });
+
   const canUpdateJob = hasRole(["engineer", "admin"]);
   const canApproveComplete = hasRole(["coordinator", "admin"]);
   const canReviewExtras = hasRole(["coordinator", "admin"]);
+  const canManageRegistration = hasRole(JOB_CREATE_ROLES);
   const statusOptions = canApproveComplete ? JOB_STATUS_OPTIONS : ENGINEER_STATUS_OPTIONS;
-  const awaitingReview = job?.status === "review";
+  const awaitingQa = job?.status === "review";
+  const awaitingDelivery = job?.status === "delivery";
   const canSubmitForReview =
-    canUpdateJob && job && !["review", "completed"].includes(job.status);
+    canUpdateJob && job && !["review", "delivery", "completed"].includes(job.status);
   const canEditWorkReport = canUpdateJob && job && job.status !== "completed";
   const hasWorkReport = Boolean(job && pickWorkReportLog(job.workLogs));
   const tab = searchParams.get("tab") ?? "overview";
+  const stageDetails = parseJobStageDetails(job?.stageDetails);
+  const activeStageIndex = job ? jobWorkflowStageIndex(job.status) : 0;
 
   const load = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     setError(null);
     try {
-      const [record, audit] = await Promise.all([api.getJob(id), api.getJobActivities(id)]);
+      const [record, audit, users] = await Promise.all([
+        api.getJob(id),
+        api.getJobActivities(id),
+        canAssignTeam ? api.listUsers({ isActive: true }) : Promise.resolve([] as BackendUser[]),
+      ]);
       setJob(record);
       setActivities(audit);
+      if (canAssignTeam) {
+        setProjectTeamStaff(
+          users.filter((user) => PROJECT_TEAM_ROLES.includes(user.role as Role)),
+        );
+      }
     } catch (err) {
       setJob(null);
       setError(err instanceof ApiError && err.status === 404 ? null : "Please try again.");
       if (!(err instanceof ApiError && err.status === 404)) {
-        toast.apiError(err, { fallback: "Failed to load job" });
+        toast.apiError(err, { fallback: `Failed to load ${recordLabel.toLowerCase()}` });
       }
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, canAssignTeam, recordLabel]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!job) return;
+    const details = parseJobStageDetails(job.stageDetails);
+    setQaNotes(details.qa?.notes ?? "");
+    setDeliveryMethod(details.delivery?.method || "site_return");
+    setDeliveryNote(details.delivery?.note ?? "");
+    setDeliveryReceivedBy(details.delivery?.receivedBy ?? "");
+    if (details.delivery?.courier) {
+      setCourierName(details.delivery.courier.name ?? "");
+      setWaybillNumber(details.delivery.courier.waybill ?? "");
+      setDispatchDate(details.delivery.courier.dispatchDate ?? "");
+      setEstimatedDeliveryDate(details.delivery.courier.estimatedDeliveryDate ?? "");
+    }
+  }, [job?.id, job?.stageDetails, job?.status]);
+
+  const overdueDays = useMemo(() => {
+    if (!job || !job.scheduledFor || job.status === "completed" || job.status === "delivery") return 0;
+    const scheduledTime = new Date(job.scheduledFor).getTime();
+    const now = Date.now();
+    if (now > scheduledTime) {
+      const diff = Math.floor((now - scheduledTime) / (1000 * 60 * 60 * 24));
+      return diff > 0 ? diff : 0;
+    }
+    return 0;
+  }, [job]);
+
+  const handleLogEscalation = async () => {
+    if (!job) return;
+    try {
+      await api.addJobActivity(job.id, {
+        actor: "System",
+        action: "Escalation Logged",
+        note: `Job overdue by ${overdueDays} day(s) — escalation logged.`,
+      });
+      toast.success("Escalation logged", { description: `Logged for job ${job.reference}` });
+      await refreshActivities(job.id);
+    } catch (err) {
+      toast.apiError(err, { fallback: "Failed to log escalation" });
+    }
+  };
 
   const workReport = useJobWorkReportEditor(async () => {
     await load();
@@ -185,8 +349,42 @@ export default function JobDetail() {
     }
   };
 
+  const assignProjectTeamMember = async () => {
+    if (!id || !teamValidation.validateAll(teamAssignment, undefined, teamAssignRef.current)) return;
+    const member = projectTeamStaff.find((user) => user.id === teamAssignment.userId);
+    setTeamSaving(true);
+    try {
+      await api.assignJobStaff(id, {
+        userId: teamAssignment.userId,
+        role: member?.role || "member",
+        isLead: teamAssignment.isLead,
+      });
+      setTeamAssignment({ userId: "", isLead: false });
+      teamValidation.reset();
+      toast({ title: "Staff assignment saved" });
+      const record = await api.getJob(id);
+      setJob(record);
+      await refreshActivities(id);
+    } catch (error) {
+      if (!teamValidation.applyApiErrors(error, teamAssignRef.current)) {
+        toast.apiError(error, { fallback: "Unable to assign staff" });
+      }
+    } finally {
+      setTeamSaving(false);
+    }
+  };
+
   const updateJobStatus = async (status: string, progress?: number) => {
     if (!job) return;
+    if (job.status === "scheduled" && status === "inProgress") {
+      const pendingExtras = (job.extras ?? []).filter((e) => e.status === "pending");
+      if (pendingExtras.length > 0) {
+        toast.error("Work Authorization Locked", {
+          description: `Cannot advance to In Progress — ${pendingExtras.length} unapproved extra(s) pending coordinator approval.`,
+        });
+        return;
+      }
+    }
     try {
       const updated = await api.updateJob(job.id, {
         status,
@@ -200,12 +398,77 @@ export default function JobDetail() {
     }
   };
 
+  const openRegistrationEditor = async () => {
+    if (!job) return;
+    setLoadingStaff(true);
+    try {
+      const lists = await Promise.all(
+        ASSIGNABLE_JOB_ROLES.map((role) => api.listUsers({ role, isActive: true })),
+      );
+      setAssignableStaff(lists.flat().sort((a, b) => a.name.localeCompare(b.name)));
+      const fields = parseCustomerAdditionalFields(job.additionalFields);
+      setRegistrationForm({
+        type: job.type ?? "",
+        typeOther: job.typeOther ?? "",
+        engineerId: job.engineerId ?? "",
+        scheduledFor: toDateInput(job.scheduledFor),
+        additionalFields: fields.length ? fields : [{ label: "", value: "" }],
+      });
+      registrationValidation.reset();
+      setRegistrationOpen(true);
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to load assignees" });
+    } finally {
+      setLoadingStaff(false);
+    }
+  };
+
+  const saveRegistration = async () => {
+    if (!job) return;
+    if (!registrationValidation.validateAll(registrationForm, undefined, registrationDialogRef.current)) return;
+    setRegistrationSaving(true);
+    try {
+      const updated = await api.updateJob(job.id, {
+        type: registrationForm.type || undefined,
+        typeOther: registrationForm.type === "Other" ? registrationForm.typeOther.trim() || null : null,
+        engineerId: registrationForm.engineerId,
+        scheduledFor: registrationForm.scheduledFor,
+        additionalFields: sanitizeCustomerAdditionalFields(registrationForm.additionalFields),
+      });
+      setJob(updated);
+      setRegistrationOpen(false);
+      toast.success("Job registration updated");
+      await refreshActivities(job.id);
+    } catch (err) {
+      if (!registrationValidation.applyApiErrors(err, registrationDialogRef.current)) {
+        toast.apiError(err, { fallback: "Unable to update job registration" });
+      }
+    } finally {
+      setRegistrationSaving(false);
+    }
+  };
+
+  const deleteJobRegistration = async () => {
+    if (!job) return;
+    setDeletingJob(true);
+    try {
+      await api.deleteJob(job.id);
+      toast.success("Job deleted", { description: job.reference });
+      setDeleteJobOpen(false);
+      navigate("/app/jobs");
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to delete job" });
+    } finally {
+      setDeletingJob(false);
+    }
+  };
+
   const submitForReview = async () => {
     if (!job) return;
     if (!pickWorkReportLog(job.workLogs)) {
       toast({
         title: "Work report required",
-        description: "Fill the work report (like inspection) before submitting for review.",
+        description: "Fill the work report (like inspection) before submitting for QA.",
         variant: "destructive",
       });
       workReport.openReport(job);
@@ -215,27 +478,99 @@ export default function JobDetail() {
       await api.updateJob(job.id, { status: "review", progress: Math.max(job.progress, 90) });
       const doc = await api.generateDocument("service-report", job.id);
       toast({
-        title: "Submitted for review",
-        description: "Service report generated. Awaiting coordinator or admin approval.",
+        title: "Submitted for QA",
+        description: "Service report generated. Awaiting coordinator or admin quality check.",
       });
       if (doc.file?.id) window.open(api.fileDownloadUrl(doc.file.id), "_blank");
       await load();
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to submit job for review" });
+      toast.apiError(err, { fallback: "Unable to submit job for QA" });
     }
   };
 
-  const approveAndComplete = async () => {
+  const approveQaPass = async () => {
     if (!job) return;
     try {
-      await api.updateJob(job.id, { status: "completed", progress: 100 });
-      toast({
-        title: "Job completed",
-        description: "Work approved. Ticket moved to pending final approval / billing.",
+      const updated = await api.updateJob(job.id, {
+        status: "delivery",
+        progress: Math.max(job.progress, 95),
+        stageDetails: {
+          qa: {
+            result: "pass",
+            notes: qaNotes.trim() || null,
+            checkedAt: new Date().toISOString(),
+            checklist: qaChecklist,
+          },
+        },
       });
-      await load();
+      setJob(updated);
+      toast({
+        title: "QA passed",
+        description: "Job moved to Delivery. Confirm handoff to complete and continue to billing.",
+      });
+      setSearchParams({ tab: "workflow" });
+      await refreshActivities(job.id);
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to approve and complete job" });
+      toast.apiError(err, { fallback: "Unable to approve QA" });
+    }
+  };
+
+  const failQaReturnToRepair = async () => {
+    if (!job) return;
+    try {
+      const updated = await api.updateJob(job.id, {
+        status: "inProgress",
+        progress: Math.min(job.progress, 80),
+        stageDetails: {
+          qa: {
+            result: "fail",
+            notes: qaNotes.trim() || null,
+            checkedAt: new Date().toISOString(),
+          },
+        },
+      });
+      setJob(updated);
+      toast({
+        title: "Returned to Repair",
+        description: "QA failed — engineer can continue work and resubmit.",
+      });
+      await refreshActivities(job.id);
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to return job to Repair" });
+    }
+  };
+
+  const confirmDelivery = async () => {
+    if (!job) return;
+    try {
+      const updated = await api.updateJob(job.id, {
+        status: "completed",
+        progress: 100,
+        stageDetails: {
+          delivery: {
+            method: deliveryMethod || null,
+            note: deliveryNote.trim() || null,
+            receivedBy: deliveryReceivedBy.trim() || null,
+            deliveredAt: new Date().toISOString(),
+            courier: courierName.trim()
+              ? {
+                  name: courierName.trim(),
+                  waybill: waybillNumber.trim(),
+                  dispatchDate,
+                  estimatedDeliveryDate,
+                }
+              : null,
+          },
+        },
+      });
+      setJob(updated);
+      toast({
+        title: "Delivery confirmed",
+        description: "Job completed. Continue to billing to invoice and update warranty.",
+      });
+      await refreshActivities(job.id);
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to confirm delivery" });
     }
   };
 
@@ -367,17 +702,18 @@ export default function JobDetail() {
     }
   };
 
-  const deleteExtra = async (extraId: string) => {
-    if (!window.confirm("Delete this pending parts / scope request?")) return;
-    setActionSaving(true);
+  const deleteExtra = async () => {
+    if (!deleteExtraId) return;
+    setDeletingExtra(true);
     try {
-      await api.deleteJobExtra(extraId);
+      await api.deleteJobExtra(deleteExtraId);
       toast({ title: "Parts / scope request deleted" });
+      setDeleteExtraId(null);
       await load();
     } catch (err) {
       toast.apiError(err, { fallback: "Unable to delete request" });
     } finally {
-      setActionSaving(false);
+      setDeletingExtra(false);
     }
   };
 
@@ -397,6 +733,7 @@ export default function JobDetail() {
   const openStockDialog = async () => {
     setStockOpen(true);
     setStockItemId("");
+    setStockClassFilter("all");
     setStockQty(1);
     stockValidation.reset();
     try {
@@ -405,6 +742,14 @@ export default function JobDetail() {
       setInventory([]);
     }
   };
+
+  const stockInventoryOptions = useMemo(
+    () =>
+      stockClassFilter === "all"
+        ? inventory
+        : inventory.filter((item) => (item.itemClass ?? "spare_part") === stockClassFilter),
+    [inventory, stockClassFilter],
+  );
 
   const handleDeductStock = async () => {
     if (!job) return;
@@ -467,44 +812,101 @@ export default function JobDetail() {
   const photos = job?.photos ?? [];
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "engineer"]}>
+    <RoleGuard roles={guardRoles}>
       <RecordDetailLayout
-        backTo="/app/jobs"
-        backLabel="Back to Jobs"
-        title={job?.reference ?? "Job"}
+        backTo={backTo}
+        backLabel={backLabel}
+        title={job?.reference ?? recordLabel}
         subtitle={job ? `${job.equipmentName} · ${job.customerName}` : undefined}
         status={job ? formatJobStatus(job.status) : undefined}
         meta={job ? [
           { label: "Scheduled", value: formatDate(job.scheduledFor) },
           { label: "Ticket", value: job.requestRef },
+          ...(isProject ? [{ label: "Lead", value: job.engineer || "Not assigned" }] : []),
         ] : undefined}
         loading={loading}
         error={error}
         notFound={!loading && !error && !job}
-        notFoundTitle="Job not found"
-        notFoundDescription="The requested service job could not be found."
+        notFoundTitle={`${recordLabel} not found`}
+        notFoundDescription={`The requested ${recordLabel.toLowerCase()} could not be found.`}
         onRetry={() => void load()}
         actions={
-          job && job.status !== "completed" ? (
+          job ? (
             <div className="flex flex-wrap gap-2">
-              {canEditWorkReport ? (
-                <Button variant="outline" onClick={() => workReport.openReport(job)}>
-                  <ClipboardList className="mr-1.5 h-4 w-4" />
-                  {hasWorkReport ? "Update Work Report" : "Work Report"}
+              {isProject && hasRole(["admin", "coordinator", "engineer"]) ? (
+                <Button variant="outline" asChild>
+                  <Link to={`/app/jobs/${job.id}`}>Open service job</Link>
                 </Button>
               ) : null}
-              {canSubmitForReview ? (
-                <Button onClick={() => void submitForReview()}>
-                  Submit for Review & Report
+              {!isProject && hasRole(["admin", "coordinator", "estimator"]) ? (
+                <Button variant="outline" asChild>
+                  <Link to={`/app/projects/${job.id}`}>Open project</Link>
                 </Button>
-              ) : awaitingReview && canApproveComplete ? (
-                <Button onClick={() => void approveAndComplete()}>
-                  Approve & Complete
-                </Button>
-              ) : awaitingReview ? (
-                <Button disabled variant="outline">
-                  Awaiting coordinator approval
-                </Button>
+              ) : null}
+              {job.status === "completed" ? (
+                <>
+                  <Button variant="brand" asChild>
+                    <Link to={`/app/billing/jobs/${job.id}`}>Continue to billing</Link>
+                  </Button>
+                  {job.serviceRequestId ? (
+                    <Button variant="outline" asChild>
+                      <Link to={`/app/service-tickets/${job.serviceRequestId}`}>Open service ticket</Link>
+                    </Button>
+                  ) : null}
+                </>
+              ) : null}
+              {canManageRegistration ? (
+                <>
+                  <Button variant="outline" onClick={() => void openRegistrationEditor()}>
+                    <Pencil className="mr-1.5 h-4 w-4" />
+                    Edit registration
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="text-destructive hover:text-destructive"
+                    disabled={deletingJob}
+                    onClick={() => setDeleteJobOpen(true)}
+                  >
+                    <Trash2 className="mr-1.5 h-4 w-4" />
+                    Delete
+                  </Button>
+                </>
+              ) : null}
+              {job.status !== "completed" ? (
+                <>
+                  {canEditWorkReport ? (
+                    <Button variant="outline" onClick={() => workReport.openReport(job)}>
+                      <ClipboardList className="mr-1.5 h-4 w-4" />
+                      {hasWorkReport ? "Update Work Report" : "Work Report"}
+                    </Button>
+                  ) : null}
+                  {canSubmitForReview ? (
+                    <Button onClick={() => void submitForReview()}>
+                      Submit for QA & Report
+                    </Button>
+                  ) : awaitingQa && canApproveComplete ? (
+                    <>
+                      <Button variant="outline" onClick={() => void failQaReturnToRepair()}>
+                        QA Fail — Return to Repair
+                      </Button>
+                      <Button onClick={() => void approveQaPass()}>
+                        QA Pass — Send to Delivery
+                      </Button>
+                    </>
+                  ) : awaitingQa ? (
+                    <Button disabled variant="outline">
+                      Awaiting QA approval
+                    </Button>
+                  ) : awaitingDelivery && canApproveComplete ? (
+                    <Button onClick={() => void confirmDelivery()}>
+                      Confirm Delivery & Complete
+                    </Button>
+                  ) : awaitingDelivery ? (
+                    <Button disabled variant="outline">
+                      Awaiting delivery confirmation
+                    </Button>
+                  ) : null}
+                </>
               ) : null}
             </div>
           ) : undefined
@@ -517,6 +919,64 @@ export default function JobDetail() {
             label: "Overview",
             content: (
               <div className="space-y-4">
+                {overdueDays > 0 && (
+                  <Alert variant="destructive" className="flex items-center justify-between">
+                    <div>
+                      <AlertTitle className="font-semibold">⚠ Job Overdue by {overdueDays} Day(s)</AlertTitle>
+                      <AlertDescription>
+                        Scheduled date was {formatDate(job.scheduledFor)}. Escalation is required for delayed jobs.
+                      </AlertDescription>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-destructive/40 text-destructive hover:bg-destructive/10 shrink-0 ml-3"
+                      onClick={() => void handleLogEscalation()}
+                    >
+                      Log Escalation
+                    </Button>
+                  </Alert>
+                )}
+
+                {job.status === "scheduled" && (job.extras ?? []).some((e) => e.status === "pending") && (
+                  <Alert className="border-amber-500/50 bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200 [&>svg]:text-amber-600">
+                    <AlertTitle className="font-semibold text-amber-800 dark:text-amber-300">
+                      Work Authorization Lock
+                    </AlertTitle>
+                    <AlertDescription>
+                      {(job.extras ?? []).filter((e) => e.status === "pending").length} unapproved extra(s) pending coordinator approval. Status advancement to "In Progress" is locked until approved.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                <DetailSection title="Workflow">
+                  <ol className="grid gap-3 sm:grid-cols-3">
+                    {JOB_WORKFLOW_STAGES.map((stage, index) => {
+                      const done = activeStageIndex > index || job.status === "completed";
+                      const current = activeStageIndex === index && job.status !== "completed";
+                      return (
+                        <li
+                          key={stage.id}
+                          className={cn(
+                            "rounded-lg border px-3 py-3",
+                            done && "border-success/30 bg-[hsl(var(--success-light))]",
+                            current && "border-primary/40 bg-primary-light",
+                            !done && !current && "bg-muted/40",
+                          )}
+                        >
+                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Step {index + 1}
+                          </p>
+                          <p className="mt-1 font-semibold">{stage.label}</p>
+                          <p className="text-xs text-muted-foreground">{stage.description}</p>
+                          <p className="mt-2 text-xs font-medium">
+                            {done ? "Done" : current ? "In progress" : "Upcoming"}
+                          </p>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </DetailSection>
                 <DetailSection title="Progress">
                   <div className="mb-2 flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Completion</span>
@@ -524,12 +984,13 @@ export default function JobDetail() {
                   </div>
                   <Progress value={job.progress} className="h-2" />
                 </DetailSection>
-                <DetailSection title="Job details">
+                <DetailSection title={isProject ? "Project details" : "Job details"}>
                   <DetailInfoGrid
                     items={[
                       { label: "Type", value: formatFixedOption(SERVICE_TYPE_OPTIONS, job.type, job.typeOther) },
                       { label: "Customer", value: job.customerName },
                       { label: "Equipment", value: job.equipmentName },
+                      { label: "Lead", value: job.engineer || "Not assigned" },
                       { label: "Scheduled", value: formatDate(job.scheduledFor) },
                       { label: "Service ticket", value: job.serviceRequestId ? (
                         <Link className="text-primary hover:underline normal-case" to={`/app/service-tickets/${job.serviceRequestId}`}>
@@ -541,6 +1002,16 @@ export default function JobDetail() {
                     ]}
                   />
                 </DetailSection>
+                {parseCustomerAdditionalFields(job.additionalFields).length > 0 ? (
+                  <DetailSection title="Additional registration fields">
+                    <DetailInfoGrid
+                      items={parseCustomerAdditionalFields(job.additionalFields).map((field) => ({
+                        label: field.label,
+                        value: field.value || "—",
+                      }))}
+                    />
+                  </DetailSection>
+                ) : null}
                 {photos.length > 0 ? (
                   <DetailSection title="Photos">
                     <div className="flex flex-wrap gap-3">
@@ -562,6 +1033,243 @@ export default function JobDetail() {
                     </div>
                   </DetailSection>
                 ) : null}
+              </div>
+            ),
+          },
+          {
+            id: "workflow",
+            label: "Repair / QA / Delivery",
+            content: (
+              <div className="space-y-4">
+                <DetailSection title="Repair">
+                  <p className="text-sm text-muted-foreground">
+                    Field work, parts, and the work report happen in Repair. Submit for QA when ready.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {canEditWorkReport ? (
+                      <Button variant="outline" onClick={() => workReport.openReport(job)}>
+                        <ClipboardList className="mr-1.5 h-4 w-4" />
+                        {hasWorkReport ? "Update Work Report" : "Work Report"}
+                      </Button>
+                    ) : null}
+                    {canSubmitForReview ? (
+                      <Button onClick={() => void submitForReview()}>Submit for QA & Report</Button>
+                    ) : null}
+                  </div>
+                  {stageDetails.qa?.result === "fail" ? (
+                    <p className="mt-3 text-sm text-destructive">
+                      Last QA result: Fail{stageDetails.qa.notes ? ` — ${stageDetails.qa.notes}` : ""}
+                    </p>
+                  ) : null}
+                </DetailSection>
+
+                <DetailSection title="QA">
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    Coordinator/admin quality check before equipment leaves for delivery.
+                  </p>
+                  <div className="grid gap-3">
+                    {awaitingQa && canApproveComplete && (
+                      <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                        <Label className="text-xs font-semibold uppercase text-muted-foreground">
+                          QA Independent Quality Checklist (All Required)
+                        </Label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={qaChecklist.repairVerified}
+                              onChange={(e) => setQaChecklist({ ...qaChecklist, repairVerified: e.target.checked })}
+                              className="rounded"
+                            />
+                            <span>1. Repair & Part Replacement Verified</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={qaChecklist.testingPassed}
+                              onChange={(e) => setQaChecklist({ ...qaChecklist, testingPassed: e.target.checked })}
+                              className="rounded"
+                            />
+                            <span>2. Functional Testing Passed</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={qaChecklist.calibrationChecked}
+                              onChange={(e) => setQaChecklist({ ...qaChecklist, calibrationChecked: e.target.checked })}
+                              className="rounded"
+                            />
+                            <span>3. Calibration & Specs Checked</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={qaChecklist.cleanlinessOk}
+                              onChange={(e) => setQaChecklist({ ...qaChecklist, cleanlinessOk: e.target.checked })}
+                              className="rounded"
+                            />
+                            <span>4. Cleanliness & Decontamination OK</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer sm:col-span-2">
+                            <input
+                              type="checkbox"
+                              checked={qaChecklist.docsReady}
+                              onChange={(e) => setQaChecklist({ ...qaChecklist, docsReady: e.target.checked })}
+                              className="rounded"
+                            />
+                            <span>5. Service Report & Documentation Ready</span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                    <div className="grid gap-2">
+                      <Label htmlFor="qa-notes">QA notes</Label>
+                      <Textarea
+                        id="qa-notes"
+                        value={qaNotes}
+                        onChange={(e) => setQaNotes(e.target.value)}
+                        placeholder="Checks performed, issues found…"
+                        disabled={!awaitingQa || !canApproveComplete}
+                        rows={3}
+                      />
+                    </div>
+                    {stageDetails.qa?.result === "pass" ? (
+                      <p className="text-sm text-success">
+                        QA passed{stageDetails.qa.checkedAt ? ` · ${formatDateTime(stageDetails.qa.checkedAt)}` : ""}
+                        {stageDetails.qa.notes ? ` — ${stageDetails.qa.notes}` : ""}
+                      </p>
+                    ) : null}
+                    {awaitingQa && canApproveComplete ? (
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" onClick={() => void failQaReturnToRepair()}>
+                          Fail — Return to Repair
+                        </Button>
+                        <Button
+                          disabled={!Object.values(qaChecklist).every(Boolean)}
+                          onClick={() => void approveQaPass()}
+                        >
+                          Pass — Send to Delivery
+                        </Button>
+                      </div>
+                    ) : awaitingQa ? (
+                      <p className="text-sm text-muted-foreground">Waiting for coordinator/admin QA.</p>
+                    ) : job.status === "scheduled" || job.status === "inProgress" || job.status === "partsPending" ? (
+                      <p className="text-sm text-muted-foreground">QA unlocks after Repair is submitted.</p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">QA step finished for this job.</p>
+                    )}
+                  </div>
+                </DetailSection>
+
+                <DetailSection title="Delivery">
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    Confirm handoff to the customer. Completing delivery marks the job done and opens billing.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-2 sm:col-span-1">
+                      <Label>Delivery method</Label>
+                      <Select
+                        value={deliveryMethod}
+                        onValueChange={setDeliveryMethod}
+                        disabled={!awaitingDelivery || !canApproveComplete}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select method" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {DELIVERY_METHOD_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="delivery-received-by">Received by</Label>
+                      <Input
+                        id="delivery-received-by"
+                        value={deliveryReceivedBy}
+                        onChange={(e) => setDeliveryReceivedBy(e.target.value)}
+                        placeholder="Customer contact name"
+                        disabled={!awaitingDelivery || !canApproveComplete}
+                      />
+                    </div>
+
+                    {/* Courier Tracking fields */}
+                    <div className="grid gap-2 sm:col-span-2 rounded-lg border border-border p-3 bg-muted/20">
+                      <Label className="text-xs font-semibold uppercase text-muted-foreground">Courier / Shipping Tracking Details (Optional)</Label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
+                        <div>
+                          <Label className="text-xs">Courier Name</Label>
+                          <Input
+                            value={courierName}
+                            onChange={(e) => setCourierName(e.target.value)}
+                            placeholder="e.g. DHL, FedEx, Local Freight"
+                            disabled={!awaitingDelivery || !canApproveComplete}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Waybill / Tracking #</Label>
+                          <Input
+                            value={waybillNumber}
+                            onChange={(e) => setWaybillNumber(e.target.value)}
+                            placeholder="e.g. WB-9482019"
+                            disabled={!awaitingDelivery || !canApproveComplete}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Dispatch Date</Label>
+                          <Input
+                            type="date"
+                            value={dispatchDate}
+                            onChange={(e) => setDispatchDate(e.target.value)}
+                            disabled={!awaitingDelivery || !canApproveComplete}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Estimated Delivery Date</Label>
+                          <Input
+                            type="date"
+                            value={estimatedDeliveryDate}
+                            onChange={(e) => setEstimatedDeliveryDate(e.target.value)}
+                            disabled={!awaitingDelivery || !canApproveComplete}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid gap-2 sm:col-span-2">
+                      <Label htmlFor="delivery-note">Delivery note</Label>
+                      <Textarea
+                        id="delivery-note"
+                        value={deliveryNote}
+                        onChange={(e) => setDeliveryNote(e.target.value)}
+                        placeholder="Tracking, site notes, accessories returned…"
+                        disabled={!awaitingDelivery || !canApproveComplete}
+                        rows={3}
+                      />
+                    </div>
+                  </div>
+                  {stageDetails.delivery?.deliveredAt ? (
+                    <p className="mt-3 text-sm">
+                      Delivered {formatDateTime(stageDetails.delivery.deliveredAt)}
+                      {stageDetails.delivery.receivedBy ? ` · Received by ${stageDetails.delivery.receivedBy}` : ""}
+                    </p>
+                  ) : null}
+                  {awaitingDelivery && canApproveComplete ? (
+                    <Button className="mt-3" onClick={() => void confirmDelivery()}>
+                      Confirm Delivery & Complete
+                    </Button>
+                  ) : job.status === "completed" ? (
+                    <Button className="mt-3" variant="brand" asChild>
+                      <Link to={`/app/billing/jobs/${job.id}`}>Continue to billing</Link>
+                    </Button>
+                  ) : awaitingDelivery ? (
+                    <p className="mt-3 text-sm text-muted-foreground">Waiting for coordinator/admin delivery confirmation.</p>
+                  ) : (
+                    <p className="mt-3 text-sm text-muted-foreground">Delivery unlocks after QA pass.</p>
+                  )}
+                </DetailSection>
               </div>
             ),
           },
@@ -625,8 +1333,8 @@ export default function JobDetail() {
                                   size="sm"
                                   variant="outline"
                                   className="text-destructive hover:text-destructive"
-                                  disabled={actionSaving}
-                                  onClick={() => void deleteExtra(item.id)}
+                                  disabled={actionSaving || deletingExtra}
+                                  onClick={() => setDeleteExtraId(item.id)}
                                 >
                                   <Trash2 className="mr-1 h-3.5 w-3.5" />
                                   Delete
@@ -667,6 +1375,100 @@ export default function JobDetail() {
               </DetailSection>
             ),
           },
+          ...(isProject
+            ? [
+                {
+                  id: "team",
+                  label: "Team",
+                  content: (
+                    <DetailSection title="Project team">
+                      <div ref={teamAssignRef} className="space-y-4">
+                        {canAssignTeam ? (
+                          <form
+                            noValidate
+                            className="space-y-3 rounded-lg border p-4"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              void assignProjectTeamMember();
+                            }}
+                          >
+                            <div className="grid gap-2" data-field="userId">
+                              <Label className={teamValidation.shouldShow("userId") ? "text-destructive" : undefined}>
+                                Staff member
+                                <RequiredMark />
+                              </Label>
+                              <Select
+                                value={teamAssignment.userId}
+                                onValueChange={(userId) => {
+                                  const next = { ...teamAssignment, userId };
+                                  setTeamAssignment(next);
+                                  teamValidation.handleChange("userId", next);
+                                }}
+                              >
+                                <SelectTrigger
+                                  className={fieldErrorClass(teamValidation.shouldShow("userId"))}
+                                  {...fieldAria(
+                                    "userId",
+                                    teamValidation.shouldShow("userId") ? teamValidation.errors.userId : null,
+                                  )}
+                                >
+                                  <SelectValue placeholder="Select staff" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {projectTeamStaff.map((user) => (
+                                    <SelectItem key={user.id} value={user.id}>
+                                      {user.name} · {roleLabels[user.role as Role] ?? user.role}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {teamValidation.shouldShow("userId") ? (
+                                <FormFieldError field="userId" message={teamValidation.errors.userId} />
+                              ) : null}
+                            </div>
+                            <label className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={teamAssignment.isLead}
+                                onChange={(e) =>
+                                  setTeamAssignment((prev) => ({ ...prev, isLead: e.target.checked }))
+                                }
+                              />
+                              Assign as lead
+                            </label>
+                            <Button type="submit" disabled={teamSaving}>
+                              {teamSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                              Add to team
+                            </Button>
+                          </form>
+                        ) : null}
+                        {job.assignments?.length ? (
+                          <div className="space-y-2">
+                            {job.assignments.map((member) => (
+                              <div key={member.id} className="rounded-lg border px-3 py-2 text-sm">
+                                <p className="font-medium">
+                                  {member.user?.name ?? "Team member"}
+                                  {member.isLead ? " · Lead" : ""}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {roleLabels[(member.user?.role ?? member.role) as Role] ?? member.role}
+                                  {" · "}
+                                  Assigned {formatDate(member.assignedAt)}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            Lead: {job.engineer || "Not assigned"}. No additional team members yet.
+                          </p>
+                        )}
+                      </div>
+                    </DetailSection>
+                  ),
+                },
+              ]
+            : []),
         ] : undefined}
         sidebar={job ? (
           <div className="space-y-4">
@@ -678,12 +1480,29 @@ export default function JobDetail() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {job.status === "completed" ? (
-                  <p className="text-sm text-muted-foreground">This job is completed.</p>
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      Delivery is complete. Continue to Billing to generate the invoice and record warranty on the equipment.
+                    </p>
+                    <Button className="w-full" asChild>
+                      <Link to={`/app/billing/jobs/${job.id}`}>Open billing for this job</Link>
+                    </Button>
+                    {job.serviceRequestId ? (
+                      <Button variant="outline" className="w-full" asChild>
+                        <Link to={`/app/service-tickets/${job.serviceRequestId}`}>Open linked ticket</Link>
+                      </Button>
+                    ) : null}
+                  </div>
                 ) : (
                   <>
-                    {awaitingReview ? (
+                    {awaitingQa ? (
                       <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
-                        Work submitted for review. A coordinator or admin must approve before the job is marked completed.
+                        Work submitted for QA. A coordinator or admin must pass QA before Delivery.
+                      </p>
+                    ) : null}
+                    {awaitingDelivery ? (
+                      <p className="rounded-md border border-info/30 bg-info/10 px-3 py-2 text-sm text-foreground">
+                        QA passed. Confirm Delivery to complete the job and continue to billing.
                       </p>
                     ) : null}
                     {(canUpdateJob || canApproveComplete) && job.status !== "completed" ? (
@@ -711,20 +1530,60 @@ export default function JobDetail() {
                         <ActionBtn icon={Camera} label="Quick photos" onClick={() => { photosValidation.reset(); resetPhotoDraft(); setPhotosOpen(true); }} />
                       </div>
                     ) : null}
-                    {awaitingReview && canApproveComplete ? (
-                      <Button className="w-full" onClick={() => void approveAndComplete()}>
-                        Approve & Complete
+                    {awaitingQa && canApproveComplete ? (
+                      <div className="grid gap-2">
+                        <Button className="w-full" variant="outline" onClick={() => void failQaReturnToRepair()}>
+                          QA Fail — Return to Repair
+                        </Button>
+                        <Button className="w-full" onClick={() => void approveQaPass()}>
+                          QA Pass — Send to Delivery
+                        </Button>
+                      </div>
+                    ) : null}
+                    {awaitingDelivery && canApproveComplete ? (
+                      <Button className="w-full" onClick={() => void confirmDelivery()}>
+                        Confirm Delivery & Complete
                       </Button>
                     ) : null}
                     {canSubmitForReview ? (
                       <Button className="w-full" variant="outline" onClick={() => void submitForReview()}>
-                        Submit for Review & Report
+                        Submit for QA & Report
                       </Button>
                     ) : null}
                   </>
                 )}
               </CardContent>
             </Card>
+            {isProject ? (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <UserPlus className="h-4 w-4" /> Team
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {job.assignments?.length ? (
+                    job.assignments.slice(0, 5).map((member) => (
+                      <div key={member.id} className="text-sm">
+                        <p className="font-medium">
+                          {member.user?.name ?? "Team member"}
+                          {member.isLead ? " · Lead" : ""}
+                        </p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{job.engineer || "No team assigned"}</p>
+                  )}
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => setSearchParams({ tab: "team" })}
+                  >
+                    Manage team
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : null}
           </div>
         ) : undefined}
       />
@@ -912,6 +1771,28 @@ export default function JobDetail() {
             }}
           >
             <div className="grid gap-4 py-2">
+              <div className="grid gap-2">
+                <Label>Item class</Label>
+                <Select
+                  value={stockClassFilter}
+                  onValueChange={(value) => {
+                    setStockClassFilter(value as "all" | InventoryItemClass);
+                    setStockItemId("");
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All classes</SelectItem>
+                    {INVENTORY_ITEM_CLASS_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="grid gap-2" data-field="stockItemId">
                 <Label className={stockValidation.shouldShow("stockItemId") ? "text-destructive" : undefined}>
                   Inventory item
@@ -933,8 +1814,10 @@ export default function JobDetail() {
                     <SelectValue placeholder="Select item" />
                   </SelectTrigger>
                   <SelectContent>
-                    {inventory.map((i) => (
-                      <SelectItem key={i.id} value={i.id}>{i.name} ({i.sku}) — {i.inStock} in stock</SelectItem>
+                    {stockInventoryOptions.map((i) => (
+                      <SelectItem key={i.id} value={i.id}>
+                        {formatInventoryItemClass(i.itemClass)} · {i.name} ({i.sku}) — {i.inStock} in stock
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1009,6 +1892,188 @@ export default function JobDetail() {
         setImageCaptions={workReport.setImageCaptions}
         newImagePreviews={workReport.newImagePreviews}
       />
+
+      <Dialog
+        open={registrationOpen}
+        onOpenChange={(open) => {
+          if (!open) registrationValidation.reset();
+          setRegistrationOpen(open);
+        }}
+      >
+        <DialogContent ref={registrationDialogRef} className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit job registration</DialogTitle>
+            <DialogDescription>
+              Update schedule, assignee, type, or optional fields. Linked inspection, estimate, and billing history are not removed by this edit.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2" data-field="type">
+              <Label>Service type</Label>
+              <Select
+                value={registrationForm.type || undefined}
+                onValueChange={(v) => {
+                  const next = {
+                    ...registrationForm,
+                    type: v,
+                    typeOther: v === "Other" ? registrationForm.typeOther : "",
+                  };
+                  setRegistrationForm(next);
+                  registrationValidation.clearError("type");
+                  if (v !== "Other") registrationValidation.clearError("typeOther");
+                  registrationValidation.handleChange("type", next);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SERVICE_TYPE_OPTIONS.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {registrationForm.type === "Other" ? (
+              <div className="grid gap-2" data-field="typeOther">
+                <Label className={registrationValidation.shouldShow("typeOther") ? "text-destructive" : undefined}>
+                  Specify type
+                  <RequiredMark />
+                </Label>
+                <Input
+                  value={registrationForm.typeOther}
+                  className={fieldErrorClass(registrationValidation.shouldShow("typeOther"))}
+                  {...fieldAria(
+                    "typeOther",
+                    registrationValidation.shouldShow("typeOther") ? registrationValidation.errors.typeOther : null,
+                  )}
+                  onChange={(e) => {
+                    const next = { ...registrationForm, typeOther: e.target.value };
+                    setRegistrationForm(next);
+                    registrationValidation.handleChange("typeOther", next);
+                  }}
+                  onBlur={() => registrationValidation.handleBlur("typeOther", registrationForm)}
+                />
+                {registrationValidation.shouldShow("typeOther") && (
+                  <FormFieldError field="typeOther" message={registrationValidation.errors.typeOther} />
+                )}
+              </div>
+            ) : null}
+            <div className="grid gap-2" data-field="engineerId">
+              <Label className={registrationValidation.shouldShow("engineerId") ? "text-destructive" : undefined}>
+                Assign to
+                <RequiredMark />
+              </Label>
+              {loadingStaff ? (
+                <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading staff…
+                </div>
+              ) : (
+                <Select
+                  value={registrationForm.engineerId}
+                  onValueChange={(v) => {
+                    const next = { ...registrationForm, engineerId: v };
+                    setRegistrationForm(next);
+                    registrationValidation.clearError("engineerId");
+                    registrationValidation.handleChange("engineerId", next);
+                  }}
+                >
+                  <SelectTrigger
+                    className={fieldErrorClass(registrationValidation.shouldShow("engineerId"))}
+                    {...fieldAria(
+                      "engineerId",
+                      registrationValidation.shouldShow("engineerId") ? registrationValidation.errors.engineerId : null,
+                    )}
+                  >
+                    <SelectValue placeholder="Select assignee" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assignableStaff.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name} · {roleLabels[s.role as Role]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {registrationValidation.shouldShow("engineerId") && (
+                <FormFieldError field="engineerId" message={registrationValidation.errors.engineerId} />
+              )}
+            </div>
+            <div className="grid gap-2" data-field="scheduledFor">
+              <Label className={registrationValidation.shouldShow("scheduledFor") ? "text-destructive" : undefined}>
+                Scheduled for
+                <RequiredMark />
+              </Label>
+              <Input
+                type="date"
+                value={registrationForm.scheduledFor}
+                className={fieldErrorClass(registrationValidation.shouldShow("scheduledFor"))}
+                {...fieldAria(
+                  "scheduledFor",
+                  registrationValidation.shouldShow("scheduledFor") ? registrationValidation.errors.scheduledFor : null,
+                )}
+                onChange={(e) => {
+                  const next = { ...registrationForm, scheduledFor: e.target.value };
+                  setRegistrationForm(next);
+                  registrationValidation.handleChange("scheduledFor", next);
+                }}
+                onBlur={() => registrationValidation.handleBlur("scheduledFor", registrationForm)}
+              />
+              {registrationValidation.shouldShow("scheduledFor") && (
+                <FormFieldError field="scheduledFor" message={registrationValidation.errors.scheduledFor} />
+              )}
+            </div>
+            <CustomerAdditionalFieldsEditor
+              value={registrationForm.additionalFields}
+              onChange={(additionalFields) => setRegistrationForm({ ...registrationForm, additionalFields })}
+              title="Additional registration fields"
+              description="Optional custom fields (site contact, accessories, PO reference, etc.)."
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRegistrationOpen(false)}>Cancel</Button>
+            <Button onClick={() => void saveRegistration()} disabled={registrationSaving} variant="brand">
+              {registrationSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Save changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <DeleteConfirmDialog
+        open={deleteJobOpen}
+        onOpenChange={setDeleteJobOpen}
+        title={`Delete ${recordLabel.toLowerCase()}?`}
+        description={
+          <div className="space-y-2">
+            <p>
+              Delete {recordLabel.toLowerCase()}{" "}
+              <span className="font-medium text-foreground">{job?.reference}</span>? This cannot be
+              undone.
+            </p>
+            <p>
+              Jobs with invoices, stock deductions, extras, work logs, or QA/delivery/completed status
+              cannot be deleted.
+            </p>
+          </div>
+        }
+        confirmLabel={`Delete ${recordLabel.toLowerCase()}`}
+        loading={deletingJob}
+        onConfirm={() => void deleteJobRegistration()}
+      />
+
+      <DeleteConfirmDialog
+        open={!!deleteExtraId}
+        onOpenChange={(open) => {
+          if (!open) setDeleteExtraId(null);
+        }}
+        title="Delete parts / scope request?"
+        description="Delete this pending parts / scope request? This cannot be undone."
+        confirmLabel="Delete request"
+        loading={deletingExtra}
+        onConfirm={() => void deleteExtra()}
+      />
     </RoleGuard>
   );
 }
@@ -1020,4 +2085,8 @@ function ActionBtn({ icon: Icon, label, onClick }: { icon: typeof Camera; label:
       <span className="text-xs">{label}</span>
     </Button>
   );
+}
+
+export default function JobDetail() {
+  return <ServiceJobDetail variant="job" />;
 }

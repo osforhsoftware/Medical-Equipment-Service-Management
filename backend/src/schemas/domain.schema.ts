@@ -25,7 +25,7 @@ export const estimateRevisionSchema = z.object({
     sendForApproval: z.boolean().optional(),
     status: z.enum(["draft", "pendingAdminApproval", "sent"]).optional(),
     lines: z.array(z.object({
-      type: z.enum(["labor", "part", "transport", "testing", "calibration", "service", "other"]),
+      type: z.enum(["labor", "part", "transport", "testing", "calibration", "service", "custom", "other"]),
       description: z.string().trim().min(1).max(500),
       catalogItemId: z.string().cuid().nullable().optional(),
       inventoryItemId: z.string().cuid().nullable().optional(),
@@ -122,7 +122,7 @@ export const jobExtraSchema = z.object({
   body: z.object({
     inventoryItemId: z.string().cuid().nullable().optional(),
     description: z.string().trim().min(1).max(500),
-    type: z.enum(["product", "equipment", "machine", "other"]).default("product"),
+    type: z.enum(["product", "equipment", "machine", "custom", "other"]).default("product"),
     reason: z.string().trim().min(1).max(5000),
     quantity: z.coerce.number().positive(),
     unitPrice: money,
@@ -196,7 +196,7 @@ export const invoiceFromJobSchema = z.object({
     dueAt: z.coerce.date(),
     currency: z.string().trim().length(3).default("INR"),
     additionalLines: z.array(z.object({
-      type: z.enum(["product", "equipment", "machine", "service", "other", "labor", "part"]).default("other"),
+      type: z.enum(["product", "equipment", "machine", "service", "custom", "other", "labor", "part"]).default("other"),
       description: z.string().trim().min(1).max(500),
       quantity: z.coerce.number().positive(),
       unitPrice: money,
@@ -204,6 +204,13 @@ export const invoiceFromJobSchema = z.object({
       discount: money.default(0),
       catalogItemId: z.string().cuid().nullable().optional(),
     })).optional(),
+    equipmentWarranty: z
+      .object({
+        warrantyStart: z.coerce.date().nullable().optional(),
+        warrantyEnd: z.coerce.date().nullable().optional(),
+        amcStatus: z.enum(["active", "expiring", "expired", "none"]).optional(),
+      })
+      .optional(),
   }),
 });
 

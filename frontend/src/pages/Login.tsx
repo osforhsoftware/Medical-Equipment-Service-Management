@@ -8,6 +8,7 @@ import { MesmsLogo } from "@/components/shared/MesmsLogo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
 import { useAuth } from "@/context/AuthContext";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { api, consumeSessionExpiredNotice } from "@/lib/api";
@@ -15,8 +16,13 @@ import { fieldRules } from "@/lib/formValidation";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
+const PORTAL_DISABLED_MESSAGE = "Customer Portal is temporarily unavailable.";
+
 function homeForRole(role: string) {
-  return role === "customer" ? "/portal" : "/app";
+  if (role === "customer") {
+    return CUSTOMER_PORTAL_ENABLED ? "/portal" : "/login";
+  }
+  return "/app";
 }
 
 type Mode = "login" | "forgot" | "reset";
@@ -36,7 +42,7 @@ const resetSchema = z.object({
 });
 
 export default function Login() {
-  const { user, loading, login } = useAuth();
+  const { user, loading, login, logout } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("login");
   const [username, setUsername] = useState("");
@@ -50,6 +56,14 @@ export default function Login() {
     if (loading) return;
     if (consumeSessionExpiredNotice()) setSessionNotice(true);
   }, [loading]);
+
+  useEffect(() => {
+    if (loading || !user) return;
+    if (user.role === "customer" && !CUSTOMER_PORTAL_ENABLED) {
+      void logout();
+      toast.info(PORTAL_DISABLED_MESSAGE);
+    }
+  }, [loading, user, logout]);
 
   const loginValidation = useFormValidation({
     fieldOrder: ["username", "password"],
@@ -82,7 +96,7 @@ export default function Login() {
     );
   }
 
-  if (user) {
+  if (user && !(user.role === "customer" && !CUSTOMER_PORTAL_ENABLED)) {
     return <Navigate to={homeForRole(user.role)} replace />;
   }
 
@@ -95,6 +109,11 @@ export default function Login() {
     const loadingId = toast.loading("Signing in...");
     try {
       const loggedInUser = await login(values.username, values.password);
+      if (loggedInUser.role === "customer" && !CUSTOMER_PORTAL_ENABLED) {
+        await logout();
+        toast.error(PORTAL_DISABLED_MESSAGE, { id: loadingId, force: true });
+        return;
+      }
       toast.success("Signed in successfully", { id: loadingId, force: true });
       navigate(homeForRole(loggedInUser.role));
     } catch (err) {
@@ -166,8 +185,8 @@ export default function Login() {
       <div className="brand-grid brand-panel relative hidden flex-col justify-between overflow-hidden p-12 lg:flex xl:p-16">
         <div className="absolute -right-24 -top-24 h-80 w-80 rounded-full bg-accent/20 blur-3xl" />
         <div className="absolute -bottom-32 -left-16 h-[24rem] w-[24rem] rounded-full bg-primary/30 blur-3xl" />
-        <div className="relative w-fit rounded-lg bg-white px-4 py-2.5 shadow-md">
-          <MesmsLogo size="hero" />
+        <div className="relative w-fit rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur-md shadow-xl">
+          <MesmsLogo size="hero" variant="stacked" theme="dark" />
         </div>
 
         <div className="relative space-y-5">
@@ -205,7 +224,7 @@ export default function Login() {
       <div className="relative flex items-center justify-center p-6 sm:p-10">
         <div className="relative w-full max-w-[400px] rounded-xl border border-border bg-card p-6 shadow-card sm:p-8">
           <div className="mb-8 lg:hidden">
-            <MesmsLogo size="lg" className="mb-4" />
+            <MesmsLogo size="md" variant="horizontal" className="mb-4" />
             <h1 className="text-2xl font-semibold tracking-tight">Welcome to MESMS</h1>
             {sessionNotice ? (
               <p className="mt-3 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
@@ -215,7 +234,7 @@ export default function Login() {
           </div>
 
           <div className="mb-6 hidden lg:block">
-            <MesmsLogo size="lg" className="mb-5" />
+            <MesmsLogo size="md" variant="horizontal" className="mb-5" />
             <h2 className="text-2xl font-semibold tracking-tight">
               {mode === "login" ? "Sign in" : mode === "forgot" ? "Forgot password" : "Reset password"}
             </h2>

@@ -25,6 +25,7 @@ export const ESTIMATE_LINE_TYPES = [
   { value: "labor", label: "Labor" },
   { value: "part", label: "Part" },
   { value: "service", label: "Service" },
+  { value: "custom", label: "Custom" },
   { value: "transport", label: "Transport" },
   { value: "testing", label: "Testing" },
   { value: "calibration", label: "Calibration" },

@@ -17,9 +17,18 @@ const statusMap: Record<string, Tone> = {
   inspection: "info",
   estimate: "accent",
   approval: "warning",
+  pending_approval: "warning",
+  "pending-approval": "warning",
   "in-progress": "info",
+  inProgress: "info",
+  assigned_engineer: "info",
+  "assigned-engineer": "info",
+  change_pending_approval: "warning",
+  pending_final_approval: "warning",
   completed: "success",
+  pending_invoice: "accent",
   invoiced: "success",
+  finished: "success",
   // priority
   low: "muted",
   medium: "info",
@@ -45,6 +54,7 @@ const statusMap: Record<string, Tone> = {
   rejected: "destructive",
   revision: "warning",
   paid: "success",
+  accrued: "warning",
   overdue: "destructive",
   closed: "muted",
   received: "success",
@@ -55,6 +65,7 @@ const statusMap: Record<string, Tone> = {
   scheduled: "info",
   "parts-pending": "warning",
   review: "accent",
+  delivery: "info",
   verified: "success",
   passed: "info",
 };
@@ -66,7 +77,7 @@ export function StatusBadge({ status, label, className }: { status: string; labe
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium capitalize",
+        "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium capitalize whitespace-nowrap",
         toneClasses[tone],
         className,
       )}

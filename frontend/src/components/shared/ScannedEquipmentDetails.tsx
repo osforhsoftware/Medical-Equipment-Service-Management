@@ -7,13 +7,6 @@ import { api, type BackendEquipmentHistory } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { termLabel } from "@/lib/taxonomy";
 
-const AMC_LABELS: Record<string, string> = {
-  active: "Active",
-  expiring: "Expiring",
-  expired: "Expired",
-  none: "None",
-};
-
 export function ScannedEquipmentDetails({
   history,
   qrDataUrl,
@@ -57,8 +50,8 @@ export function ScannedEquipmentDetails({
         <Field label="Category" value={categoryName} />
         <Field label="Serial" value={equipment.serialNumber} />
         <Field label="Condition" value={conditionName} />
-        <Field label="AMC" value={AMC_LABELS[equipment.amcStatus] ?? equipment.amcStatus} />
         <Field label="Installed" value={formatDate(equipment.installDate)} />
+        <Field label="Warranty start" value={formatDate(equipment.warrantyStart)} />
         <Field label="Warranty end" value={formatDate(equipment.warrantyEnd)} />
         <Field label="Last service" value={equipment.lastServiceDate ? formatDate(equipment.lastServiceDate) : "Not recorded"} />
       </div>

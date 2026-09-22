@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { SaleFormDialog } from "@/components/sales/SaleFormDialog";
+import { PackingListPrint } from "@/components/sales/PackingListPrint";
 import { downloadInvoicePdf } from "@/components/billing/billing-ui";
 import { SALES_BILL_ROLES, SALES_DESK_ROLES, SALES_WRITE_ROLES } from "@/config/roles";
 import { Button } from "@/components/ui/button";
@@ -172,6 +173,9 @@ export default function SalesOrderDetail() {
                       </Link>
                     </Button>
                   ) : null}
+                  <Button variant="outline" onClick={() => window.print()}>
+                    <Printer className="mr-1 h-4 w-4" /> Print Packing List
+                  </Button>
                   {canDeliver && order.deliveryStatus !== "delivered" ? (
                     <Button variant="outline" disabled={working} onClick={() => void deliver()}>
                       <Truck className="mr-1 h-4 w-4" /> Mark delivered
@@ -222,12 +226,8 @@ export default function SalesOrderDetail() {
                 {/* Document header */}
                 <div className="grid gap-6 border-b border-border px-6 py-6 sm:grid-cols-[1.2fr_0.8fr] sm:px-8">
                   <div className="flex min-w-0 items-start gap-3">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted/40">
-                      {settings?.logoUrl ? (
-                        <img src={settings.logoUrl} alt="" className="h-full w-full object-contain" />
-                      ) : (
-                        <MesmsLogo size="md" className="h-8 max-w-[2.5rem]" />
-                      )}
+                    <div className="flex shrink-0 items-center justify-center">
+                      <MesmsLogo size="sm" variant="horizontal" customLogoUrl={settings?.logoUrl} />
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-bold uppercase tracking-wide text-foreground">{company}</p>
@@ -449,6 +449,15 @@ export default function SalesOrderDetail() {
             <p className="text-xs text-muted-foreground">
               Sale billing lives on this order. Service-ticket estimates and job invoices stay under Estimates and Billing.
             </p>
+
+            <PackingListPrint
+              order={order}
+              customerAddress={customerAddress}
+              customerPhone={customer?.phone}
+              companyName={company}
+              companyAddress={settings?.companyAddress}
+              companyPhone={settings?.companyPhone}
+            />
           </>
         ) : null}
       </div>

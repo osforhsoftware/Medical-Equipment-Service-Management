@@ -3,16 +3,28 @@ import { taxonomyService } from "@/services/taxonomy.service";
 import { AppError } from "@/middleware/errorHandler";
 import { prisma } from "@/db/prisma";
 import { getDefaultBranchId } from "@/utils/defaultBranch";
+import {
+  inferItemClassFromCategory,
+  isInventoryItemClass,
+  type InventoryItemClass,
+} from "@/lib/inventoryItemClass";
 
 type CreateInventoryData = {
   sku?: string;
   name: string;
+  itemClass?: InventoryItemClass | string;
   category?: string;
   subcategory?: string | null;
   description?: string | null;
+  manufacturer?: string;
+  compatibleModels?: string | null;
   branchId?: string;
   inStock?: number;
   reorderLevel?: number;
+  maxLevel?: number;
+  binLocation?: string;
+  trackBatches?: boolean;
+  trackSerials?: boolean;
   unitCost?: number;
   sellingPrice?: number;
   deliveryCharge?: number;
@@ -22,6 +34,11 @@ type CreateInventoryData = {
   supplierId?: string | null;
   imageFileIds?: string[];
 };
+
+function resolveItemClass(value: unknown, category?: string | null): InventoryItemClass {
+  if (isInventoryItemClass(value)) return value;
+  return inferItemClassFromCategory(category);
+}
 
 export class InventoryService {
   private withAvailability<T extends { inStock: number; reserved: number }>(item: T) {
@@ -95,6 +112,7 @@ export class InventoryService {
     if (duplicateSku) throw new AppError("An inventory item with that SKU already exists in this branch", 409);
     const category = await this.resolveOptionalSlug(tenantId, "inventory_category", rest.category);
     const subcategory = await this.resolveOptionalSlug(tenantId, "inventory_subcategory", rest.subcategory);
+    const itemClass = resolveItemClass(rest.itemClass, category);
     if (rest.supplierId) {
       const supplier = await prisma.supplier.findFirst({ where: { id: rest.supplierId, tenantId } });
       if (!supplier) throw new AppError("Supplier not found", 404);
@@ -106,13 +124,20 @@ export class InventoryService {
           tenantId,
           sku,
           name: rest.name,
+          itemClass,
           category: category ?? "",
           subcategory,
           description: rest.description ?? null,
+          manufacturer: rest.manufacturer?.trim() || "",
+          compatibleModels: rest.compatibleModels?.trim() || null,
           branchId,
           inStock: rest.inStock ?? 0,
           reserved: 0,
           reorderLevel: rest.reorderLevel ?? 0,
+          maxLevel: rest.maxLevel ?? 0,
+          binLocation: rest.binLocation?.trim() || "",
+          trackBatches: rest.trackBatches ?? false,
+          trackSerials: rest.trackSerials ?? false,
           unitCost: rest.unitCost ?? 0,
           sellingPrice: rest.sellingPrice ?? 0,
           deliveryCharge: rest.deliveryCharge ?? 0,
@@ -161,6 +186,13 @@ export class InventoryService {
     if (safe.subcategory !== undefined) {
       safe.subcategory = await this.resolveOptionalSlug(tenantId, "inventory_subcategory", safe.subcategory);
     }
+    let nextItemClass: InventoryItemClass | undefined;
+    if (safe.itemClass !== undefined || safe.category !== undefined) {
+      nextItemClass = resolveItemClass(
+        safe.itemClass,
+        typeof safe.category === "string" ? safe.category : undefined,
+      );
+    }
     const nextSku = typeof safe.sku === "string" ? safe.sku.trim() : undefined;
     return prisma.$transaction(async (tx) => {
       await tx.inventoryItem.update({
@@ -168,12 +200,21 @@ export class InventoryService {
         data: {
           ...(nextSku ? { sku: nextSku } : {}),
           ...(safe.name != null ? { name: safe.name } : {}),
+          ...(nextItemClass ? { itemClass: nextItemClass } : {}),
           ...(safe.category !== undefined ? { category: safe.category } : {}),
           ...(safe.subcategory !== undefined ? { subcategory: safe.subcategory } : {}),
           ...(safe.description !== undefined ? { description: safe.description } : {}),
+          ...(safe.manufacturer != null ? { manufacturer: String(safe.manufacturer).trim() } : {}),
+          ...(safe.compatibleModels !== undefined
+            ? { compatibleModels: typeof safe.compatibleModels === "string" ? safe.compatibleModels.trim() || null : safe.compatibleModels }
+            : {}),
           ...(safe.branchId != null ? { branchId: safe.branchId } : {}),
           ...(safe.inStock != null ? { inStock: safe.inStock } : {}),
           ...(safe.reorderLevel != null ? { reorderLevel: safe.reorderLevel } : {}),
+          ...(safe.maxLevel != null ? { maxLevel: safe.maxLevel } : {}),
+          ...(safe.binLocation != null ? { binLocation: String(safe.binLocation).trim() } : {}),
+          ...(safe.trackBatches != null ? { trackBatches: Boolean(safe.trackBatches) } : {}),
+          ...(safe.trackSerials != null ? { trackSerials: Boolean(safe.trackSerials) } : {}),
           ...(safe.unitCost != null ? { unitCost: safe.unitCost } : {}),
           ...(safe.sellingPrice != null ? { sellingPrice: safe.sellingPrice } : {}),
           ...(safe.deliveryCharge != null ? { deliveryCharge: safe.deliveryCharge } : {}),

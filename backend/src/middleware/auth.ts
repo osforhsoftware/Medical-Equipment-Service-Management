@@ -6,6 +6,7 @@ import { failure } from "@/utils/response";
 import { AUTH_COOKIE_NAME, authTtlMs, setAuthCookie } from "@/utils/authCookie";
 import { prisma } from "@/db/prisma";
 import { rolesFor, type ApiWritePermission } from "@/config/apiAccess";
+import { userMayMutate } from "@/lib/userPermissions";
 
 export const STAFF_ROLES = [
   "admin",
@@ -46,7 +47,15 @@ export const authenticate = (req: Request, res: Response, next: NextFunction): v
       const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
       const user = await prisma.user.findFirst({
         where: { id: payload.userId, tenantId: payload.tenantId },
-        select: { id: true, name: true, isActive: true, role: true, tenantId: true, email: true },
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+          role: true,
+          tenantId: true,
+          email: true,
+          permissions: true,
+        },
       });
       if (!user) {
         res.status(401).json(failure("Invalid or expired token"));
@@ -62,10 +71,19 @@ export const authenticate = (req: Request, res: Response, next: NextFunction): v
         role: user.role,
         email: user.email,
         name: user.name,
+        permissions: user.permissions,
         exp: payload.exp,
         iat: payload.iat,
       };
       req.tenantId = user.tenantId;
+
+      const method = req.method.toUpperCase();
+      const isMutation = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+      if (isMutation && !userMayMutate(user.role, user.permissions)) {
+        res.status(403).json(failure("This account is read-only"));
+        return;
+      }
+
       slideAuthCookieIfNeeded(req, res);
       next();
     } catch {

@@ -3,6 +3,7 @@ import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
 import { extraChargeType, extraLineTotal, summarizeChargeGroups } from "@/utils/invoiceCharges";
+import { hasEquipmentWarrantyCoverage } from "@/lib/equipmentWarranty";
 
 export const BILLING_CHECKLIST = [
   { key: "engineerReportSubmitted", label: "Engineer Report Submitted" },
@@ -100,6 +101,12 @@ export function computeVerificationChecklist(job: {
     inspectionReport: unknown | null;
     status: string;
   } | null;
+  equipmentId?: string | null;
+  equipment?: {
+    warrantyStart?: Date | string | null;
+    warrantyEnd?: Date | string | null;
+    amcStatus?: string | null;
+  } | null;
   serviceReportDoc?: boolean;
 }) {
   const estimate = job.estimate;
@@ -118,6 +125,11 @@ export function computeVerificationChecklist(job: {
     return remaining <= 0 || r.status === "consumed" || r.status === "released";
   });
 
+  const linkedEquipment = job.equipmentId || job.equipment;
+  const warrantyUpdated = !linkedEquipment
+    ? job.status === "completed"
+    : hasEquipmentWarrantyCoverage(job.equipment);
+
   const checks: Record<string, boolean> = {
     engineerReportSubmitted: workLogs.length > 0,
     inspectionCompleted: !ticketLinked || !!job.serviceRequest?.inspectionReport,
@@ -127,11 +139,16 @@ export function computeVerificationChecklist(job: {
     serviceReportUploaded: !!job.serviceReportDoc,
     customerSignatureAvailable: !!job.signature,
     equipmentReturned: job.status === "completed",
-    warrantyUpdated: job.status === "completed",
+    warrantyUpdated,
     stockAdjusted: stockOk,
   };
 
-  const optionalKeys = new Set(["serviceReportUploaded", "customerSignatureAvailable"]);
+  const optionalKeys = new Set([
+    "serviceReportUploaded",
+    "customerSignatureAvailable",
+    // Warranty can be recorded on billing review; do not block invoice generation.
+    "warrantyUpdated",
+  ]);
   const requiredKeys = BILLING_CHECKLIST.map((item) => item.key).filter((key) => !optionalKeys.has(key));
   const allPassed = requiredKeys.every((key) => checks[key]);
   return { checks, allPassed, items: BILLING_CHECKLIST.map((item) => ({ ...item, passed: checks[item.key] })) };

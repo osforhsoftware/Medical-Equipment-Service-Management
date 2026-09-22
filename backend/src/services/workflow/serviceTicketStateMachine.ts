@@ -107,6 +107,7 @@ export const JOB_STATUS_ORDER = [
   "inProgress",
   "partsPending",
   "review",
+  "delivery",
   "completed",
 ] as const;
 
@@ -115,10 +116,12 @@ export type JobStatus = (typeof JOB_STATUS_ORDER)[number];
 /** Allowed job status transitions (from → to[]). */
 export const JOB_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   scheduled: ["inProgress", "partsPending"],
-  /** Field work must go through coordinator/admin review before completed. */
+  /** Field work → QA (review) → Delivery → Completed (billing handoff). */
   inProgress: ["partsPending", "review"],
   partsPending: ["inProgress", "review"],
-  review: ["inProgress", "completed"],
+  /** QA pass → delivery; QA fail → back to repair. */
+  review: ["inProgress", "delivery"],
+  delivery: ["completed", "review"],
   completed: [],
 };
 

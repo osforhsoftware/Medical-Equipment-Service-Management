@@ -9,6 +9,7 @@ import {
 } from "@/utils/pagination";
 import { success } from "@/utils/response";
 import type { Response } from "express";
+import { parseCompletedScope, type CompletedScope } from "@/lib/ticketBoardArchive";
 
 const EQUIPMENT_SORT_FIELDS = {
   name: "name",
@@ -88,6 +89,8 @@ const JOB_SORT_FIELDS = {
 export function parseJobListQuery(req: Request) {
   const { page, limit, skip } = parsePaginationQuery(req.query);
   const sort = parseSortQuery(req.query, JOB_SORT_FIELDS, "scheduledFor");
+  const overdue = req.query.overdue === "true" || req.query.overdue === "1";
+  const completedScope: CompletedScope = parseCompletedScope(parseOptionalFilter(req.query.completedScope));
   return {
     page,
     limit,
@@ -97,6 +100,10 @@ export function parseJobListQuery(req: Request) {
     status: parseOptionalFilter(req.query.status),
     priority: parseOptionalFilter(req.query.priority),
     assignee: parseOptionalFilter(req.query.assignee),
+    scheduledFrom: parseOptionalFilter(req.query.scheduledFrom),
+    scheduledTo: parseOptionalFilter(req.query.scheduledTo),
+    overdue,
+    completedScope,
     orderBy: toOrderBy(sort),
   };
 }
@@ -114,8 +121,10 @@ export function parseServiceRequestListQuery(req: Request) {
   const { page, limit, skip } = parsePaginationQuery(req.query);
   const sort = parseSortQuery(req.query, SERVICE_REQUEST_SORT_FIELDS, "createdAt", "desc");
   const overdue = req.query.overdue === "true" || req.query.overdue === "1";
+  const mine = req.query.mine === "true" || req.query.mine === "1";
   const statusesRaw = parseOptionalFilter(req.query.statuses);
   const statuses = statusesRaw ? statusesRaw.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+  const completedScope: CompletedScope = parseCompletedScope(parseOptionalFilter(req.query.completedScope));
   return {
     page,
     limit,
@@ -127,6 +136,10 @@ export function parseServiceRequestListQuery(req: Request) {
     priority: parseOptionalFilter(req.query.priority),
     assignee: parseOptionalFilter(req.query.assignee),
     overdue,
+    mine,
+    completedScope,
+    slaDueFrom: parseOptionalFilter(req.query.slaDueFrom),
+    slaDueTo: parseOptionalFilter(req.query.slaDueTo),
     orderBy: toOrderBy(sort),
   };
 }
@@ -177,6 +190,7 @@ export function parseInventoryListQuery(req: Request) {
     take: limit,
     search: parseSearchQuery(req.query),
     category: parseOptionalFilter(req.query.category),
+    itemClass: parseOptionalFilter(req.query.itemClass),
     stockStatus: parseOptionalFilter(req.query.stockStatus),
     supplierId: parseOptionalFilter(req.query.supplierId),
     orderBy: toOrderBy(sort),

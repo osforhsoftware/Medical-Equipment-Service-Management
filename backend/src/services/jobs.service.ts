@@ -20,6 +20,8 @@ import {
   startWorkLog,
 } from "@/services/jobWorkLog.helpers";
 import { userHasAnyRoleKey } from "@/utils/userRoles";
+import { normalizeAdditionalFields } from "@/lib/additionalFields";
+import { mergeJobStageDetails } from "@/lib/jobStageDetails";
 
 const ASSIGNABLE_JOB_ROLES = ["coordinator", "engineer"];
 const jobSyncInflight = new Map<string, Promise<void>>();
@@ -34,6 +36,7 @@ type CreateJobData = {
   scheduledFor: string;
   status?: string;
   progress?: number;
+  additionalFields?: { label: string; value: string }[] | null;
 };
 
 export class JobsService {
@@ -311,7 +314,10 @@ export class JobsService {
     const job = await jobsRepository.findById(id, tenantId);
     if (!job) throw new AppError("Job not found", 404);
     await this.assertJobAccess(job, tenantId, actorId, actorRole);
-    return job;
+    return {
+      ...job,
+      additionalFields: normalizeAdditionalFields(job.additionalFields) ?? [],
+    };
   }
 
   async create(tenantId: string, data: CreateJobData, actorId: string) {
@@ -346,6 +352,7 @@ export class JobsService {
             status: (data.status ?? "scheduled") as never,
             scheduledFor: new Date(data.scheduledFor),
             progress: data.progress ?? 0,
+            additionalFields: normalizeAdditionalFields(data.additionalFields) ?? Prisma.JsonNull,
             assignments: {
               create: {
                 tenantId,
@@ -399,6 +406,10 @@ export class JobsService {
           status: (data.status ?? "scheduled") as never,
           scheduledFor: new Date(data.scheduledFor),
           progress: data.progress ?? 0,
+          additionalFields:
+            normalizeAdditionalFields(data.additionalFields)
+            ?? normalizeAdditionalFields((sr as { additionalFields?: unknown }).additionalFields)
+            ?? Prisma.JsonNull,
           assignments: {
             create: {
               tenantId,
@@ -440,18 +451,35 @@ export class JobsService {
       throw new AppError("Engineers can only update job status and progress", 403);
     }
 
+    if (data.additionalFields !== undefined) {
+      data.additionalFields = normalizeAdditionalFields(data.additionalFields) ?? Prisma.JsonNull;
+    }
+
+    if (data.stageDetails !== undefined) {
+      data.stageDetails = mergeJobStageDetails(existing.stageDetails, data.stageDetails as never);
+    }
+
+    if (data.type === "Other" && data.typeOther !== undefined) {
+      data.typeOther = typeof data.typeOther === "string" ? data.typeOther.trim() || null : null;
+    } else if (data.type && data.type !== "Other") {
+      data.typeOther = null;
+    }
+
     if (data.status && data.status !== existing.status) {
       assertJobTransition(existing.status, String(data.status));
     }
 
-    if (data.status === "completed" && existing.status !== "completed") {
-      const canComplete =
+    const advancingPastQa =
+      (data.status === "delivery" && existing.status !== "delivery") ||
+      (data.status === "completed" && existing.status !== "completed");
+    if (advancingPastQa) {
+      const canAdvance =
         !!actorId &&
         !!actorRole &&
         (await userHasAnyRoleKey(actorId, tenantId, actorRole, ["admin", "coordinator"]));
-      if (!canComplete) {
+      if (!canAdvance) {
         throw new AppError(
-          "Only administrators and service coordinators can mark a job completed after review",
+          "Only administrators and service coordinators can approve QA or confirm delivery",
           403,
         );
       }
@@ -554,8 +582,16 @@ export class JobsService {
         const actor = actorId ? await usersRepository.findById(actorId, tenantId) : null;
         await jobActionsRepository.addActivity(id, {
           actor: actor?.name ?? actorId ?? "system",
-          action: "Submitted for review",
-          note: "Awaiting coordinator or admin approval before the job can be completed",
+          action: "Submitted for QA",
+          note: "Repair submitted — awaiting coordinator or admin quality check",
+        });
+      }
+      if (data.status === "delivery") {
+        const actor = actorId ? await usersRepository.findById(actorId, tenantId) : null;
+        await jobActionsRepository.addActivity(id, {
+          actor: actor?.name ?? actorId ?? "system",
+          action: "QA passed — ready for delivery",
+          note: "Quality check approved. Confirm delivery to complete and hand off to billing.",
         });
       }
       await notificationsService.notifyJobUpdated(tenantId, existing.reference, String(data.status));
@@ -564,8 +600,56 @@ export class JobsService {
   }
 
   async delete(id: string, tenantId: string) {
-    await this.getById(id, tenantId);
-    return jobsRepository.delete(id, tenantId);
+    const job = await this.getById(id, tenantId);
+    const [invoices, stockDeductions, extras, workLogs] = await Promise.all([
+      prisma.invoice.count({ where: { tenantId, jobId: id } }),
+      prisma.jobStockDeduction.count({ where: { jobId: id } }),
+      prisma.jobExtra.count({ where: { jobId: id } }),
+      prisma.jobWorkLog.count({ where: { jobId: id } }),
+    ]);
+
+    const blockers: string[] = [];
+    if (invoices > 0) blockers.push(`${invoices} invoice(s)`);
+    if (stockDeductions > 0) blockers.push("stock deductions");
+    if (extras > 0) blockers.push("parts/scope extras");
+    if (workLogs > 0) blockers.push("work logs");
+    if (job.status === "completed") blockers.push("completed status");
+    if (job.status === "review") blockers.push("review status");
+    if (job.status === "delivery") blockers.push("delivery status");
+
+    if (blockers.length > 0) {
+      throw new AppError(
+        `Cannot delete job ${job.reference}: linked ${blockers.join(", ")}. Only scheduled/in-progress jobs without billing or stock history can be removed.`,
+        409,
+      );
+    }
+
+    if (!["scheduled", "inProgress", "partsPending"].includes(job.status)) {
+      throw new AppError(
+        `Cannot delete job ${job.reference} in status “${job.status}”.`,
+        409,
+      );
+    }
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.jobPhoto.deleteMany({ where: { jobId: id } });
+        await tx.jobAssignment.deleteMany({ where: { jobId: id } });
+        await tx.jobActivity.deleteMany({ where: { jobId: id } });
+        await tx.jobPartsRequest.deleteMany({ where: { jobId: id } });
+        await tx.jobSignature.deleteMany({ where: { jobId: id } });
+        await tx.stockReservation.updateMany({
+          where: { tenantId, jobId: id },
+          data: { jobId: null },
+        });
+        await tx.serviceJob.delete({ where: { id } });
+      });
+    } catch {
+      throw new AppError(
+        "This job cannot be deleted because related records are still linked.",
+        409,
+      );
+    }
   }
 
   async uploadPhotos(
@@ -942,6 +1026,15 @@ export class JobsService {
       }
       return { job: updated, deduction, movement };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async addActivity(id: string, tenantId: string, payload: { action: string; note?: string; actor?: string }, actorId?: string, actorRole?: string) {
+    await this.getById(id, tenantId, actorId, actorRole);
+    return jobActionsRepository.addActivity(id, {
+      actor: payload.actor || "System",
+      action: payload.action,
+      note: payload.note,
+    });
   }
 
   async getActivities(id: string, tenantId: string, actorId?: string, actorRole?: string) {

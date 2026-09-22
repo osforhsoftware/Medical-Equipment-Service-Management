@@ -14,6 +14,7 @@ import {
 import { MesmsLogo } from "@/components/shared/MesmsLogo";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
 import { api } from "@/lib/api";
 import { NOTIFICATIONS_UPDATED } from "@/lib/notifications-events";
 
@@ -25,6 +26,7 @@ export function Topbar({
   onToggleSidebar: () => void;
 }) {
   const { user, logout } = useAuth();
+  const { settings } = useSettings();
   const navigate = useNavigate();
   const [unread, setUnread] = useState(0);
 
@@ -62,8 +64,8 @@ export function Topbar({
       </button>
 
       {!sidebarOpen && (
-        <div>
-          <MesmsLogo size="sm" />
+        <div className="flex items-center">
+          <MesmsLogo size="xs" variant="horizontal" customLogoUrl={settings?.logoUrl} />
         </div>
       )}
 

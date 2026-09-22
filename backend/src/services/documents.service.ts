@@ -3,6 +3,7 @@ import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
 import { fileStorageService } from "@/services/fileStorage.service";
 import { BILLING_CHARGE_GROUPS, chargeGroupForType } from "@/utils/invoiceCharges";
+import { normalizeAdditionalFields } from "@/lib/additionalFields";
 
 type DocumentKind = "estimate" | "invoice" | "service-report" | "inspection-report";
 
@@ -897,6 +898,20 @@ export class DocumentsService {
       if (report.calibrationStatus) {
         this.sectionHeading(doc, "Calibration");
         this.bodyParagraph(doc, report.calibrationStatus);
+      }
+
+      const inspectionExtraFields = normalizeAdditionalFields(
+        (report as { additionalFields?: unknown }).additionalFields,
+      );
+      if (inspectionExtraFields?.length) {
+        this.sectionHeading(doc, "Additional fields");
+        this.keyValueRows(
+          doc,
+          inspectionExtraFields.map((field) => ({
+            label: field.label,
+            value: displayValue(field.value),
+          })),
+        );
       }
 
       if (report.attachments.length) {

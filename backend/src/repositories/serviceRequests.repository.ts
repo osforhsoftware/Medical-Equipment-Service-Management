@@ -2,6 +2,12 @@ import { prisma } from "@/db/prisma";
 import type { ServiceRequest, TimelineEvent, Prisma } from "@prisma/client";
 import type { PaginatedResult } from "@/types";
 import { searchContains } from "@/utils/searchFilter";
+import {
+  BOARD_COMPLETED_STATUSES,
+  completedAtForStatusChange,
+  completedBoardCutoff,
+  type CompletedScope,
+} from "@/lib/ticketBoardArchive";
 
 const withEquipmentItems = {
   equipmentItems: { orderBy: { createdAt: "asc" as const } },
@@ -17,8 +23,13 @@ export interface ServiceRequestListFilters {
   priority?: string;
   assignee?: string;
   overdue?: boolean;
+  mineUserId?: string;
+  slaDueFrom?: string;
+  slaDueTo?: string;
   search?: string;
   statuses?: string[];
+  /** recent (default) = hide completed older than 7 days; archive = only those; all = no hide */
+  completedScope?: CompletedScope;
   skip: number;
   take: number;
   // Allow multi-field sorting. We will also add a deterministic tie-breaker to avoid
@@ -28,6 +39,37 @@ export interface ServiceRequestListFilters {
 
 function pushAnd(where: Prisma.ServiceRequestWhereInput, clause: Prisma.ServiceRequestWhereInput) {
   where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), clause];
+}
+
+function applyCompletedScope(
+  where: Prisma.ServiceRequestWhereInput,
+  completedScope: CompletedScope | undefined,
+) {
+  const scope = completedScope ?? "recent";
+  if (scope === "all") return;
+
+  const cutoff = completedBoardCutoff();
+  const completed = [...BOARD_COMPLETED_STATUSES] as ServiceRequest["status"][];
+
+  if (scope === "archive") {
+    pushAnd(where, {
+      status: { in: completed },
+      completedAt: { lt: cutoff },
+    });
+    return;
+  }
+
+  // recent: active work + completed within retention window
+  // (kept for API compatibility; UI now defaults to "all" + See more pagination)
+  pushAnd(where, {
+    OR: [
+      { status: { notIn: completed } },
+      {
+        status: { in: completed },
+        OR: [{ completedAt: null }, { completedAt: { gte: cutoff } }],
+      },
+    ],
+  });
 }
 
 function buildWhere(
@@ -84,8 +126,35 @@ function buildWhere(
   if (filters.overdue) {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
-    where.slaDue = { lt: start };
-    where.status = { notIn: ["pending_final_approval", "pending_invoice", "invoiced", "closed", "completed", "finished"] as ServiceRequest["status"][] };
+    const terminal = ["pending_final_approval", "pending_invoice", "invoiced", "closed", "completed", "finished"] as ServiceRequest["status"][];
+    const slaDue: Prisma.DateTimeFilter = {
+      ...(filters.slaDueFrom ? { gte: new Date(filters.slaDueFrom) } : {}),
+      ...(filters.slaDueTo ? { lte: new Date(`${filters.slaDueTo}T23:59:59.999Z`) } : {}),
+      lt: start,
+    };
+    where.slaDue = slaDue;
+    if (filters.statuses?.length) {
+      const openStatuses = filters.statuses.filter((s) => !terminal.includes(s as ServiceRequest["status"]));
+      where.status = { in: (openStatuses.length ? openStatuses : filters.statuses) as ServiceRequest["status"][] };
+    } else if (!filters.status) {
+      where.status = { notIn: terminal };
+    }
+  } else if (filters.slaDueFrom || filters.slaDueTo) {
+    where.slaDue = {
+      ...(filters.slaDueFrom ? { gte: new Date(filters.slaDueFrom) } : {}),
+      ...(filters.slaDueTo ? { lte: new Date(`${filters.slaDueTo}T23:59:59.999Z`) } : {}),
+    };
+  }
+
+  if (filters.mineUserId) {
+    pushAnd(where, {
+      OR: [
+        { assignedTo: filters.mineUserId },
+        { assignedInspectorId: filters.mineUserId },
+        { assignedEstimatorId: filters.mineUserId },
+        { assignedEngineerId: filters.mineUserId },
+      ],
+    });
   }
 
   if (filters.search) {
@@ -99,6 +168,8 @@ function buildWhere(
       ],
     });
   }
+
+  applyCompletedScope(where, filters.completedScope);
 
   return where;
 }
@@ -178,9 +249,34 @@ export class ServiceRequestsRepository {
   }
 
   async update(id: string, tenantId: string, data: Prisma.ServiceRequestUpdateInput) {
+    const nextStatus =
+      typeof data.status === "string"
+        ? data.status
+        : data.status && typeof data.status === "object" && "set" in data.status
+          ? (data.status as { set?: string }).set
+          : undefined;
+
+    let patch = data;
+    if (nextStatus) {
+      const existing = await prisma.serviceRequest.findFirst({
+        where: { id, tenantId },
+        select: { status: true, completedAt: true },
+      });
+      if (existing) {
+        const completedAt = completedAtForStatusChange({
+          previousStatus: existing.status,
+          nextStatus,
+          existingCompletedAt: existing.completedAt,
+        });
+        if (completedAt !== undefined) {
+          patch = { ...data, completedAt };
+        }
+      }
+    }
+
     return prisma.serviceRequest.update({
       where: { id },
-      data,
+      data: patch,
       include: withEquipmentItems,
     });
   }

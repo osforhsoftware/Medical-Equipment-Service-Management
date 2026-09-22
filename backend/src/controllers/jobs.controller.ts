@@ -1,6 +1,7 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { jobsService } from "@/services/jobs.service";
 import { parseJobListQuery, sendPaginatedList } from "@/utils/listQuery";
+import { parseCompletedScope } from "@/lib/ticketBoardArchive";
 import { success } from "@/utils/response";
 
 export class JobsController {
@@ -14,6 +15,11 @@ export class JobsController {
         {
           status: query.status,
           search: query.search,
+          scheduledFrom: query.scheduledFrom,
+          scheduledTo: query.scheduledTo,
+          overdue: query.overdue || undefined,
+          engineerId: query.assignee || undefined,
+          completedScope: parseCompletedScope(query.completedScope),
           skip: query.skip,
           take: query.take,
           orderBy: query.orderBy,
@@ -125,6 +131,19 @@ export class JobsController {
         req.body.quantity,
       );
       res.status(201).json(success("Stock deducted successfully", data));
+    } catch (err) { next(err); }
+  }
+
+  async addActivity(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await jobsService.addActivity(
+        req.params.id,
+        req.tenantId!,
+        req.body,
+        req.user!.userId,
+        req.user!.role,
+      );
+      res.status(201).json(success("Job activity logged", data));
     } catch (err) { next(err); }
   }
 

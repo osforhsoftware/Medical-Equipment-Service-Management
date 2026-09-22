@@ -53,6 +53,19 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       const roles = settings.rbacMatrix[item.label];
       if (Array.isArray(roles)) merged[item.label] = roles as Role[];
     }
+    // Drop known over-grants that would show a nav item the API rejects.
+    const prune: Array<[string, Role]> = [
+      ["Projects", "estimator"],
+      ["Projects", "engineer"],
+      ["Billing", "estimator"],
+    ];
+    for (const [module, role] of prune) {
+      const allowed = merged[module];
+      if (!allowed?.includes(role)) continue;
+      if (!(defaults[module] ?? []).includes(role)) {
+        merged[module] = allowed.filter((entry) => entry !== role);
+      }
+    }
     return merged;
   }, [settings, defaults]);
 

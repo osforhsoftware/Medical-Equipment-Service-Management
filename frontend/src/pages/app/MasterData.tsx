@@ -30,33 +30,27 @@ import {
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import { api, type BackendTaxonomyTerm, type TaxonomyType } from "@/lib/api";
-import { slugifyTerm, TAXONOMY_TABS } from "@/lib/taxonomy";
+import { TAXONOMY_TABS } from "@/lib/taxonomy";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 const termSchema = z.object({
   name: fieldRules.requiredString("Name"),
-  slug: fieldRules.optionalString(),
   description: fieldRules.optionalString(),
-  sortOrder: z.string(),
   isActive: z.boolean(),
 });
 
 type FormState = {
   name: string;
-  slug: string;
   description: string;
   parentId: string;
-  sortOrder: string;
   isActive: boolean;
 };
 
 const emptyForm = (): FormState => ({
   name: "",
-  slug: "",
   description: "",
   parentId: "",
-  sortOrder: "0",
   isActive: true,
 });
 
@@ -78,7 +72,6 @@ export default function MasterData() {
   const terms = termsQuery.data ?? [];
 
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [slugManual, setSlugManual] = useState(false);
   const [editing, setEditing] = useState<BackendTaxonomyTerm | null>(null);
   const [saving, setSaving] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -92,16 +85,14 @@ export default function MasterData() {
     handleBlur,
     handleChange,
     applyApiErrors,
-    clearError,
   } = useFormValidation({
-    fieldOrder: ["name", "slug", "sortOrder"],
+    fieldOrder: ["name"],
     schema: termSchema,
   });
 
   useEffect(() => {
     setForm(emptyForm());
     setEditing(null);
-    setSlugManual(false);
     resetValidation();
   }, [type, resetValidation]);
 
@@ -110,6 +101,7 @@ export default function MasterData() {
     if (type === "equipment_condition") return "Add new condition";
     if (type === "inventory_category") return "Add new inventory category";
     if (type === "inventory_subcategory") return "Add new subcategory";
+    if (type === "expense_category") return "Add new expense category";
     return "Add new customer type";
   }, [type]);
 
@@ -125,24 +117,17 @@ export default function MasterData() {
   };
 
   const onNameChange = (name: string) => {
-    const next = {
-      ...form,
-      name,
-      slug: slugManual || editing ? form.slug : slugifyTerm(name),
-    };
+    const next = { ...form, name };
     setForm(next);
     handleChange("name", next);
   };
 
   const startEdit = (term: BackendTaxonomyTerm) => {
     setEditing(term);
-    setSlugManual(true);
     setForm({
       name: term.name,
-      slug: term.slug,
       description: term.description ?? "",
       parentId: term.parentId ?? "",
-      sortOrder: String(term.sortOrder),
       isActive: term.isActive,
     });
     resetValidation();
@@ -151,18 +136,12 @@ export default function MasterData() {
 
   const cancelEdit = () => {
     setEditing(null);
-    setSlugManual(false);
     setForm(emptyForm());
     resetValidation();
   };
 
   const save = async () => {
     if (!validateAll(form, undefined, formRef.current)) return;
-    const sortOrder = form.sortOrder.trim() === "" ? 0 : Number(form.sortOrder);
-    if (Number.isNaN(sortOrder) || sortOrder < 0) {
-      toast.error("Sort order must be a number.");
-      return;
-    }
 
     setSaving(true);
     try {
@@ -174,10 +153,8 @@ export default function MasterData() {
       if (editing) {
         await api.updateTaxonomy(editing.id, {
           name: form.name.trim(),
-          slug: form.slug.trim() || undefined,
           description: form.description.trim() || null,
           parentId: type === "inventory_subcategory" ? form.parentId : null,
-          sortOrder,
           isActive: form.isActive,
         });
         toast.success("Term updated", { description: `${form.name.trim()} was saved.` });
@@ -185,10 +162,8 @@ export default function MasterData() {
         await api.createTaxonomy({
           type,
           name: form.name.trim(),
-          slug: form.slug.trim() || undefined,
           description: form.description.trim() || null,
           parentId: type === "inventory_subcategory" ? form.parentId : undefined,
-          sortOrder,
           isActive: form.isActive,
         });
         toast.success("Term added", { description: `${form.name.trim()} is now available in dropdowns.` });
@@ -220,6 +195,8 @@ export default function MasterData() {
       setPendingId(null);
     }
   };
+
+  const tableColSpan = type === "inventory_subcategory" ? 5 : 4;
 
   return (
     <div className="space-y-6">
@@ -280,7 +257,13 @@ export default function MasterData() {
                   value={form.name}
                   onChange={(e) => onNameChange(e.target.value)}
                   onBlur={() => handleBlur("name", form)}
-                  placeholder={type === "customer_type" ? "Nursing Home" : "Cardiology"}
+                  placeholder={
+                    type === "customer_type"
+                      ? "Nursing Home"
+                      : type === "expense_category"
+                        ? "Calibration"
+                        : "Cardiology"
+                  }
                   className={fieldErrorClass(shouldShow("name"))}
                   {...fieldAria("name", shouldShow("name") ? errors.name : null)}
                 />
@@ -308,32 +291,6 @@ export default function MasterData() {
                 </div>
               ) : null}
 
-              <div className="grid gap-2" data-field="slug">
-                <Label htmlFor="term-slug">Slug</Label>
-                <Input
-                  id="term-slug"
-                  value={form.slug}
-                  disabled={Boolean(editing?.isSystem)}
-                  onChange={(e) => {
-                    setSlugManual(true);
-                    const next = { ...form, slug: e.target.value };
-                    setForm(next);
-                    clearError("slug");
-                    handleChange("slug", next);
-                  }}
-                  onBlur={() => handleBlur("slug", form)}
-                  placeholder="auto-from-name"
-                  className={cn("font-mono text-sm", fieldErrorClass(shouldShow("slug")))}
-                  {...fieldAria("slug", shouldShow("slug") ? errors.slug : null)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  {editing?.isSystem
-                    ? "System slugs are protected so existing records keep working."
-                    : "Used when saving records. Leave blank to generate from the name."}
-                </p>
-                {shouldShow("slug") && <FormFieldError field="slug" message={errors.slug} />}
-              </div>
-
               <div className="grid gap-2">
                 <Label htmlFor="term-description">Description</Label>
                 <Textarea
@@ -342,22 +299,6 @@ export default function MasterData() {
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
                   placeholder="Optional"
                   rows={3}
-                />
-              </div>
-
-              <div className="grid gap-2" data-field="sortOrder">
-                <Label htmlFor="term-sort">Sort order</Label>
-                <Input
-                  id="term-sort"
-                  type="number"
-                  min={0}
-                  value={form.sortOrder}
-                  onChange={(e) => {
-                    const next = { ...form, sortOrder: e.target.value };
-                    setForm(next);
-                    handleChange("sortOrder", next);
-                  }}
-                  className={fieldErrorClass(shouldShow("sortOrder"))}
                 />
               </div>
 
@@ -389,7 +330,6 @@ export default function MasterData() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     {type === "inventory_subcategory" ? <TableHead>Category</TableHead> : null}
-                    <TableHead>Slug</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Used by</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -398,13 +338,13 @@ export default function MasterData() {
                 <TableBody>
                   {termsQuery.isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={type === "inventory_subcategory" ? 6 : 5} className="py-10 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={tableColSpan} className="py-10 text-center text-sm text-muted-foreground">
                         Loading {tab.label.toLowerCase()}…
                       </TableCell>
                     </TableRow>
                   ) : terms.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={type === "inventory_subcategory" ? 6 : 5} className="py-10 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={tableColSpan} className="py-10 text-center text-sm text-muted-foreground">
                         No {tab.label.toLowerCase()} yet. Add the first one using the form.
                       </TableCell>
                     </TableRow>
@@ -422,7 +362,6 @@ export default function MasterData() {
                             {inventoryCategoriesQuery.data?.find((category) => category.id === term.parentId)?.name ?? "—"}
                           </TableCell>
                         ) : null}
-                        <TableCell className="font-mono text-xs text-muted-foreground">{term.slug}</TableCell>
                         <TableCell>
                           <StatusBadge status={term.isActive ? "active" : "inactive"} />
                         </TableCell>

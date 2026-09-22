@@ -15,10 +15,12 @@ import {
 } from "@/components/ui/drawer";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useIsMobile } from "@/hooks/use-mobile";
+import type { Dispatch, SetStateAction } from "react";
 import type {
   BackendInspectionReport,
   BackendServiceRequest,
 } from "@/lib/api";
+import type { CustomerAdditionalField } from "@/lib/customerFields";
 import { formatServiceStatus } from "@/lib/format";
 import { InspectionReportForm } from "./InspectionReportForm";
 
@@ -38,11 +40,13 @@ interface InspectionReportPanelProps {
   setWorkDetails: (v: string) => void;
   severity: string;
   setSeverity: (v: string) => void;
+  additionalFields: CustomerAdditionalField[];
+  setAdditionalFields: Dispatch<SetStateAction<CustomerAdditionalField[]>>;
   machineImages: File[];
-  setMachineImages: React.Dispatch<React.SetStateAction<File[]>>;
+  setMachineImages: Dispatch<SetStateAction<File[]>>;
   setMachineImage: (file: File | null) => void;
   imageCaptions: string[];
-  setImageCaptions: React.Dispatch<React.SetStateAction<string[]>>;
+  setImageCaptions: Dispatch<SetStateAction<string[]>>;
   newImagePreviews: { file: File; url: string }[];
 }
 

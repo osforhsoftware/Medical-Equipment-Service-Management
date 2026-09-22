@@ -26,7 +26,7 @@ export function MobileMoreSheet({ open, onOpenChange }: MobileMoreSheetProps) {
   if (!user) return null;
 
   const userRoles = getUserRoles(user);
-  const bottomTabPaths = new Set(getMobileNavTabs(userRoles, rbacMatrix).map((t) => t.to));
+  const bottomTabPaths = new Set(getMobileNavTabs(userRoles, rbacMatrix, user).map((t) => t.to));
 
   const moreItems = navItems.filter((item) => {
     if (item.to === "/app") return false;

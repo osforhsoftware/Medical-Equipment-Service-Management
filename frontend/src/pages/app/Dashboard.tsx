@@ -1,17 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import {
   AlertTriangle,
   ArrowRight,
   Bell,
@@ -36,6 +25,13 @@ import {
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatCard } from "@/components/shared/StatCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { DateRangeFilter, type DateRangeValue } from "@/components/shared/DateRangeFilter";
+import {
+  GroupedActivityChart,
+  HorizontalJobsBar,
+  JobsByStatusDoughnut,
+  StackedRevenueChart,
+} from "@/components/charts/DashboardCharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -47,6 +43,7 @@ import { api,
   type DashboardData,
   type DashboardQueueItem,
 } from "@/lib/api";
+import { defaultDateRange } from "@/lib/charts";
 import { formatCurrency, formatDate, formatDateTime, formatJobStatus } from "@/lib/format";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
@@ -59,8 +56,9 @@ const JOB_STATUS_ACTIONS = [
   { value: "scheduled", label: "Assigned" },
   { value: "inProgress", label: "In Progress" },
   { value: "partsPending", label: "Waiting for Spare Parts" },
-  { value: "review", label: "Submit for Review" },
-  { value: "completed", label: "Approve & Complete" },
+  { value: "review", label: "Submit for QA" },
+  { value: "delivery", label: "QA Pass → Delivery" },
+  { value: "completed", label: "Confirm Delivery" },
 ] as const;
 
 type QuickAction = { label: string; to: string; icon: LucideIcon };
@@ -102,7 +100,7 @@ function roleQuickActions(role: Role): QuickAction[] {
         { label: "Low Stock", to: "/app/inventory", icon: AlertTriangle },
         { label: "Purchase Orders", to: "/app/purchase-orders", icon: ShoppingCart },
         { label: "Purchase Returns", to: "/app/purchase-returns", icon: Package },
-        { label: "Stock Transfers", to: "/app/stock-transfers", icon: Package },
+
         { label: "Notifications", to: "/app/notifications", icon: Bell },
       ];
     case "billing":
@@ -257,13 +255,14 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [updatingJobId, setUpdatingJobId] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => defaultDateRange(29));
 
   const role = (user?.role ?? "admin") as Role;
 
-  const loadDashboard = useCallback(async () => {
+  const loadDashboard = useCallback(async (range: DateRangeValue) => {
     setLoading(true);
     try {
-      const overview = await api.getDashboard();
+      const overview = await api.getDashboard({ from: range.from, to: range.to });
       setData(overview);
     } catch (err) {
       toast.apiError(err, { fallback: "Failed to load dashboard" });
@@ -274,8 +273,8 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    void loadDashboard();
-  }, [loadDashboard]);
+    void loadDashboard(dateRange);
+  }, [loadDashboard, dateRange]);
 
   const cards = useMemo(() => (data ? overviewCards(role, data) : []), [data, role]);
   const actions = useMemo(() => {
@@ -284,17 +283,37 @@ export default function Dashboard() {
   }, [role, user, rbacMatrix]);
   const canCreateTicket = hasRole(TICKET_CREATE_ROLES);
 
+  const activity = data?.activityTrend ?? data?.revenueTrend.map((row) => ({
+    label: row.month,
+    key: row.month,
+    jobs: row.jobs,
+    tickets: 0,
+    revenue: row.revenue,
+    saleRevenue: row.saleRevenue ?? 0,
+    serviceRevenue: row.serviceRevenue ?? 0,
+  })) ?? [];
+
   const updateJobStatus = async (jobId: string, status: string) => {
     setUpdatingJobId(jobId);
     try {
       const progress =
-        status === "completed" ? 100 : status === "inProgress" ? 40 : status === "partsPending" ? 55 : status === "review" ? 85 : 10;
+        status === "completed"
+          ? 100
+          : status === "delivery"
+            ? 95
+            : status === "inProgress"
+              ? 40
+              : status === "partsPending"
+                ? 55
+                : status === "review"
+                  ? 85
+                  : 10;
       await api.updateJob(jobId, { status, progress });
       toast({
         title: "Work status updated",
         description: `Moved to ${JOB_STATUS_ACTIONS.find((s) => s.value === status)?.label ?? status}.`,
       });
-      await loadDashboard();
+      await loadDashboard(dateRange);
     } catch (err) {
       toast.apiError(err, { fallback: "Could not update job status" });
     } finally {
@@ -304,7 +323,7 @@ export default function Dashboard() {
 
   if (!user) return null;
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <div className="space-y-6">
         <div className="space-y-2">
@@ -328,7 +347,7 @@ export default function Dashboard() {
     return (
       <div className="space-y-4">
         <PageHeader title="Dashboard" description="Unable to load overview" />
-        <Button onClick={() => void loadDashboard()}>Retry</Button>
+        <Button onClick={() => void loadDashboard(dateRange)}>Retry</Button>
       </div>
     );
   }
@@ -337,6 +356,10 @@ export default function Dashboard() {
   const showCharts = data.visibility.showCharts;
   const showSchedule = data.visibility.showSchedule;
   const canUpdateJobStatus = data.visibility.canUpdateJobStatus && role === "engineer";
+  const periodLabel = data.period
+    ? `${formatDate(data.period.from)} – ${formatDate(data.period.to)}`
+    : `${formatDate(dateRange.from)} – ${formatDate(dateRange.to)}`;
+  const periodMode = data.period?.mode === "monthly" ? "Monthly" : "Daily";
 
   return (
     <div className="space-y-6">
@@ -356,7 +379,6 @@ export default function Dashboard() {
         }
       />
 
-      {/* Overview cards */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => (
           <StatCard
@@ -370,7 +392,6 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Service request status strip for ops roles */}
       {(role === "admin" || role === "coordinator" || role === "inspector" || role === "estimator" || role === "engineer") && (
         <Card>
           <CardHeader className="pb-3">
@@ -379,17 +400,22 @@ export default function Dashboard() {
           <CardContent>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               {[
-                { label: "New Assigned", value: data.roleQueues.newAssigned },
-                { label: "Inspection", value: data.roleQueues.inspection },
-                { label: "Estimate Pending", value: data.roleQueues.estimatePending },
-                { label: "Waiting Approval", value: data.roleQueues.waitingApproval },
-                { label: "Service Pending", value: data.roleQueues.servicePending },
-                { label: "Completed (MTD)", value: data.roleQueues.completed },
+                { label: "New Assigned", value: data.roleQueues.newAssigned, to: "/app/service-tickets?status=new&view=table" },
+                { label: "Inspection", value: data.roleQueues.inspection, to: "/app/service-tickets?status=inspection&view=table" },
+                { label: "Estimate Pending", value: data.roleQueues.estimatePending, to: "/app/service-tickets?status=estimate&view=table" },
+                { label: "Waiting Approval", value: data.roleQueues.waitingApproval, to: "/app/service-tickets?status=approval&view=table" },
+                { label: "Service Pending", value: data.roleQueues.servicePending, to: "/app/service-tickets?status=in-progress&view=table" },
+                { label: "Completed (MTD)", value: data.roleQueues.completed, to: "/app/service-tickets?status=completed&view=table" },
               ].map((item) => (
-                <div key={item.label} className="rounded-md border border-border bg-muted/30 px-3 py-2.5">
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => navigate(item.to)}
+                  className="rounded-md border border-border bg-muted/30 px-3 py-2.5 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
                   <p className="text-xs text-muted-foreground">{item.label}</p>
                   <p className="mt-1 text-xl font-semibold tabular-nums">{item.value}</p>
-                </div>
+                </button>
               ))}
             </div>
           </CardContent>
@@ -397,7 +423,6 @@ export default function Dashboard() {
       )}
 
       <div className="grid gap-6 xl:grid-cols-3">
-        {/* My Work */}
         <Card className="shadow-card xl:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <div className="flex items-center gap-2">
@@ -457,7 +482,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Quick actions + notifications */}
         <div className="space-y-6">
           {actions.length > 0 ? (
           <Card className="shadow-card">
@@ -502,7 +526,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Engineer schedule + map shortcut */}
       {showSchedule && (role === "engineer" || data.todaySchedule.length > 0 || data.upcomingJobs.length > 0) && (
         <div className="grid gap-6 lg:grid-cols-2">
           <Card className="shadow-card">
@@ -568,70 +591,107 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Analytics — admin / coordinator / billing / engineer productivity */}
       {showCharts && (
-        <div className="grid gap-6 lg:grid-cols-3">
-          <Card className="shadow-card lg:col-span-2">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">{showFinance ? "Revenue & Job Volume" : "Productivity · Job Volume"}</CardTitle>
-              <span className="text-xs text-muted-foreground">Last 6 months</span>
-            </CardHeader>
-            <CardContent>
-              {data.revenueTrend.length === 0 ? (
-                <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">
-                  No job or revenue data yet
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={240}>
-                  <AreaChart data={data.revenueTrend} margin={{ left: -16, right: 8 }}>
-                    <defs>
-                      <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.35} />
-                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 12 }}
-                      formatter={(v: number, n: string) => (n === "revenue" ? [formatCurrency(v), "Revenue"] : [v, "Jobs"])}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey={showFinance ? "revenue" : "jobs"}
-                      stroke="hsl(var(--primary))"
-                      strokeWidth={2.5}
-                      fill="url(#rev)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-base font-semibold">Visual reports</h2>
+            <p className="text-xs text-muted-foreground">
+              {periodMode} recorded data · {periodLabel}
+              {loading ? " · refreshing…" : ""}
+            </p>
+          </div>
 
-          <Card className="shadow-card">
-            <CardHeader>
-              <CardTitle className="text-base">Jobs by Type</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {data.jobsByType.length === 0 ? (
-                <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">
-                  No jobs recorded yet
-                </div>
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
+
+          {data.period?.totals ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                <p className="text-xs text-muted-foreground">Jobs in range</p>
+                <p className="mt-1 text-xl font-semibold tabular-nums">{data.period.totals.jobs}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                <p className="text-xs text-muted-foreground">Tickets opened</p>
+                <p className="mt-1 text-xl font-semibold tabular-nums">{data.period.totals.tickets}</p>
+              </div>
+              {showFinance ? (
+                <>
+                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                    <p className="text-xs text-muted-foreground">Sale billing</p>
+                    <p className="mt-1 text-xl font-semibold tabular-nums">{formatCurrency(data.period.totals.saleRevenue)}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                    <p className="text-xs text-muted-foreground">Service billing</p>
+                    <p className="mt-1 text-xl font-semibold tabular-nums">{formatCurrency(data.period.totals.serviceRevenue)}</p>
+                  </div>
+                </>
               ) : (
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={data.jobsByType} layout="vertical" margin={{ left: 8, right: 16 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
-                    <XAxis type="number" hide />
-                    <YAxis type="category" dataKey="type" width={84} stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 12 }} cursor={{ fill: "hsl(var(--muted))" }} />
-                    <Bar dataKey="count" fill="hsl(var(--accent))" radius={[0, 6, 6, 0]} barSize={20} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 sm:col-span-2">
+                  <p className="text-xs text-muted-foreground">Total activity</p>
+                  <p className="mt-1 text-xl font-semibold tabular-nums">
+                    {data.period.totals.jobs + data.period.totals.tickets}
+                  </p>
+                </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          ) : null}
+
+          <div className="grid gap-6 lg:grid-cols-3">
+            <Card className="shadow-card lg:col-span-2">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">
+                  {showFinance ? "Stacked billing · sale vs service" : "Jobs created over time"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {showFinance ? (
+                  <StackedRevenueChart
+                    labels={activity.map((r) => r.label)}
+                    saleRevenue={activity.map((r) => r.saleRevenue)}
+                    serviceRevenue={activity.map((r) => r.serviceRevenue)}
+                  />
+                ) : (
+                  <GroupedActivityChart
+                    labels={activity.map((r) => r.label)}
+                    jobs={activity.map((r) => r.jobs)}
+                    tickets={activity.map((r) => r.tickets)}
+                  />
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="shadow-card">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Jobs by status</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <JobsByStatusDoughnut rows={data.jobsByStatus ?? []} />
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card className="shadow-card">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Daily activity · jobs & tickets</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <GroupedActivityChart
+                  labels={activity.map((r) => r.label)}
+                  jobs={activity.map((r) => r.jobs)}
+                  tickets={activity.map((r) => r.tickets)}
+                />
+              </CardContent>
+            </Card>
+
+            <Card className="shadow-card">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Jobs by type</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <HorizontalJobsBar rows={data.jobsByType} />
+              </CardContent>
+            </Card>
+          </div>
         </div>
       )}
 
@@ -720,7 +780,6 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           )}
-
         </div>
       </div>
     </div>

@@ -232,9 +232,8 @@ export class ServiceTicketWorkflowService {
 
     const actor = await usersRepository.findById(actorId, tenantId);
 
-    await prisma.serviceRequest.update({
-      where: { id },
-      data: { status: resolveTicketEventStatus("pending_final_approval", "finalApproved") as never },
+    await serviceRequestsRepository.update(id, tenantId, {
+      status: resolveTicketEventStatus("pending_final_approval", "finalApproved") as never,
     });
 
     await serviceRequestsRepository.addTimelineEvent(
@@ -256,9 +255,8 @@ export class ServiceTicketWorkflowService {
       if (err instanceof AppError && err.statusCode === 409) {
         const invoice = await prisma.invoice.findFirst({ where: { tenantId, serviceRequestId: id } });
         if (invoice) {
-          await prisma.serviceRequest.update({
-            where: { id },
-            data: { status: resolveTicketEventStatus("pending_invoice", "invoiceGenerated") as never },
+          await serviceRequestsRepository.update(id, tenantId, {
+            status: resolveTicketEventStatus("pending_invoice", "invoiceGenerated") as never,
           });
           return;
         }
@@ -287,9 +285,8 @@ export class ServiceTicketWorkflowService {
     }
 
     const actor = await usersRepository.findById(actorId, tenantId);
-    await prisma.serviceRequest.update({
-      where: { id },
-      data: { status: "assigned_engineer" as never },
+    await serviceRequestsRepository.update(id, tenantId, {
+      status: "assigned_engineer" as never,
     });
     await serviceRequestsRepository.addTimelineEvent(
       id,
@@ -310,9 +307,8 @@ export class ServiceTicketWorkflowService {
     }
 
     const actor = await usersRepository.findById(actorId, tenantId);
-    await prisma.serviceRequest.update({
-      where: { id },
-      data: { status: resolveTicketEventStatus("invoiced", "ticketClosed") as never },
+    await serviceRequestsRepository.update(id, tenantId, {
+      status: resolveTicketEventStatus("invoiced", "ticketClosed") as never,
     });
     await serviceRequestsRepository.addTimelineEvent(
       id,

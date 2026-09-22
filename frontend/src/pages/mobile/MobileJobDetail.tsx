@@ -47,17 +47,21 @@ import { useAuth } from "@/context/AuthContext";
 import { api, type BackendInventoryItem, type BackendServiceJob, type JobPhotoInput } from "@/lib/api";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
 import { defaultDatePlusDays, formatDate, formatDateTime, formatJobStatus } from "@/lib/format";
+import { formatInventoryItemClass } from "@/lib/inventoryItemClass";
 import { toast } from "@/lib/toast";
 
 const JOB_STATUS_OPTIONS = [
   { value: "scheduled", label: "Assigned" },
   { value: "inProgress", label: "In Progress" },
   { value: "partsPending", label: "Parts Pending" },
-  { value: "review", label: "Review" },
+  { value: "review", label: "QA" },
+  { value: "delivery", label: "Delivery" },
   { value: "completed", label: "Completed" },
 ] as const;
 
-const ENGINEER_STATUS_OPTIONS = JOB_STATUS_OPTIONS.filter((o) => o.value !== "completed");
+const ENGINEER_STATUS_OPTIONS = JOB_STATUS_OPTIONS.filter(
+  (o) => o.value !== "completed" && o.value !== "delivery",
+);
 
 const scopeSchema = z.object({
   partsNote: fieldRules.requiredString("Scope change reason"),
@@ -146,9 +150,10 @@ export default function MobileJobDetail() {
   const canUpdateJob = hasRole(["engineer", "admin"]);
   const canApproveComplete = hasRole(["coordinator", "admin"]);
   const statusOptions = canApproveComplete ? JOB_STATUS_OPTIONS : ENGINEER_STATUS_OPTIONS;
-  const awaitingReview = job?.status === "review";
+  const awaitingQa = job?.status === "review";
+  const awaitingDelivery = job?.status === "delivery";
   const canSubmitForReview =
-    canUpdateJob && job && !["review", "completed"].includes(job.status);
+    canUpdateJob && job && !["review", "delivery", "completed"].includes(job.status);
   const hasWorkReport = Boolean(job && pickWorkReportLog(job.workLogs));
 
   const load = useCallback(async () => {
@@ -193,7 +198,7 @@ export default function MobileJobDetail() {
     if (!pickWorkReportLog(job.workLogs)) {
       toast({
         title: "Work report required",
-        description: "Fill the work report before submitting for review.",
+        description: "Fill the work report before submitting for QA.",
         variant: "destructive",
       });
       workReport.openReport(job);
@@ -203,8 +208,8 @@ export default function MobileJobDetail() {
       await api.updateJob(job.id, { status: "review", progress: Math.max(job.progress, 90) });
       const doc = await api.generateDocument("service-report", job.id);
       toast({
-        title: "Submitted for review",
-        description: "Awaiting coordinator or admin approval.",
+        title: "Submitted for QA",
+        description: "Awaiting coordinator or admin quality check.",
       });
       if (doc.file?.id) window.open(api.fileDownloadUrl(doc.file.id), "_blank");
       await load();
@@ -213,12 +218,45 @@ export default function MobileJobDetail() {
     }
   };
 
-  const approveAndComplete = async () => {
+  const approveQaPass = async () => {
     if (!job) return;
     try {
-      await api.updateJob(job.id, { status: "completed", progress: 100 });
-      toast({ title: "Job completed", description: "Work approved by coordinator/admin." });
-      navigate("/app/jobs");
+      await api.updateJob(job.id, {
+        status: "delivery",
+        progress: Math.max(job.progress, 95),
+        stageDetails: { qa: { result: "pass", checkedAt: new Date().toISOString() } },
+      });
+      toast({ title: "QA passed", description: "Job moved to Delivery." });
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Error" });
+    }
+  };
+
+  const failQaReturnToRepair = async () => {
+    if (!job) return;
+    try {
+      await api.updateJob(job.id, {
+        status: "inProgress",
+        stageDetails: { qa: { result: "fail", checkedAt: new Date().toISOString() } },
+      });
+      toast({ title: "Returned to Repair", description: "QA failed — continue work and resubmit." });
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Error" });
+    }
+  };
+
+  const confirmDelivery = async () => {
+    if (!job) return;
+    try {
+      await api.updateJob(job.id, {
+        status: "completed",
+        progress: 100,
+        stageDetails: { delivery: { method: "site_return", deliveredAt: new Date().toISOString() } },
+      });
+      toast({ title: "Delivery confirmed", description: "Job completed — continue to billing." });
+      navigate(`/app/billing/jobs/${job.id}`);
     } catch (err) {
       toast.apiError(err, { fallback: "Error" });
     }
@@ -469,9 +507,14 @@ export default function MobileJobDetail() {
 
           {(canUpdateJob || canApproveComplete) && job.status !== "completed" && (
             <CollapsibleSection title="Field Actions" icon={<Wrench className="h-4 w-4" />} defaultOpen>
-              {awaitingReview ? (
+              {awaitingQa ? (
                 <p className="mb-3 rounded-[14px] border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
-                  Awaiting coordinator or admin approval before completion.
+                  Awaiting QA approval before delivery.
+                </p>
+              ) : null}
+              {awaitingDelivery ? (
+                <p className="mb-3 rounded-[14px] border border-info/30 bg-info/10 px-3 py-2 text-sm">
+                  QA passed — confirm delivery to complete and open billing.
                 </p>
               ) : null}
               {(canUpdateJob || canApproveComplete) && (
@@ -536,15 +579,28 @@ export default function MobileJobDetail() {
             ) : null}
             {canSubmitForReview ? (
               <button type="button" className="mobile-btn-primary w-full" onClick={() => void submitForReview()}>
-                Submit for Review & Report
+                Submit for QA & Report
               </button>
-            ) : awaitingReview && canApproveComplete ? (
-              <button type="button" className="mobile-btn-primary w-full" onClick={() => void approveAndComplete()}>
-                Approve & Complete
-              </button>
-            ) : awaitingReview ? (
+            ) : awaitingQa && canApproveComplete ? (
+              <div className="space-y-2">
+                <button type="button" className="mobile-btn-secondary w-full" onClick={() => void failQaReturnToRepair()}>
+                  QA Fail — Return to Repair
+                </button>
+                <button type="button" className="mobile-btn-primary w-full" onClick={() => void approveQaPass()}>
+                  QA Pass — Send to Delivery
+                </button>
+              </div>
+            ) : awaitingQa ? (
               <button type="button" className="mobile-btn-secondary w-full" disabled>
-                Awaiting coordinator approval
+                Awaiting QA approval
+              </button>
+            ) : awaitingDelivery && canApproveComplete ? (
+              <button type="button" className="mobile-btn-primary w-full" onClick={() => void confirmDelivery()}>
+                Confirm Delivery & Complete
+              </button>
+            ) : awaitingDelivery ? (
+              <button type="button" className="mobile-btn-secondary w-full" disabled>
+                Awaiting delivery confirmation
               </button>
             ) : null}
           </div>
@@ -671,7 +727,9 @@ export default function MobileJobDetail() {
                 </SelectTrigger>
                 <SelectContent>
                   {inventory.map((i) => (
-                    <SelectItem key={i.id} value={i.id}>{i.name} — {i.inStock} in stock</SelectItem>
+                    <SelectItem key={i.id} value={i.id}>
+                      {formatInventoryItemClass(i.itemClass)} · {i.name} — {i.inStock} in stock
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>

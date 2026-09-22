@@ -17,8 +17,9 @@ import {
   UserCheck,
   Wrench,
 } from "lucide-react";
-import type { Role } from "@/data/types";
+import type { AppUser, Role } from "@/data/types";
 import type { DashboardData } from "@/lib/api";
+import { userCanAccessPath } from "@/lib/userRoles";
 
 export type MobileQuickAction = { label: string; to: string; icon: LucideIcon; primary?: boolean };
 
@@ -34,7 +35,8 @@ export const JOB_STATUS_ACTIONS = [
   { value: "scheduled", label: "Assigned", next: "inProgress", nextLabel: "Start Job" },
   { value: "inProgress", label: "In Progress", next: "partsPending", nextLabel: "Need Parts" },
   { value: "partsPending", label: "Waiting Parts", next: "inProgress", nextLabel: "Resume Work" },
-  { value: "review", label: "Customer Review", next: "completed", nextLabel: "Complete" },
+  { value: "review", label: "QA", next: "delivery", nextLabel: "QA Pass" },
+  { value: "delivery", label: "Delivery", next: "completed", nextLabel: "Confirm Delivery" },
   { value: "completed", label: "Completed" },
 ] as const;
 
@@ -274,7 +276,7 @@ const PATH_TO_MODULE: Record<string, string> = {
   "/app/inventory": "Inventory Items",
   "/app/purchase-orders": "Purchase Orders",
   "/app/purchase-returns": "Purchase Returns",
-  "/app/stock-transfers": "Stock Transfers",
+
   "/app/stock-ledger": "Stock Ledger",
   "/app/billing": "Billing",
   "/app/notifications": "Notifications",
@@ -292,11 +294,14 @@ function moduleForPath(path: string): string | undefined {
 
 export function filterQuickActionsByAccess(
   actions: MobileQuickAction[],
-  roleOrRoles: Role | Role[],
+  userOrRoles: AppUser | Role | Role[],
   rbacMatrix: Record<string, Role[]>,
 ): MobileQuickAction[] {
-  const roles = Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles];
   return actions.filter((action) => {
+    if (typeof userOrRoles === "object" && userOrRoles !== null && "role" in userOrRoles) {
+      return userCanAccessPath(userOrRoles, action.to, rbacMatrix);
+    }
+    const roles = Array.isArray(userOrRoles) ? userOrRoles : [userOrRoles];
     const module = moduleForPath(action.to);
     if (!module) return true;
     const allowed = rbacMatrix[module];

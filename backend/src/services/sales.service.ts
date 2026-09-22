@@ -202,12 +202,54 @@ export class SalesService {
     };
   }
 
-  async listOrders(tenantId: string) {
+  async listOrders(
+    tenantId: string,
+    params?: {
+      customerId?: string;
+      status?: string;
+      deliveryStatus?: string;
+      paymentStatus?: string;
+      from?: string;
+      to?: string;
+      search?: string;
+    },
+  ) {
+    const where: Prisma.SalesOrderWhereInput = { tenantId };
+    if (params?.customerId) where.customerId = params.customerId;
+    if (params?.status && params.status !== "all") where.status = params.status;
+    if (params?.deliveryStatus && params.deliveryStatus !== "all") where.deliveryStatus = params.deliveryStatus;
+    if (params?.paymentStatus && params.paymentStatus !== "all") where.paymentStatus = params.paymentStatus;
+    if (params?.from || params?.to) {
+      where.orderedAt = {};
+      if (params.from) {
+        const d = new Date(params.from);
+        if (!isNaN(d.getTime())) {
+          d.setHours(0, 0, 0, 0);
+          where.orderedAt.gte = d;
+        }
+      }
+      if (params.to) {
+        const d = new Date(params.to);
+        if (!isNaN(d.getTime())) {
+          d.setHours(23, 59, 59, 999);
+          where.orderedAt.lte = d;
+        }
+      }
+    }
+    if (params?.search?.trim()) {
+      const q = params.search.trim();
+      where.OR = [
+        { reference: { contains: q } },
+        { customerName: { contains: q } },
+        { salespersonName: { contains: q } },
+        { notes: { contains: q } },
+      ];
+    }
     const rows = await prisma.salesOrder.findMany({
-      where: { tenantId },
+      where,
       include: { lines: true, invoices: true },
       orderBy: { orderedAt: "desc" },
-      take: 100,
+      take: 1000,
     });
     return rows.map((row) => this.serializeOrder(row));
   }
@@ -619,50 +661,120 @@ export class SalesService {
     });
   }
 
-  async getReports(tenantId: string) {
+  async getReports(tenantId: string, query?: { from?: string; to?: string }) {
     const month = startOfMonth();
     const today = startOfDay();
-    const [orders, invoices, lines] = await Promise.all([
+
+    let fromDate: Date | null = null;
+    let toDate: Date | null = null;
+    if (query?.from) {
+      const parsed = new Date(query.from);
+      if (!isNaN(parsed.getTime())) {
+        parsed.setHours(0, 0, 0, 0);
+        fromDate = parsed;
+      }
+    }
+    if (query?.to) {
+      const parsed = new Date(query.to);
+      if (!isNaN(parsed.getTime())) {
+        parsed.setHours(23, 59, 59, 999);
+        toDate = parsed;
+      }
+    }
+
+    const orderWhere: Prisma.SalesOrderWhereInput = {
+      tenantId,
+      status: { not: "cancelled" },
+    };
+    if (fromDate || toDate) {
+      orderWhere.orderedAt = {};
+      if (fromDate) orderWhere.orderedAt.gte = fromDate;
+      if (toDate) orderWhere.orderedAt.lte = toDate;
+    }
+
+    const invoiceWhere: Prisma.InvoiceWhereInput = {
+      tenantId,
+      salesOrderId: { not: null },
+    };
+    if (fromDate || toDate) {
+      invoiceWhere.createdAt = {};
+      if (fromDate) invoiceWhere.createdAt.gte = fromDate;
+      if (toDate) invoiceWhere.createdAt.lte = toDate;
+    }
+
+    const [orders, invoices, lines, allTenantOrders, allTenantInvoices] = await Promise.all([
       prisma.salesOrder.findMany({
-        where: { tenantId, status: { not: "cancelled" } },
-        include: { lines: true },
+        where: orderWhere,
+        include: { lines: true, invoices: true },
         orderBy: { orderedAt: "desc" },
       }),
       prisma.invoice.findMany({
-        where: { tenantId, salesOrderId: { not: null } },
+        where: invoiceWhere,
         select: {
           id: true,
+          reference: true,
           customerName: true,
           total: true,
           paidTotal: true,
           balanceDue: true,
           status: true,
           issuedAt: true,
+          createdAt: true,
         },
       }),
       prisma.salesOrderLine.findMany({
-        where: { salesOrder: { tenantId, status: { not: "cancelled" } } },
+        where: { salesOrder: orderWhere },
         select: {
+          id: true,
           type: true,
           description: true,
+          sku: true,
           quantity: true,
+          unitPrice: true,
+          discount: true,
+          taxRate: true,
           lineTotal: true,
-          salesOrder: { select: { salespersonName: true, customerName: true, orderedAt: true } },
+          inventoryItem: { select: { itemClass: true, sku: true, name: true } },
+          salesOrder: {
+            select: {
+              id: true,
+              reference: true,
+              salespersonName: true,
+              customerName: true,
+              orderedAt: true,
+              deliveryStatus: true,
+              paymentStatus: true,
+            },
+          },
         },
+      }),
+      prisma.salesOrder.findMany({
+        where: { tenantId, status: { not: "cancelled" } },
+        select: { total: true, orderedAt: true },
+      }),
+      prisma.invoice.findMany({
+        where: { tenantId, salesOrderId: { not: null } },
+        select: { total: true, paidTotal: true, balanceDue: true, status: true },
       }),
     ]);
 
-    const daily = orders
+    const daily = allTenantOrders
       .filter((o) => o.orderedAt >= today)
       .reduce((sum, o) => sum + num(o.total), 0);
-    const monthly = orders
+    const monthly = allTenantOrders
       .filter((o) => o.orderedAt >= month)
       .reduce((sum, o) => sum + num(o.total), 0);
+
+    const rangeSales = orders.reduce((sum, o) => sum + num(o.total), 0);
+    const rangeInvoiced = invoices.reduce((sum, inv) => sum + num(inv.total), 0);
+    const rangeCollected = invoices.reduce((sum, inv) => sum + num(inv.paidTotal), 0);
+    const rangeOrdersCount = orders.length;
 
     const byKey = (key: (line: (typeof lines)[number]) => string) => {
       const map = new Map<string, { name: string; quantity: number; amount: number }>();
       for (const line of lines) {
         const name = key(line);
+        if (!name) continue;
         const current = map.get(name) ?? { name, quantity: 0, amount: 0 };
         current.quantity += num(line.quantity);
         current.amount += num(line.lineTotal);
@@ -672,23 +784,51 @@ export class SalesService {
     };
 
     const productWise = byKey((l) => l.description);
-    const sparePartsSales = byKey((l) => (l.type === "part" ? l.description : "")).filter((row) => row.name);
+    const sparePartsSales = byKey((l) =>
+      l.type === "part" && (l.inventoryItem?.itemClass ?? "spare_part") === "spare_part" ? l.description : "",
+    );
+    const consumablesSales = byKey((l) =>
+      l.type === "part" && l.inventoryItem?.itemClass === "consumable" ? l.description : "",
+    );
     const equipmentSales = byKey((l) =>
-      l.type === "service" || l.type === "labor" ? l.description : "",
-    ).filter((row) => row.name);
+      l.type === "service" || l.type === "labor" || l.type === "package" ? l.description : "",
+    );
 
-    const invoiced = invoices.reduce((sum, inv) => sum + num(inv.total), 0);
-    const collected = invoices.reduce((sum, inv) => sum + num(inv.paidTotal), 0);
-    const outstandingTotal = invoices.reduce((sum, inv) => sum + num(inv.balanceDue), 0);
+    const invoiced = allTenantInvoices.reduce((sum, inv) => sum + num(inv.total), 0);
+    const collected = allTenantInvoices.reduce((sum, inv) => sum + num(inv.paidTotal), 0);
+    const outstandingTotal = allTenantInvoices.reduce((sum, inv) => sum + num(inv.balanceDue), 0);
+
+    const detailedLines = lines.map((l) => ({
+      id: l.id,
+      orderId: l.salesOrder.id,
+      orderReference: l.salesOrder.reference,
+      customerName: l.salesOrder.customerName,
+      salespersonName: l.salesOrder.salespersonName || "Unassigned",
+      orderedAt: l.salesOrder.orderedAt.toISOString(),
+      type: l.type,
+      description: l.description,
+      sku: l.sku || l.inventoryItem?.sku || null,
+      itemClass: l.inventoryItem?.itemClass ?? (l.type === "service" ? "service" : null),
+      quantity: num(l.quantity),
+      unitPrice: num(l.unitPrice),
+      discount: num(l.discount),
+      taxRate: num(l.taxRate),
+      lineTotal: num(l.lineTotal),
+    }));
 
     return {
       dailySales: daily,
       monthlySales: monthly,
+      rangeSales,
+      rangeInvoiced,
+      rangeCollected,
+      rangeOrdersCount,
       invoiced,
       collected,
       outstandingTotal,
       productWise,
       sparePartsSales,
+      consumablesSales,
       equipmentSales,
       salespersonWise: byKey((l) => l.salesOrder.salespersonName || "Unassigned"),
       customerWise: byKey((l) => l.salesOrder.customerName),
@@ -701,6 +841,8 @@ export class SalesService {
           balanceDue: num(inv.balanceDue),
         })),
       topSelling: productWise.slice(0, 10),
+      detailedLines,
+      period: query?.from && query?.to ? { from: query.from, to: query.to } : undefined,
     };
   }
 

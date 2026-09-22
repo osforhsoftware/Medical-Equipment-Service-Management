@@ -30,18 +30,94 @@ export interface DashboardQueueItem {
   href: string;
 }
 
-function last6MonthBuckets() {
+function parseIsoDate(value?: string | null, endOf = false) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  const [y, m, d] = trimmed.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return endOf ? new Date(y, m - 1, d, 23, 59, 59, 999) : new Date(y, m - 1, d);
+}
+
+function resolveDateRange(from?: string, to?: string) {
   const now = new Date();
-  return Array.from({ length: 6 }, (_, i) => {
-    const offset = 5 - i;
-    const start = new Date(now.getFullYear(), now.getMonth() - offset, 1);
-    const end = new Date(now.getFullYear(), now.getMonth() - offset + 1, 0, 23, 59, 59, 999);
-    return {
-      label: start.toLocaleString("en-US", { month: "short" }),
-      start,
-      end,
-    };
-  });
+  const defaultTo = endOfDay(now);
+  const defaultFrom = startOfDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29));
+  let rangeFrom = parseIsoDate(from, false) ?? defaultFrom;
+  let rangeTo = parseIsoDate(to, true) ?? defaultTo;
+  if (rangeFrom > rangeTo) {
+    const swap = rangeFrom;
+    rangeFrom = startOfDay(rangeTo);
+    rangeTo = endOfDay(swap);
+  }
+  // Cap range to 366 days to keep chart series readable
+  const maxMs = 366 * 24 * 60 * 60 * 1000;
+  if (rangeTo.getTime() - rangeFrom.getTime() > maxMs) {
+    rangeFrom = startOfDay(new Date(rangeTo.getTime() - maxMs));
+  }
+  return { from: rangeFrom, to: rangeTo };
+}
+
+function dayKey(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function formatDayLabel(d: Date) {
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+}
+
+function formatMonthLabel(d: Date) {
+  return d.toLocaleString("en-US", { month: "short", year: "2-digit" });
+}
+
+function buildRangeBuckets(from: Date, to: Date) {
+  const daySpan = Math.ceil((to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+  const useDaily = daySpan <= 45;
+  const buckets: { label: string; key: string; start: Date; end: Date }[] = [];
+
+  if (useDaily) {
+    const cursor = startOfDay(from);
+    const last = startOfDay(to);
+    while (cursor <= last) {
+      const start = startOfDay(cursor);
+      const end = endOfDay(cursor);
+      buckets.push({
+        key: dayKey(start),
+        label: formatDayLabel(start),
+        start,
+        end,
+      });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return { mode: "daily" as const, buckets };
+  }
+
+  const cursor = new Date(from.getFullYear(), from.getMonth(), 1);
+  const lastMonth = new Date(to.getFullYear(), to.getMonth(), 1);
+  while (cursor <= lastMonth) {
+    const start = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const end = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0, 23, 59, 59, 999);
+    const clippedStart = start < from ? from : start;
+    const clippedEnd = end > to ? to : end;
+    buckets.push({
+      key: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`,
+      label: formatMonthLabel(start),
+      start: clippedStart,
+      end: clippedEnd,
+    });
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return { mode: "monthly" as const, buckets };
+}
+
+function humanizeStatus(status: string) {
+  if (status === "inProgress") return "In Progress";
+  if (status === "partsPending") return "Parts Pending";
+  if (status === "review") return "QA Review";
+  if (status === "delivery") return "Delivery";
+  if (status === "scheduled") return "Scheduled";
+  if (status === "completed") return "Completed";
+  return status.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function pctChange(current: number, previous: number): { value: string; up: boolean } | undefined {
@@ -87,7 +163,12 @@ const ENGINEER_TICKET_STATUSES = [
 ] as const;
 
 export class DashboardService {
-  async getOverview(tenantId: string, userId: string, role: string) {
+  async getOverview(
+    tenantId: string,
+    userId: string,
+    role: string,
+    range?: { from?: string; to?: string },
+  ) {
     const staffRole = (role as StaffRole) || "admin";
     if (staffRole === "engineer") {
       await jobsService.syncJobsFromAssignedTickets(tenantId, userId);
@@ -106,6 +187,8 @@ export class DashboardService {
     const mtdStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    const { from: rangeFrom, to: rangeTo } = resolveDateRange(range?.from, range?.to);
+    const { mode: chartMode, buckets: chartBuckets } = buildRangeBuckets(rangeFrom, rangeTo);
 
     const [
       openRequests,
@@ -132,6 +215,7 @@ export class DashboardService {
       completedJobsMonth,
       dueTodayRequests,
       overdueRequests,
+      rangeRequests,
     ] = await Promise.all([
       prisma.serviceRequest.count({
         where: { ...requestWhere, status: { notIn: [...CLOSED_REQUEST_STATUSES] } },
@@ -261,6 +345,13 @@ export class DashboardService {
           slaDue: { lt: todayStart },
         },
       }),
+      prisma.serviceRequest.findMany({
+        where: {
+          tenantId,
+          createdAt: { gte: rangeFrom, lte: rangeTo },
+        },
+        select: { createdAt: true, status: true },
+      }),
     ]);
 
     const unreadNotifications = await notificationsService.unreadCount(tenantId, userId, role);
@@ -275,27 +366,68 @@ export class DashboardService {
     const salePaid = paidOnly.filter(isSaleInvoice);
     const servicePaid = paidOnly.filter(isServiceInvoice);
     const financePaid = staffRole === "sales" ? salePaid : paidOnly;
-    const revenueTrend = last6MonthBuckets().map((bucket) => {
-      const revenue = financePaid
+
+    const jobsInRange = allJobs.filter((j) => j.createdAt >= rangeFrom && j.createdAt <= rangeTo);
+    const invoicesInRange = financePaid.filter((inv) => inv.issuedAt >= rangeFrom && inv.issuedAt <= rangeTo);
+    const saleInRange = salePaid.filter((inv) => inv.issuedAt >= rangeFrom && inv.issuedAt <= rangeTo);
+    const serviceInRange = servicePaid.filter((inv) => inv.issuedAt >= rangeFrom && inv.issuedAt <= rangeTo);
+
+    const activityTrend = chartBuckets.map((bucket) => {
+      const jobs = jobsInRange.filter((j) => j.createdAt >= bucket.start && j.createdAt <= bucket.end).length;
+      const tickets = rangeRequests.filter((r) => r.createdAt >= bucket.start && r.createdAt <= bucket.end).length;
+      const saleRevenue = saleInRange
         .filter((inv) => inv.issuedAt >= bucket.start && inv.issuedAt <= bucket.end)
         .reduce((sum, inv) => sum + Number(inv.total), 0);
-      const saleRevenue = salePaid
+      const serviceRevenue = serviceInRange
         .filter((inv) => inv.issuedAt >= bucket.start && inv.issuedAt <= bucket.end)
         .reduce((sum, inv) => sum + Number(inv.total), 0);
-      const serviceRevenue = servicePaid
+      const revenue = invoicesInRange
         .filter((inv) => inv.issuedAt >= bucket.start && inv.issuedAt <= bucket.end)
         .reduce((sum, inv) => sum + Number(inv.total), 0);
-      const jobs = allJobs.filter((j) => j.createdAt >= bucket.start && j.createdAt <= bucket.end).length;
-      return { month: bucket.label, revenue, saleRevenue, serviceRevenue, jobs };
+      return {
+        label: bucket.label,
+        key: bucket.key,
+        jobs,
+        tickets,
+        revenue,
+        saleRevenue,
+        serviceRevenue,
+      };
     });
 
+    // Range-filtered revenue / activity series for charts.
+    const revenueTrend = activityTrend.map((row) => ({
+      month: row.label,
+      revenue: row.revenue,
+      saleRevenue: row.saleRevenue,
+      serviceRevenue: row.serviceRevenue,
+      jobs: row.jobs,
+    }));
+
     const jobsByTypeMap = new Map<string, number>();
-    for (const job of allJobs) {
+    for (const job of jobsInRange) {
       jobsByTypeMap.set(job.type, (jobsByTypeMap.get(job.type) ?? 0) + 1);
     }
     const jobsByType = [...jobsByTypeMap.entries()]
       .map(([type, count]) => ({ type, count }))
       .sort((a, b) => b.count - a.count);
+
+    const jobsByStatusMap = new Map<string, number>();
+    for (const job of jobsInRange) {
+      const label = humanizeStatus(job.status);
+      jobsByStatusMap.set(label, (jobsByStatusMap.get(label) ?? 0) + 1);
+    }
+    const jobsByStatus = [...jobsByStatusMap.entries()]
+      .map(([status, count]) => ({ status, count }))
+      .sort((a, b) => b.count - a.count);
+
+    const periodTotals = {
+      jobs: jobsInRange.length,
+      tickets: rangeRequests.length,
+      revenue: invoicesInRange.reduce((sum, inv) => sum + Number(inv.total), 0),
+      saleRevenue: saleInRange.reduce((sum, inv) => sum + Number(inv.total), 0),
+      serviceRevenue: serviceInRange.reduce((sum, inv) => sum + Number(inv.total), 0),
+    };
 
     const sumPaid = (rows: typeof paidOnly) =>
       rows.filter((inv) => inv.issuedAt >= mtdStart).reduce((sum, inv) => sum + Number(inv.total), 0);
@@ -454,7 +586,27 @@ export class DashboardService {
       revenueTrend: showFinance
         ? revenueTrend
         : revenueTrend.map(({ month, jobs }) => ({ month, revenue: 0, saleRevenue: 0, serviceRevenue: 0, jobs })),
+      activityTrend: showFinance
+        ? activityTrend
+        : activityTrend.map(({ label, key, jobs, tickets }) => ({
+            label,
+            key,
+            jobs,
+            tickets,
+            revenue: 0,
+            saleRevenue: 0,
+            serviceRevenue: 0,
+          })),
       jobsByType: showCompanyOps || staffRole === "engineer" || staffRole === "billing" ? jobsByType : [],
+      jobsByStatus: showCompanyOps || staffRole === "engineer" || staffRole === "billing" ? jobsByStatus : [],
+      period: {
+        from: dayKey(rangeFrom),
+        to: dayKey(rangeTo),
+        mode: chartMode,
+        totals: showFinance
+          ? periodTotals
+          : { ...periodTotals, revenue: 0, saleRevenue: 0, serviceRevenue: 0 },
+      },
       activeJobs: (staffRole === "engineer" ? myJobs : activeJobsList).slice(0, 6).map((j) => ({
         id: j.id,
         reference: j.reference,
@@ -591,7 +743,11 @@ export class DashboardService {
           ...base,
           assignedOpen: input.myJobs.length,
           inProgress: input.myJobs.filter(
-            (j) => j.status === "inProgress" || j.status === "partsPending" || j.status === "review",
+            (j) =>
+              j.status === "inProgress" ||
+              j.status === "partsPending" ||
+              j.status === "review" ||
+              j.status === "delivery",
           ).length,
           dueToday: input.myJobs.filter((j) => {
             const d = j.scheduledFor;

@@ -2,6 +2,7 @@ import { type Request, type Response, type NextFunction } from "express";
 import { serviceRequestsService } from "@/services/serviceRequests.service";
 import { serviceTicketWorkflowService } from "@/services/serviceTicketWorkflow.service";
 import { parseServiceRequestListQuery, sendPaginatedList } from "@/utils/listQuery";
+import { parseCompletedScope } from "@/lib/ticketBoardArchive";
 import { success } from "@/utils/response";
 
 export class ServiceRequestsController {
@@ -18,6 +19,10 @@ export class ServiceRequestsController {
           priority: query.priority,
           assignee: query.assignee,
           overdue: query.overdue,
+          mineUserId: query.mine ? req.user!.userId : undefined,
+          completedScope: parseCompletedScope(query.completedScope),
+          slaDueFrom: query.slaDueFrom,
+          slaDueTo: query.slaDueTo,
           search: query.search,
           skip: query.skip,
           take: query.take,
@@ -35,6 +40,7 @@ export class ServiceRequestsController {
           ?? "new,inspection,estimate,pending_approval,assigned_engineer,change_pending_approval,pending_final_approval,pending_invoice,invoiced,closed",
       );
       const statuses = statusesRaw.split(",").map((s) => s.trim()).filter(Boolean);
+      const completedScope = parseCompletedScope(req.query.completedScope);
       const counts = await serviceRequestsService.getStatusCounts(
         req.tenantId!,
         req.user!.userId,
@@ -45,6 +51,8 @@ export class ServiceRequestsController {
           priority: req.query.priority as string | undefined,
           assignee: req.query.assignee as string | undefined,
           search: req.query.search as string | undefined,
+          mineUserId: req.query.mine === "true" || req.query.mine === "1" ? req.user!.userId : undefined,
+          completedScope,
         },
       );
       res.json(success("Status counts fetched successfully", counts));

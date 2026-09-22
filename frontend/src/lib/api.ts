@@ -184,6 +184,10 @@ export interface BackendUser {
   branchId: string | null;
   avatarColor: string;
   customerId: string | null;
+  permissions?: {
+    mode: "crud" | "read";
+    modules?: Record<string, "none" | "read" | "crud">;
+  };
   createdAt: string;
   updatedAt: string;
 }
@@ -203,6 +207,10 @@ export interface CreateUserInput {
   phone?: string;
   isActive?: boolean;
   branchId?: string;
+  permissions?: {
+    mode: "crud" | "read";
+    modules?: Record<string, "none" | "read" | "crud">;
+  };
 }
 
 export interface UpdateUserInput {
@@ -216,6 +224,10 @@ export interface UpdateUserInput {
   isActive?: boolean;
   branchId?: string | null;
   password?: string;
+  permissions?: {
+    mode: "crud" | "read";
+    modules?: Record<string, "none" | "read" | "crud">;
+  };
 }
 
 export interface BackendBranch {
@@ -243,6 +255,12 @@ export interface BackendCustomer {
   country: string;
   licenseGst?: string | null;
   note?: string | null;
+  paymentTerms?: string | null;
+  creditLimit?: number | null;
+  outstandingBalance?: number | null;
+  priceCategory?: string | null;
+  deliveryAddress?: string | null;
+  additionalFields?: { label: string; value: string }[] | null;
   branchId: string;
   equipmentCount: number;
   activeJobs: number;
@@ -263,9 +281,16 @@ export interface CreateCustomerInput {
   country: string;
   licenseGst?: string | null;
   note?: string | null;
+  paymentTerms?: string | null;
+  creditLimit?: number | null;
+  priceCategory?: string | null;
+  deliveryAddress?: string | null;
+  additionalFields?: { label: string; value: string }[] | null;
   branchId?: string;
   status?: string;
 }
+
+export type UpdateCustomerInput = Partial<CreateCustomerInput>;
 
 export interface BackendEquipment {
   id: string;
@@ -276,14 +301,18 @@ export interface BackendEquipment {
   manufacturer: string;
   category: string;
   serialNumber: string;
+  partNumber?: string | null;
   customerId: string | null;
   customerName: string;
   branchId: string;
   location: string;
   installDate: string | null;
+  warrantyStart: string | null;
   warrantyEnd: string | null;
   amcStatus: string;
   condition: string;
+  currentStatus?: string;
+  purchaseSaleHistory?: string | null;
   lastServiceDate: string | null;
   createdAt: string;
   updatedAt: string;
@@ -294,7 +323,8 @@ export type TaxonomyType =
   | "equipment_condition"
   | "customer_type"
   | "inventory_category"
-  | "inventory_subcategory";
+  | "inventory_subcategory"
+  | "expense_category";
 
 export interface BackendTaxonomyTerm {
   id: string;
@@ -338,13 +368,17 @@ export interface CreateEquipmentInput {
   manufacturer?: string;
   category?: string;
   serialNumber: string;
+  partNumber?: string | null;
   customerId?: string | null;
   branchId?: string;
   location?: string;
   installDate?: string | null;
+  warrantyStart?: string | null;
   warrantyEnd?: string | null;
   amcStatus?: string;
   condition?: string;
+  currentStatus?: string;
+  purchaseSaleHistory?: string | null;
   lastServiceDate?: string | null;
 }
 
@@ -381,6 +415,7 @@ export interface BackendInspectionReport {
   measurements?: unknown;
   calibrationStatus?: string | null;
   technicianRemarks?: string | null;
+  additionalFields?: { label: string; value: string }[] | null;
   reportedBy: string;
   reportedAt: string;
   submittedAt?: string | null;
@@ -405,6 +440,7 @@ export interface BackendServiceRequest {
   priority: string;
   status: string;
   description: string;
+  additionalFields?: { label: string; value: string }[] | null;
   createdBy: string;
   assignedTo: string | null;
   assignedName: string | null;
@@ -415,6 +451,7 @@ export interface BackendServiceRequest {
   assignedEstimatorName?: string | null;
   assignedEngineerName?: string | null;
   slaDue: string;
+  completedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   equipmentItems: BackendServiceRequestEquipment[];
@@ -438,6 +475,7 @@ export interface CreateServiceRequestInput {
   typeOther?: string | null;
   priority: string;
   description: string;
+  additionalFields?: { label: string; value: string }[];
   assignedTo?: string;
   assignedName?: string;
   /** Create-time intake role — must be inspector for Inspection flow. */
@@ -453,6 +491,7 @@ export interface UpdateServiceRequestInput {
   assignedTo?: string | null;
   assignedName?: string | null;
   description?: string;
+  additionalFields?: { label: string; value: string }[];
   timelineNote?: string;
 }
 
@@ -480,6 +519,7 @@ export interface CreateInspectionInput {
     description?: string;
     priority?: "low" | "medium" | "high" | "critical";
   }[];
+  additionalFields?: { label: string; value: string }[];
   submit?: boolean;
 }
 
@@ -801,6 +841,22 @@ export interface BackendServiceJob {
   status: string;
   scheduledFor: string;
   progress: number;
+  additionalFields?: { label: string; value: string }[] | null;
+  stageDetails?: {
+    qa?: {
+      result?: "pass" | "fail";
+      notes?: string | null;
+      checkedAt?: string | null;
+      checkedBy?: string | null;
+    };
+    delivery?: {
+      method?: string | null;
+      note?: string | null;
+      receivedBy?: string | null;
+      deliveredAt?: string | null;
+      confirmedBy?: string | null;
+    };
+  } | null;
   assignments?: BackendJobAssignment[];
   workLogs?: BackendJobWorkLog[];
   extras?: BackendJobExtra[];
@@ -854,6 +910,7 @@ export interface CreateJobInput {
   scheduledFor: string;
   status?: string;
   progress?: number;
+  additionalFields?: { label: string; value: string }[];
 }
 
 export interface UpdateJobInput {
@@ -861,6 +918,24 @@ export interface UpdateJobInput {
   scheduledFor?: string;
   status?: string;
   progress?: number;
+  type?: string;
+  typeOther?: string | null;
+  additionalFields?: { label: string; value: string }[];
+  stageDetails?: {
+    qa?: {
+      result?: "pass" | "fail";
+      notes?: string | null;
+      checkedAt?: string | null;
+      checkedBy?: string | null;
+    };
+    delivery?: {
+      method?: string | null;
+      note?: string | null;
+      receivedBy?: string | null;
+      deliveredAt?: string | null;
+      confirmedBy?: string | null;
+    };
+  } | null;
 }
 
 export interface JobPhotoInput {
@@ -894,15 +969,22 @@ export interface BackendInventoryItem {
   tenantId: string;
   sku: string;
   name: string;
+  itemClass?: string;
   category: string;
   subcategory?: string | null;
   description?: string | null;
+  manufacturer?: string;
+  compatibleModels?: string | null;
   branchId: string;
   inStock: number;
   reserved: number;
   /** Computed: inStock − reserved. Added in Phase 1; additive, non-breaking. */
   available?: number;
   reorderLevel: number;
+  maxLevel?: number;
+  binLocation?: string;
+  trackBatches?: boolean;
+  trackSerials?: boolean;
   unitCost: string | number;
   sellingPrice?: string | number;
   deliveryCharge?: string | number;
@@ -911,6 +993,7 @@ export interface BackendInventoryItem {
   supplier: string;
   supplierId?: string | null;
   images?: { id: string; fileId: string; file?: { id: string; originalName: string; mimeType: string } }[];
+  additionalFields?: { label: string; value: string }[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -918,12 +1001,19 @@ export interface BackendInventoryItem {
 export interface CreateInventoryInput {
   sku?: string;
   name: string;
+  itemClass?: "spare_part" | "consumable";
   category?: string;
   subcategory?: string | null;
   description?: string | null;
+  manufacturer?: string;
+  compatibleModels?: string | null;
   branchId?: string;
   inStock?: number;
   reorderLevel?: number;
+  maxLevel?: number;
+  binLocation?: string;
+  trackBatches?: boolean;
+  trackSerials?: boolean;
   unitCost?: number;
   sellingPrice?: number;
   deliveryCharge?: number;
@@ -932,6 +1022,7 @@ export interface CreateInventoryInput {
   supplier?: string;
   supplierId?: string | null;
   imageFileIds?: string[];
+  additionalFields?: { label: string; value: string }[] | null;
 }
 
 export interface BackendStockPurchaseRequest {
@@ -1269,19 +1360,44 @@ export interface BackendSalesOrder {
   estimate?: { id: string; reference: string; status: string } | null;
 }
 
+export interface SalesReportDetailedLine {
+  id: string;
+  orderId: string;
+  orderReference: string;
+  customerName: string;
+  salespersonName: string;
+  orderedAt: string;
+  type: string;
+  description: string;
+  sku?: string | null;
+  itemClass?: string | null;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  taxRate: number;
+  lineTotal: number;
+}
+
 export interface SalesReportsData {
   dailySales: number;
   monthlySales: number;
+  rangeSales?: number;
+  rangeInvoiced?: number;
+  rangeCollected?: number;
+  rangeOrdersCount?: number;
   invoiced?: number;
   collected?: number;
   outstandingTotal?: number;
   productWise: { name: string; quantity: number; amount: number }[];
   sparePartsSales: { name: string; quantity: number; amount: number }[];
+  consumablesSales?: { name: string; quantity: number; amount: number }[];
   equipmentSales: { name: string; quantity: number; amount: number }[];
   salespersonWise: { name: string; quantity: number; amount: number }[];
   customerWise: { name: string; quantity: number; amount: number }[];
   outstanding: { id: string; customerName: string; total: number; paidTotal: number; balanceDue: number; status: string }[];
   topSelling: { name: string; quantity: number; amount: number }[];
+  detailedLines?: SalesReportDetailedLine[];
+  period?: { from?: string; to?: string };
 }
 
 export interface DashboardData {
@@ -1330,7 +1446,29 @@ export interface DashboardData {
     revenue?: DashboardTrend;
   };
   revenueTrend: { month: string; revenue: number; saleRevenue?: number; serviceRevenue?: number; jobs: number }[];
+  activityTrend?: {
+    label: string;
+    key: string;
+    jobs: number;
+    tickets: number;
+    revenue: number;
+    saleRevenue: number;
+    serviceRevenue: number;
+  }[];
   jobsByType: { type: string; count: number }[];
+  jobsByStatus?: { status: string; count: number }[];
+  period?: {
+    from: string;
+    to: string;
+    mode: "daily" | "monthly";
+    totals: {
+      jobs: number;
+      tickets: number;
+      revenue: number;
+      saleRevenue: number;
+      serviceRevenue: number;
+    };
+  };
   activeJobs: {
     id: string;
     reference: string;
@@ -1480,7 +1618,42 @@ function queryString(params: Record<string, string | undefined>) {
   return q ? `?${q}` : "";
 }
 
+/**
+ * Ensures a path targets the backend API. Callers may pass paths with or
+ * without the "/api" prefix (e.g. "/rfqs" or "/api/rfqs").
+ */
+function withApiPrefix(path: string): string {
+  if (path === "/api" || path.startsWith("/api/") || path.startsWith("/api?")) return path;
+  return `/api${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 export const api = {
+  /**
+   * Generic GET helper. Returns a `{ data }` envelope so callers can read
+   * `(await api.get<T>(path)).data`, matching the axios-style usage used by
+   * feature pages such as RFQs, SalesEnquiries and WarrantyClaims.
+   */
+  get: <T = unknown>(path: string) =>
+    request<T>(withApiPrefix(path)).then((data) => ({ data })),
+
+  /** Generic POST helper. Accepts an optional JSON body. */
+  post: <T = unknown>(path: string, body?: unknown) =>
+    request<T>(withApiPrefix(path), {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    }).then((data) => ({ data })),
+
+  /** Generic PUT helper. Accepts an optional JSON body. */
+  put: <T = unknown>(path: string, body?: unknown) =>
+    request<T>(withApiPrefix(path), {
+      method: "PUT",
+      body: JSON.stringify(body ?? {}),
+    }).then((data) => ({ data })),
+
+  /** Generic DELETE helper. */
+  delete: <T = unknown>(path: string) =>
+    request<T>(withApiPrefix(path), { method: "DELETE" }).then((data) => ({ data })),
+
   login: (username: string, password: string) =>
     request<LoginResult>("/api/auth/login", {
       method: "POST",
@@ -1522,6 +1695,8 @@ export const api = {
   listUsers: (params?: { role?: string; isActive?: boolean }) =>
     request<BackendUser[]>(`/api/users${queryString({ role: params?.role, isActive: params?.isActive?.toString() })}`),
 
+  getUser: (id: string) => request<BackendUser>(`/api/users/${id}`),
+
   createUser: (data: CreateUserInput) =>
     request<BackendUser>("/api/users", {
       method: "POST",
@@ -1542,9 +1717,9 @@ export const api = {
   listCustomers: (params?: CustomerListParams) =>
     requestPaginated<BackendCustomer>(`/api/customers${buildListQuery(params)}`),
 
-  /** Compact customer list for dropdowns (capped server-side). */
+  /** Compact customer list for dropdowns (active only, capped server-side). */
   listCustomersOptions: () =>
-    requestPaginated<BackendCustomer>("/api/customers?limit=100&page=1").then((r) => r.data),
+    requestPaginated<BackendCustomer>("/api/customers?limit=100&page=1&status=active").then((r) => r.data),
 
   getCustomer: (id: string) =>
     request<BackendCustomer>(`/api/customers/${id}`),
@@ -1556,6 +1731,24 @@ export const api = {
     request<BackendCustomer>("/api/customers", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  updateCustomer: (id: string, data: UpdateCustomerInput) =>
+    request<BackendCustomer>(`/api/customers/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  /** Soft-delete customer (status → inactive). Related records stay linked. */
+  deleteCustomer: (id: string) =>
+    request<BackendCustomer & { related?: { equipmentCount: number; activeJobs: number } }>(
+      `/api/customers/${id}`,
+      { method: "DELETE" },
+    ),
+
+  restoreCustomer: (id: string) =>
+    request<BackendCustomer>(`/api/customers/${id}/restore`, {
+      method: "POST",
     }),
 
   listEquipment: (params?: EquipmentListParams) =>
@@ -1613,7 +1806,7 @@ export const api = {
   listServiceRequests: (params?: ServiceRequestListParams) =>
     requestPaginated<BackendServiceRequest>(`/api/service-requests${buildListQuery(params)}`),
 
-  getServiceRequestStatusCounts: (params?: { statuses?: string; overdue?: boolean; search?: string; priority?: string; assignee?: string }) =>
+  getServiceRequestStatusCounts: (params?: { statuses?: string; overdue?: boolean; search?: string; priority?: string; assignee?: string; mine?: boolean; completedScope?: "recent" | "archive" | "all" }) =>
     request<Record<string, number>>(
       `/api/service-requests/status-counts${buildListQuery(params)}`,
     ),
@@ -1779,6 +1972,9 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  deleteJob: (id: string) =>
+    request<void>(`/api/jobs/${id}`, { method: "DELETE" }),
+
   uploadJobPhotos: (id: string, photos: JobPhotoInput[]) =>
     request<{ job: BackendServiceJob }>(`/api/jobs/${id}/photos`, {
       method: "POST",
@@ -1819,6 +2015,12 @@ export const api = {
 
   getJobActivities: (id: string) =>
     request<BackendJobActivity[]>(`/api/jobs/${id}/activities`),
+
+  addJobActivity: (id: string, data: { action: string; note?: string; actor?: string }) =>
+    request<BackendJobActivity>(`/api/jobs/${id}/activities`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   listInventory: (params?: InventoryListParams) =>
     requestPaginated<BackendInventoryItem>(`/api/inventory${buildListQuery(params)}`),
@@ -1956,11 +2158,30 @@ export const api = {
 
   getSettings: () => request<BackendSettings>("/api/settings"),
 
-  getDashboard: () =>
-    request<DashboardData>("/api/dashboard"),
+  getDashboard: (params?: { from?: string; to?: string }) =>
+    request<DashboardData>(`/api/dashboard${queryString({ from: params?.from, to: params?.to })}`),
 
   getSalesDesk: () => request<SalesDeskData>("/api/sales/desk"),
-  listSalesOrders: () => request<BackendSalesOrder[]>("/api/sales/orders"),
+  listSalesOrders: (params?: {
+    customerId?: string;
+    status?: string;
+    deliveryStatus?: string;
+    paymentStatus?: string;
+    from?: string;
+    to?: string;
+    search?: string;
+  }) =>
+    request<BackendSalesOrder[]>(
+      `/api/sales/orders${queryString({
+        customerId: params?.customerId,
+        status: params?.status,
+        deliveryStatus: params?.deliveryStatus,
+        paymentStatus: params?.paymentStatus,
+        from: params?.from,
+        to: params?.to,
+        search: params?.search,
+      })}`,
+    ),
   getSalesOrder: (id: string) => request<BackendSalesOrder>(`/api/sales/orders/${id}`),
   createSalesOrder: (data: {
     customerId: string;
@@ -2015,7 +2236,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data ?? {}),
     }),
-  getSalesReports: () => request<SalesReportsData>("/api/sales/reports"),
+  getSalesReports: (params?: { from?: string; to?: string }) =>
+    request<SalesReportsData>(
+      `/api/sales/reports${queryString({
+        from: params?.from,
+        to: params?.to,
+      })}`,
+    ),
 
   listNotifications: () => request<BackendNotification[]>("/api/notifications"),
 
@@ -2188,7 +2415,7 @@ export const api = {
     data: {
       inventoryItemId?: string | null;
       description: string;
-      type?: "product" | "equipment" | "machine" | "other";
+      type?: "product" | "equipment" | "machine" | "other" | "custom";
       reason: string;
       quantity: number;
       unitPrice: number;
@@ -2249,10 +2476,15 @@ export const api = {
     dueAt: string,
     currency = "INR",
     additionalLines?: InvoiceLineInput[],
+    equipmentWarranty?: {
+      warrantyStart?: string | null;
+      warrantyEnd?: string | null;
+      amcStatus?: "active" | "expiring" | "expired" | "none";
+    },
   ) =>
     request<BackendInvoice>("/api/domain/invoices/from-job", {
       method: "POST",
-      body: JSON.stringify({ jobId, dueAt, currency, additionalLines }),
+      body: JSON.stringify({ jobId, dueAt, currency, additionalLines, equipmentWarranty }),
     }),
 
   recordInvoicePayment: (
@@ -2305,6 +2537,12 @@ export const api = {
   createCommission: (data: { referralId?: string | null; invoiceId?: string | null; payeeName: string; basisAmount: number; rate: number }) =>
     request<BackendCommission>("/api/domain/finance/commissions", {
       method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateCommission: (id: string, data: { status: "accrued" | "approved" | "paid" | "cancelled"; paidAt?: string | null }) =>
+    request<BackendCommission>(`/api/domain/finance/commissions/${id}`, {
+      method: "PUT",
       body: JSON.stringify(data),
     }),
 

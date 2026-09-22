@@ -295,7 +295,13 @@ export default function BillingInvoiceDetail() {
 
   const isSaleInvoice = Boolean(invoice?.salesOrderId) || Boolean(invoice && !invoice.jobId);
   const customerAddress = customer
-    ? [customer.address, customer.city, customer.country].filter(Boolean).join(", ")
+    ? [
+        customer.deliveryAddress?.trim() || customer.address,
+        customer.city,
+        customer.country,
+        customer.paymentTerms?.trim() ? `Payment: ${customer.paymentTerms.trim()}` : null,
+        customer.priceCategory?.trim() ? `Price category: ${customer.priceCategory.trim()}` : null,
+      ].filter(Boolean).join("\n")
     : undefined;
   const invoiceDetailRows = useMemo(() => {
     if (!invoice) return [];

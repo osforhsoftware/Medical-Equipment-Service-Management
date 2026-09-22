@@ -15,7 +15,7 @@ export function MobileBottomNav() {
 
   if (!user) return null;
 
-  const tabs = getMobileNavTabs(getUserRoles(user), rbacMatrix);
+  const tabs = getMobileNavTabs(getUserRoles(user), rbacMatrix, user);
 
   return (
     <nav className="mobile-bottom-nav" aria-label="Main navigation">
@@ -30,7 +30,7 @@ export function MobileBottomNav() {
               type="button"
               onClick={() => navigate(tab.to)}
               className={cn(
-                "mobile-nav-item",
+                "mobile-nav-item py-1",
                 active && "mobile-nav-item-active",
               )}
               aria-current={active ? "page" : undefined}
@@ -38,23 +38,23 @@ export function MobileBottomNav() {
             >
               <span
                 className={cn(
-                  "relative flex h-11 w-11 items-center justify-center rounded-2xl transition-all duration-200",
+                  "relative flex h-10 w-12 items-center justify-center rounded-2xl transition-all duration-200",
                   active
-                    ? "bg-primary text-primary-foreground shadow-md shadow-primary/25"
-                    : "text-muted-foreground",
+                    ? "bg-primary text-primary-foreground shadow-md shadow-primary/25 scale-105"
+                    : "text-muted-foreground hover:bg-muted/50",
                 )}
               >
-                <Icon className="h-6 w-6" strokeWidth={active ? 2.25 : 1.75} />
+                <Icon className="h-5 w-5" strokeWidth={active ? 2.5 : 1.8} />
                 {showBadge && (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-bold text-destructive-foreground">
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-extrabold text-destructive-foreground animate-pulse border border-background">
                     {unreadCount > 9 ? "9+" : unreadCount}
                   </span>
                 )}
               </span>
               <span
                 className={cn(
-                  "text-[10px] font-medium",
-                  active ? "text-primary" : "text-muted-foreground",
+                  "text-[10px] tracking-tight transition-colors",
+                  active ? "text-primary font-bold" : "text-muted-foreground font-semibold",
                 )}
               >
                 {tab.label}

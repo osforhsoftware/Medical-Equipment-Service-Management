@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Download, FilePenLine, Loader2, Printer } from "lucide-react";
+import { ArrowLeft, Download, FilePenLine, Loader2, Mail, MessageCircle, Printer } from "lucide-react";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { InspectionReportDocument } from "@/components/inspections/InspectionReportDocument";
 import { InspectionReportPanel } from "@/components/inspections/InspectionReportPanel";
@@ -13,9 +13,11 @@ import {
   loadInspectionReportBundle,
   type InspectionReportBundle,
 } from "@/lib/inspectionReport";
+import { shareInspectionReport, type InspectionShareChannel } from "@/lib/inspectionShare";
 import { toast } from "@/lib/toast";
 
 const EDIT_ROLES = ["admin", "coordinator", "inspector"] as const;
+const SHARE_ROLES = ["admin", "coordinator", "inspector"] as const;
 
 export default function InspectionReportView() {
   const { id = "" } = useParams();
@@ -25,6 +27,7 @@ export default function InspectionReportView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [shareBusy, setShareBusy] = useState<InspectionShareChannel | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -67,6 +70,7 @@ export default function InspectionReportView() {
     hasRole([...EDIT_ROLES]) &&
     Boolean(request) &&
     ["new", "inspection", "estimate"].includes(request!.status);
+  const canShare = hasRole([...SHARE_ROLES]) && Boolean(report);
 
   const downloadPdf = async () => {
     if (!request) return;
@@ -78,6 +82,31 @@ export default function InspectionReportView() {
       toast.apiError(err, { fallback: "Unable to generate inspection report PDF" });
     } finally {
       setPdfBusy(false);
+    }
+  };
+
+  const sendReport = async (channel: InspectionShareChannel) => {
+    if (!bundle?.request) return;
+    setShareBusy(channel);
+    try {
+      const result = await shareInspectionReport({
+        channel,
+        request: bundle.request,
+        customer: bundle.customer,
+      });
+      if (!result.opened && !result.sharedNatively && !result.downloaded) {
+        return;
+      }
+      toast.success(channel === "whatsapp" ? "WhatsApp opened" : "Gmail/Email opened", {
+        description: result.sharedNatively
+          ? "Native share was used when available. Otherwise attach the downloaded PDF."
+          : "PDF downloaded — attach it in the message window that opened.",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to send inspection report";
+      toast.error(message);
+    } finally {
+      setShareBusy(null);
     }
   };
 
@@ -101,7 +130,7 @@ export default function InspectionReportView() {
               <Button variant="outline" size="sm" onClick={() => window.print()}>
                 <Printer className="mr-1 h-4 w-4" /> Print
               </Button>
-              <Button variant="brand" size="sm" disabled={pdfBusy} onClick={() => void downloadPdf()}>
+              <Button variant="brand" size="sm" disabled={pdfBusy || Boolean(shareBusy)} onClick={() => void downloadPdf()}>
                 {pdfBusy ? (
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                 ) : (
@@ -109,6 +138,36 @@ export default function InspectionReportView() {
                 )}
                 Download PDF
               </Button>
+              {canShare ? (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={Boolean(shareBusy) || pdfBusy}
+                    onClick={() => void sendReport("whatsapp")}
+                  >
+                    {shareBusy === "whatsapp" ? (
+                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    ) : (
+                      <MessageCircle className="mr-1 h-4 w-4" />
+                    )}
+                    Send via WhatsApp
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={Boolean(shareBusy) || pdfBusy}
+                    onClick={() => void sendReport("email")}
+                  >
+                    {shareBusy === "email" ? (
+                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Mail className="mr-1 h-4 w-4" />
+                    )}
+                    Send via Gmail/Email
+                  </Button>
+                </>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -173,6 +232,8 @@ export default function InspectionReportView() {
         setWorkDetails={editor.setWorkDetails}
         severity={editor.severity}
         setSeverity={editor.setSeverity}
+        additionalFields={editor.additionalFields}
+        setAdditionalFields={editor.setAdditionalFields}
         machineImages={editor.machineImages}
         setMachineImages={editor.setMachineImages}
         setMachineImage={editor.setMachineImage}

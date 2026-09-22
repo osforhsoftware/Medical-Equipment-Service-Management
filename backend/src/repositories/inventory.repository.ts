@@ -6,6 +6,7 @@ import { searchContains } from "@/utils/searchFilter";
 export interface InventoryListFilters {
   branchId?: string;
   category?: string;
+  itemClass?: string;
   stockStatus?: string;
   supplierId?: string;
   search?: string;
@@ -19,6 +20,7 @@ function buildWhere(tenantId: string, filters: Omit<InventoryListFilters, "skip"
     tenantId,
     ...(filters.branchId && filters.branchId !== "all" ? { branchId: filters.branchId } : {}),
     ...(filters.category ? { category: filters.category } : {}),
+    ...(filters.itemClass ? { itemClass: filters.itemClass } : {}),
     ...(filters.supplierId ? { supplierId: filters.supplierId } : {}),
     ...(filters.stockStatus === "out" ? { inStock: 0 } : {}),
   };
@@ -49,7 +51,13 @@ export class InventoryRepository {
       if (lowIds.length === 0) return { data: [], total: 0 };
       const where: Prisma.InventoryItemWhereInput = { ...baseWhere, id: { in: lowIds } };
       const [data, total] = await Promise.all([
-        prisma.inventoryItem.findMany({ where, orderBy: filters.orderBy, skip: filters.skip, take: filters.take }),
+        prisma.inventoryItem.findMany({
+          where,
+          orderBy: filters.orderBy,
+          skip: filters.skip,
+          take: filters.take,
+          include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
+        }),
         prisma.inventoryItem.count({ where }),
       ]);
       return { data, total };
@@ -61,6 +69,7 @@ export class InventoryRepository {
         orderBy: filters.orderBy,
         skip: filters.skip,
         take: filters.take,
+        include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
       }),
       prisma.inventoryItem.count({ where: baseWhere }),
     ]);
@@ -80,13 +89,17 @@ export class InventoryRepository {
   async findLowStock(tenantId: string): Promise<InventoryItem[]> {
     const items = await prisma.inventoryItem.findMany({
       where: { tenantId },
+      include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
       orderBy: { name: "asc" },
     });
     return items.filter((i) => i.inStock <= i.reorderLevel);
   }
 
   async findById(id: string, tenantId: string): Promise<InventoryItem | null> {
-    return prisma.inventoryItem.findFirst({ where: { id, tenantId } });
+    return prisma.inventoryItem.findFirst({
+      where: { id, tenantId },
+      include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
+    });
   }
 
   async create(tenantId: string, data: Omit<Prisma.InventoryItemUncheckedCreateInput, "tenantId">): Promise<InventoryItem> {

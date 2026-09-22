@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Check, X, UserCog } from "lucide-react";
 import { Link } from "react-router-dom";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -101,6 +102,7 @@ export default function Settings() {
   const [loadingDemo, setLoadingDemo] = useState(true);
   const [seedingDemo, setSeedingDemo] = useState(false);
   const [removingDemo, setRemovingDemo] = useState(false);
+  const [removeDemoOpen, setRemoveDemoOpen] = useState(false);
   const orgRef = useRef<HTMLDivElement>(null);
   const {
     errors: orgErrors,
@@ -159,6 +161,7 @@ export default function Settings() {
     try {
       const status = await api.removeDemoData();
       setDemoStatus(status);
+      setRemoveDemoOpen(false);
       toast.success("Demo data removed", {
         id: loadingId,
         description: "All seeded sample records have been deleted.",
@@ -547,36 +550,15 @@ export default function Settings() {
                 </AlertDialogContent>
               </AlertDialog>
 
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={removingDemo || loadingDemo || !demoStatus?.seeded}
-                  >
-                    {removingDemo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                    Remove all
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Remove all demo data?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This permanently deletes all seeded sample records. Your admin account and organization
-                      settings are kept.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      onClick={() => void handleRemoveDemo()}
-                    >
-                      Remove all demo data
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={removingDemo || loadingDemo || !demoStatus?.seeded}
+                onClick={() => setRemoveDemoOpen(true)}
+              >
+                {removingDemo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                Remove all
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -626,6 +608,32 @@ export default function Settings() {
             <p className="text-sm text-muted-foreground">
               Add staff accounts, assign roles, reset passwords, and remove inactive users from the MySQL database.
             </p>
+          </CardContent>
+        </Card>
+        <Card className="shadow-card">
+          <CardHeader>
+            <CardTitle className="text-base">Customer Price Categories & Discount Tiers</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Define customer pricing tiers and standard discounts. These automatically adjust item pricing when building estimates or quotations.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                { name: "Retail / Standard", discount: "0%", desc: "Default pricing for standard customers" },
+                { name: "Wholesale", discount: "15%", desc: "Bulk buyers & reseller tier" },
+                { name: "VIP Customer", discount: "10%", desc: "High-volume & key account tier" },
+                { name: "Government", discount: "8%", desc: "Public sector & institutional tier" },
+              ].map((tier) => (
+                <div key={tier.name} className="rounded-lg border border-border p-3 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-sm">{tier.name}</span>
+                    <Badge variant="outline" className="text-xs font-mono">{tier.discount} Off</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{tier.desc}</p>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
 
@@ -681,6 +689,16 @@ export default function Settings() {
           </CardContent>
         </Card>
       </div>
+
+      <DeleteConfirmDialog
+        open={removeDemoOpen}
+        onOpenChange={setRemoveDemoOpen}
+        title="Remove all demo data?"
+        description="This permanently deletes all seeded sample records. Your admin account and organization settings are kept."
+        confirmLabel="Remove all demo data"
+        loading={removingDemo}
+        onConfirm={() => void handleRemoveDemo()}
+      />
     </RoleGuard>
   );
 }

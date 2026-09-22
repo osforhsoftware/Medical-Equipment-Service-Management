@@ -34,6 +34,7 @@ import EstimatePreview from "./pages/app/EstimatePreview.tsx";
 import Sales from "./pages/app/Sales.tsx";
 import SalesNew from "./pages/app/SalesNew.tsx";
 import SalesOrderDetail from "./pages/app/SalesOrderDetail.tsx";
+import SalesEnquiries from "./pages/app/SalesEnquiries.tsx";
 import Jobs from "./pages/app/Jobs.tsx";
 import JobDetail from "./pages/app/JobDetail.tsx";
 import Inventory from "./pages/app/Inventory.tsx";
@@ -45,8 +46,7 @@ import PurchaseOrders from "./pages/app/PurchaseOrdersProfessional.tsx";
 import PurchaseOrderDetail from "./pages/app/PurchaseOrderDetail.tsx";
 import PurchaseReturns from "./pages/app/PurchaseReturns.tsx";
 import PurchaseReturnDetail from "./pages/app/PurchaseReturnDetail.tsx";
-import StockTransfers from "./pages/app/StockTransfers.tsx";
-import StockTransferDetail from "./pages/app/StockTransferDetail.tsx";
+
 import StockLedger from "./pages/app/StockLedger.tsx";
 import Billing from "./pages/app/BillingProfessional.tsx";
 import BillingJobDetail from "./pages/app/BillingJobDetail.tsx";
@@ -57,13 +57,18 @@ import QRTracking from "./pages/app/QRTracking.tsx";
 import AuditLogs from "./pages/app/AuditLogs.tsx";
 import Settings from "./pages/app/Settings.tsx";
 import UsersPage from "./pages/app/Users.tsx";
+import UserFormPage from "./pages/app/UserForm.tsx";
 import ServiceCatalog from "./pages/app/ServiceCatalog.tsx";
 import Projects from "./pages/app/Projects.tsx";
 import ProjectDetail from "./pages/app/ProjectDetail.tsx";
 import OfficeAssets from "./pages/app/OfficeAssets.tsx";
 import MasterData from "./pages/app/MasterData.tsx";
 import ExpensesCommissions from "./pages/app/ExpensesCommissions.tsx";
+import RFQs from "./pages/app/RFQs.tsx";
+import WarrantyClaims from "./pages/app/WarrantyClaims.tsx";
 
+import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
+// Portal pages retained for later re-enable — see docs/CUSTOMER_PORTAL.md
 import { PortalLayout } from "./pages/portal/PortalLayout.tsx";
 import PortalDashboard from "./pages/portal/PortalDashboard.tsx";
 import PortalEquipment from "./pages/portal/PortalEquipment.tsx";
@@ -98,6 +103,7 @@ const App = () => (
               <Route path="sales" element={<ModuleGuard module="Sales"><Sales /></ModuleGuard>} />
               <Route path="sales/new" element={<ModuleGuard module="Sales"><SalesNew /></ModuleGuard>} />
               <Route path="sales/orders/:id" element={<ModuleGuard module="Sales"><SalesOrderDetail /></ModuleGuard>} />
+              <Route path="sales-enquiries" element={<ModuleGuard module="Sales Enquiries"><SalesEnquiries /></ModuleGuard>} />
               <Route path="equipment" element={<ModuleGuard module="Equipment"><Equipment /></ModuleGuard>} />
               <Route path="equipment/:id" element={<ModuleGuard module="Equipment"><EquipmentDetail /></ModuleGuard>} />
               <Route path="service-requests" element={<ModuleGuard module="Service Tickets"><ServiceRequests /></ModuleGuard>} />
@@ -123,12 +129,13 @@ const App = () => (
               <Route path="stock-purchase-requests" element={<ModuleGuard module="Stock Purchase Requests"><StockPurchaseRequests /></ModuleGuard>} />
               <Route path="stock-purchase-requests/:id" element={<ModuleGuard module="Stock Purchase Requests"><StockPurchaseRequestDetail /></ModuleGuard>} />
               <Route path="suppliers" element={<ModuleGuard module="Suppliers"><Suppliers /></ModuleGuard>} />
+              <Route path="rfqs" element={<ModuleGuard module="Supplier RFQs"><RFQs /></ModuleGuard>} />
+              <Route path="warranty-claims" element={<ModuleGuard module="Warranty Claims"><WarrantyClaims /></ModuleGuard>} />
               <Route path="purchase-orders" element={<ModuleGuard module="Purchase Orders"><PurchaseOrders /></ModuleGuard>} />
               <Route path="purchase-orders/:id" element={<ModuleGuard module="Purchase Orders"><PurchaseOrderDetail /></ModuleGuard>} />
               <Route path="purchase-returns" element={<ModuleGuard module="Purchase Returns"><PurchaseReturns /></ModuleGuard>} />
               <Route path="purchase-returns/:id" element={<ModuleGuard module="Purchase Returns"><PurchaseReturnDetail /></ModuleGuard>} />
-              <Route path="stock-transfers" element={<ModuleGuard module="Stock Transfers"><StockTransfers /></ModuleGuard>} />
-              <Route path="stock-transfers/:id" element={<ModuleGuard module="Stock Transfers"><StockTransferDetail /></ModuleGuard>} />
+
               <Route path="stock-ledger" element={<ModuleGuard module="Stock Ledger"><StockLedger /></ModuleGuard>} />
               <Route path="billing" element={<ModuleGuard module="Billing"><ResponsivePage mobile={<MobileBilling />} desktop={<Billing />} /></ModuleGuard>} />
               <Route path="billing/jobs/:jobId" element={<ModuleGuard module="Billing"><BillingJobDetail /></ModuleGuard>} />
@@ -139,19 +146,25 @@ const App = () => (
               <Route path="qr-tracking" element={<ModuleGuard module="QR Tracking"><ResponsivePage mobile={<MobileQR />} desktop={<QRTracking />} /></ModuleGuard>} />
               <Route path="audit-logs" element={<ModuleGuard module="Audit Logs"><AuditLogs /></ModuleGuard>} />
               <Route path="users" element={<ModuleGuard module="Users"><UsersPage /></ModuleGuard>} />
+              <Route path="users/new" element={<ModuleGuard module="Users"><UserFormPage /></ModuleGuard>} />
+              <Route path="users/:id/edit" element={<ModuleGuard module="Users"><UserFormPage /></ModuleGuard>} />
               <Route path="master-data" element={<ModuleGuard module="Master Data"><MasterData /></ModuleGuard>} />
               <Route path="office-assets" element={<ModuleGuard module="Office Assets"><OfficeAssets /></ModuleGuard>} />
               <Route path="settings" element={<ModuleGuard module="Settings"><Settings /></ModuleGuard>} />
             </Route>
 
-            <Route path="/portal" element={<PortalLayout />}>
-              <Route index element={<PortalDashboard />} />
-              <Route path="equipment" element={<PortalEquipment />} />
-              <Route path="estimates" element={<PortalEstimates />} />
-              <Route path="estimates/:id/preview" element={<EstimatePreview />} />
-              <Route path="estimates/:id" element={<PortalEstimateDetail />} />
-              <Route path="history" element={<PortalHistory />} />
-            </Route>
+            {CUSTOMER_PORTAL_ENABLED ? (
+              <Route path="/portal" element={<PortalLayout />}>
+                <Route index element={<PortalDashboard />} />
+                <Route path="equipment" element={<PortalEquipment />} />
+                <Route path="estimates" element={<PortalEstimates />} />
+                <Route path="estimates/:id/preview" element={<EstimatePreview />} />
+                <Route path="estimates/:id" element={<PortalEstimateDetail />} />
+                <Route path="history" element={<PortalHistory />} />
+              </Route>
+            ) : (
+              <Route path="/portal/*" element={<Navigate to="/login" replace />} />
+            )}
 
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

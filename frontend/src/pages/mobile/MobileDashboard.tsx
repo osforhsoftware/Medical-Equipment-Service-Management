@@ -13,7 +13,6 @@ import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
-import { getUserRoles } from "@/lib/userRoles";
 import {
   filterQuickActionsByAccess,
   nextJobAction,
@@ -52,6 +51,7 @@ function matchesFilter(status: string, filter: string): boolean {
 
 function progressForStatus(status: string): number {
   if (status === "completed") return 100;
+  if (status === "delivery") return 95;
   if (status === "review") return 85;
   if (status === "partsPending") return 55;
   if (status === "inProgress") return 40;
@@ -64,7 +64,6 @@ export default function MobileDashboard() {
   const navigate = useNavigate();
   const unread = useMobileUnreadCount();
   const role = (user?.role ?? "engineer") as Role;
-  const userRoles = useMemo(() => (user ? getUserRoles(user) : [role]), [user, role]);
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [notifications, setNotifications] = useState<BackendNotification[]>([]);
@@ -101,8 +100,8 @@ export default function MobileDashboard() {
 
   const stats = useMemo(() => (data ? roleStats(role, data) : []), [data, role]);
   const actions = useMemo(
-    () => filterQuickActionsByAccess(roleQuickActions(role), userRoles, rbacMatrix),
-    [role, userRoles, rbacMatrix],
+    () => (user ? filterQuickActionsByAccess(roleQuickActions(role), user, rbacMatrix) : []),
+    [role, user, rbacMatrix],
   );
   const filterOptions = useMemo(() => roleFilterOptions(role), [role]);
   const pipelineStages = useMemo(() => rolePipelineStages(role), [role]);
@@ -201,30 +200,41 @@ export default function MobileDashboard() {
   }
 
   return (
-    <div className="mobile-page">
+    <div className="mobile-page space-y-4">
       <MobileHeader
         title={user?.name.split(" ")[0] ?? "Staff"}
         subtitle={roleLabel}
         badge={todayCount > 0 ? `Today · ${todayCount} job${todayCount !== 1 ? "s" : ""}` : "Field service hub"}
         unreadCount={unread}
         onNotifications={() => navigate("/app/notifications")}
+        onScan={() => navigate("/app/qr-tracking")}
         onQuickAction={() => navigate(actions.find((a) => a.primary)?.to ?? primaryListPath)}
         quickActionLabel="Quick action"
       />
+
+      {/* Integrated Mobile Search Bar — instant search for equipment, ticket, or job */}
+      <div>
+        <MobileSearchBar
+          value={search}
+          onChange={setSearch}
+          placeholder="Search assigned work, equipment, ticket..."
+          onScan={() => navigate("/app/qr-tracking")}
+        />
+      </div>
 
       {/* Overdue alert — staff must see this immediately */}
       {overdueCount > 0 && (
         <button
           type="button"
           onClick={() => navigate(roleOverduePath(role))}
-          className="mt-4 flex w-full items-center gap-3 rounded-[16px] border border-destructive/30 bg-destructive/8 px-4 py-3 text-left active:scale-[0.99]"
+          className="flex w-full items-center gap-3 rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-left active:scale-[0.99] shadow-xs"
         >
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-destructive">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-destructive text-destructive-foreground shadow-xs">
             <AlertTriangle className="h-5 w-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-destructive">{overdueCount} overdue item{overdueCount !== 1 ? "s" : ""}</p>
-            <p className="text-xs text-destructive/80">Tap to view assigned work needing attention</p>
+            <p className="text-sm font-bold text-destructive">{overdueCount} overdue item{overdueCount !== 1 ? "s" : ""}</p>
+            <p className="text-xs font-medium text-destructive/80">Tap to view assigned work needing immediate attention</p>
           </div>
           <ChevronRight className="h-4 w-4 shrink-0 text-destructive" />
         </button>
@@ -238,9 +248,14 @@ export default function MobileDashboard() {
         onViewAll={() => navigate("/app/notifications")}
       />
 
-      {/* Role stats — tap to filter queue */}
+      {/* Vyapar style 2x2 Gradient KPI Stat Tiles — tap to filter queue */}
       {data && (
-        <div className="mt-4">
+        <div>
+          <div className="mb-2 flex items-center justify-between px-0.5">
+            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Overview & Key Metrics
+            </p>
+          </div>
           <MobileStatGrid
             stats={stats}
             onStatClick={(stat) => {
@@ -254,11 +269,13 @@ export default function MobileDashboard() {
         </div>
       )}
 
-      {/* One-tap shortcuts for common staff tasks */}
-      <div className="mt-4">
-        <p className="mb-2 px-0.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Quick Actions
-        </p>
+      {/* Vyapar style Quick Action Grid for 1-tap staff operations */}
+      <div>
+        <div className="mb-2 flex items-center justify-between px-0.5">
+          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Quick Actions
+          </p>
+        </div>
         <MobileQuickActions actions={actions} onNavigate={navigate} />
       </div>
 
@@ -301,16 +318,7 @@ export default function MobileDashboard() {
         </div>
       )}
 
-      <div className="mt-4">
-        <MobileSearchBar
-          value={search}
-          onChange={setSearch}
-          placeholder="Search your assigned work…"
-          onScan={() => navigate("/app/qr-tracking")}
-        />
-      </div>
-
-      <div className="mt-3">
+      <div>
         <FilterPills
           options={filterOptions.map((o) => ({ ...o, count: filterCounts[o.value] }))}
           value={filter}

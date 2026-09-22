@@ -40,7 +40,7 @@ export function formatTransferStatus(status: string) {
   return status === "inTransit" ? "in-transit" : status;
 }
 
-export function formatDate(value: string | null | undefined) {
+export function formatDate(value: string | Date | null | undefined) {
   if (!value) return "—";
   return new Date(value).toLocaleDateString(undefined, {
     year: "numeric",

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ChevronDown, FileText, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, FileText, Loader2, ShieldCheck } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -28,8 +28,13 @@ import {
   type InvoiceLineInput,
 } from "@/lib/api";
 import { extraLineTotal, lineAmount, summarizeChargeGroups } from "@/lib/billingCharges";
-import { defaultDatePlusDays, formatCurrency } from "@/lib/format";
+import { defaultDatePlusDays, formatCurrency, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
+
+function toDateInput(value: string | null | undefined) {
+  if (!value) return "";
+  return value.slice(0, 10);
+}
 
 export default function BillingJobDetail() {
   const { jobId = "" } = useParams();
@@ -37,16 +42,27 @@ export default function BillingJobDetail() {
   const [context, setContext] = useState<BillingJobContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [warrantySaving, setWarrantySaving] = useState(false);
   const [dueAt, setDueAt] = useState(defaultDatePlusDays(30));
   const [additionalLines, setAdditionalLines] = useState<InvoiceLineInput[]>([]);
   const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
   const [catalog, setCatalog] = useState<BackendCatalogItem[]>([]);
+  const [warrantyForm, setWarrantyForm] = useState({
+    warrantyStart: "",
+    warrantyEnd: "",
+  });
 
   const load = useCallback(async () => {
     if (!jobId) return;
     setLoading(true);
     try {
-      setContext(await api.getBillingJobContext(jobId));
+      const next = await api.getBillingJobContext(jobId);
+      setContext(next);
+      const equipment = next.job.equipment;
+      setWarrantyForm({
+        warrantyStart: toDateInput(equipment?.warrantyStart),
+        warrantyEnd: toDateInput(equipment?.warrantyEnd),
+      });
     } catch (error) {
       toast({
         title: "Unable to load billing job",
@@ -98,14 +114,52 @@ export default function BillingJobDetail() {
     return summarizeChargeGroups([...estimateLines, ...extraLines, ...billingLines]);
   }, [context, additionalLines]);
 
+  const equipment = context?.job.equipment ?? null;
+  const equipmentWarrantyPayload = {
+    warrantyStart: warrantyForm.warrantyStart || null,
+    warrantyEnd: warrantyForm.warrantyEnd || null,
+  };
+
+  const saveWarranty = async () => {
+    if (!equipment) {
+      toast.error("No equipment is linked to this job.");
+      return;
+    }
+    setWarrantySaving(true);
+    try {
+      const updated = await api.updateEquipment(equipment.id, equipmentWarrantyPayload);
+      setContext((prev) =>
+        prev
+          ? {
+              ...prev,
+              job: {
+                ...prev.job,
+                equipment: updated,
+              },
+            }
+          : prev,
+      );
+      toast.success("Warranty updated on equipment");
+      await load();
+    } catch (error) {
+      toast.apiError(error, { fallback: "Unable to update warranty" });
+    } finally {
+      setWarrantySaving(false);
+    }
+  };
+
   const generateInvoice = async () => {
     setSaving(true);
     try {
+      if (equipment) {
+        await api.updateEquipment(equipment.id, equipmentWarrantyPayload).catch(() => undefined);
+      }
       const invoice = await api.createInvoiceFromJob(
         jobId,
         new Date(dueAt).toISOString(),
         "INR",
         additionalLines.filter((line) => line.description.trim()),
+        equipment ? equipmentWarrantyPayload : undefined,
       );
       toast({ title: "Final invoice generated", description: `Amount ${formatCurrency(invoice.total)}` });
       navigate(`/app/billing/invoices/${invoice.id}`);
@@ -127,7 +181,7 @@ export default function BillingJobDetail() {
 
         <PageHeader
           title={context ? `Billing review — ${context.job.reference}` : "Billing review"}
-          description="Review the estimate and engineer extras, add any remaining charges, then generate the final invoice."
+          description="Review the estimate and engineer extras, update warranty if needed, then generate the final invoice."
           actions={
             invoice ? (
               <Button variant="outline" asChild>
@@ -169,6 +223,67 @@ export default function BillingJobDetail() {
                     <BillingServiceNotes context={context} />
                   </CollapsibleContent>
                 </Collapsible>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ShieldCheck className="h-4 w-4" />
+                  Warranty on equipment
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {!equipment ? (
+                  <p className="text-sm text-muted-foreground">
+                    No equipment record is linked to this job. Warranty can still be maintained later from Equipment.
+                  </p>
+                ) : (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <InfoRow label="Equipment" value={equipment.name} />
+                      <InfoRow label="Warranty start" value={formatDate(equipment.warrantyStart)} />
+                      <InfoRow label="Warranty end" value={formatDate(equipment.warrantyEnd)} />
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid gap-2">
+                        <Label htmlFor="billing-warranty-start">Warranty start</Label>
+                        <Input
+                          id="billing-warranty-start"
+                          type="date"
+                          value={warrantyForm.warrantyStart}
+                          onChange={(e) => setWarrantyForm((prev) => ({ ...prev, warrantyStart: e.target.value }))}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="billing-warranty-end">Warranty end</Label>
+                        <Input
+                          id="billing-warranty-end"
+                          type="date"
+                          value={warrantyForm.warrantyEnd}
+                          onChange={(e) => setWarrantyForm((prev) => ({ ...prev, warrantyEnd: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <Button variant="outline" disabled={warrantySaving || Boolean(invoice)} onClick={() => void saveWarranty()}>
+                      {warrantySaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Save warranty
+                    </Button>
+                  </>
+                )}
+                {context.verification?.items?.length ? (
+                  <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Billing checklist</p>
+                    <ul className="grid gap-1 sm:grid-cols-2">
+                      {context.verification.items.map((item) => (
+                        <li key={item.key} className="flex items-center gap-2 text-sm">
+                          <StatusBadge status={item.passed ? "completed" : "pending"} />
+                          <span>{item.label}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
 

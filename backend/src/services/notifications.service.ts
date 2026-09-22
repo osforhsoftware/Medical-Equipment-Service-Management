@@ -119,15 +119,24 @@ export class NotificationsService {
       status === "inProgress"
         ? "In Progress"
         : status === "review"
-          ? "Review (awaiting approval)"
-          : status.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase());
+          ? "QA (awaiting check)"
+          : status === "delivery"
+            ? "Delivery"
+            : status.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase());
     await notificationsRepository.create(tenantId, {
       type: "job",
-      title: status === "review" ? "Job ready for review" : "Job updated",
+      title:
+        status === "review"
+          ? "Job ready for QA"
+          : status === "delivery"
+            ? "Job ready for delivery"
+            : "Job updated",
       body:
         status === "review"
-          ? `${reference} was submitted for coordinator/admin approval.`
-          : `${reference} moved to ${label}.`,
+          ? `${reference} was submitted for coordinator/admin QA.`
+          : status === "delivery"
+            ? `${reference} passed QA and is ready for delivery confirmation.`
+            : `${reference} moved to ${label}.`,
       recipientRole: "coordinator",
     });
   }

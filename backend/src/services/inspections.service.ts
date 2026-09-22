@@ -8,6 +8,8 @@ import {
 } from "@/services/workflow/serviceTicketStateMachine";
 import { validateInspectionSubmission } from "@/utils/inspectionValidation";
 import { ticketAssignmentService } from "@/services/ticketAssignment.service";
+import { normalizeAdditionalFields } from "@/lib/additionalFields";
+import { Prisma } from "@prisma/client";
 
 type RecommendedPartInput = {
   inventoryItemId: string;
@@ -24,6 +26,7 @@ type CreateInspectionData = {
   attachmentFileIds?: string[];
   attachments?: { fileId: string; caption?: string }[];
   recommendedParts?: RecommendedPartInput[];
+  additionalFields?: { label: string; value: string }[] | null;
   submit?: boolean;
 };
 
@@ -81,6 +84,7 @@ export class InspectionsService {
     if (!report) return null;
     return {
       ...report,
+      additionalFields: normalizeAdditionalFields(report.additionalFields) ?? [],
       reportedBy: await this.resolveReporterName(tenantId, report.reportedBy),
     };
   }
@@ -181,6 +185,11 @@ export class InspectionsService {
           ? existing.version + 1
           : existing?.version ?? 1;
 
+      const additionalFieldsJson =
+        data.additionalFields !== undefined
+          ? normalizeAdditionalFields(data.additionalFields) ?? Prisma.JsonNull
+          : undefined;
+
       const report = await tx.inspectionReport.upsert({
         where: { serviceRequestId },
         create: {
@@ -191,6 +200,7 @@ export class InspectionsService {
           reportedBy,
           submittedAt: submitting ? new Date() : null,
           version: 1,
+          ...(additionalFieldsJson !== undefined ? { additionalFields: additionalFieldsJson } : {}),
         },
         update: {
           findings: data.findings,
@@ -200,6 +210,7 @@ export class InspectionsService {
           reportedAt: new Date(),
           version,
           ...(submitting ? { submittedAt: new Date() } : {}),
+          ...(additionalFieldsJson !== undefined ? { additionalFields: additionalFieldsJson } : {}),
         },
       });
 
@@ -331,7 +342,11 @@ export class InspectionsService {
         },
       });
 
-      return { ...saved, partResults: submitting ? partResults : undefined };
+      return {
+        ...saved,
+        additionalFields: normalizeAdditionalFields(saved.additionalFields) ?? [],
+        partResults: submitting ? partResults : undefined,
+      };
     });
 
     if (submitting) {
@@ -341,7 +356,10 @@ export class InspectionsService {
       }
     }
 
-    return result;
+    return {
+      ...result,
+      reportedBy: await this.resolveReporterName(tenantId, result.reportedBy),
+    };
   }
 }
 

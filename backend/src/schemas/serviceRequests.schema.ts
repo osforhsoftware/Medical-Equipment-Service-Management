@@ -35,6 +35,16 @@ export const createServiceRequestSchema = z
     /** Create intake only supports Inspection Technician → Inspection flow. */
     role: z.literal("inspector").optional(),
     slaDue: z.string().optional(),
+    additionalFields: z
+      .array(
+        z.object({
+          label: z.string().trim().min(1).max(80),
+          value: z.string().trim().max(5000).default(""),
+        }),
+      )
+      .max(30)
+      .optional()
+      .nullable(),
   })
   .superRefine((data, ctx) => {
     if (data.type === "Other" && !data.typeOther?.trim()) {
@@ -65,6 +75,16 @@ export const updateServiceRequestSchema = z.object({
   assignedName: z.string().nullable().optional(),
   description: z.string().trim().max(500).optional(),
   timelineNote: z.string().trim().max(1000).optional(),
+  additionalFields: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(80),
+        value: z.string().trim().max(5000).default(""),
+      }),
+    )
+    .max(30)
+    .optional()
+    .nullable(),
 }).superRefine((data, ctx) => {
   if (data.type === "Other" && !data.typeOther?.trim()) {
     ctx.addIssue({
@@ -166,5 +186,15 @@ export const inspectionReportSchema = z.object({
       }),
     )
     .optional(),
+  additionalFields: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(80),
+        value: z.string().trim().max(5000).default(""),
+      }),
+    )
+    .max(30)
+    .optional()
+    .nullable(),
   submit: z.boolean().optional(),
 });

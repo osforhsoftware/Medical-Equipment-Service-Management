@@ -21,6 +21,7 @@ const canUpdate = requireRole("admin", "coordinator", "engineer");
 
 router.get("/", canRead, jobsController.getAll);
 router.get("/:id/activities", canRead, jobsController.getActivities);
+router.post("/:id/activities", canExecute, jobsController.addActivity);
 router.get("/:id", canRead, jobsController.getById);
 router.post("/", requireRole("admin", "coordinator"), validate(createJobSchema), jobsController.create);
 router.post("/:id/photos", canExecute, validate(uploadJobPhotosSchema), jobsController.uploadPhotos);
@@ -29,6 +30,6 @@ router.post("/:id/parts-requests", canExecute, validate(requestJobPartsSchema), 
 router.post("/:id/signature", canExecute, validate(captureJobSignatureSchema), jobsController.captureSignature);
 router.post("/:id/deduct-stock", canExecute, validate(deductJobStockSchema), jobsController.deductStock);
 router.put("/:id", canUpdate, validate(updateJobSchema), jobsController.update);
-router.delete("/:id", requireRole("admin"), jobsController.delete);
+router.delete("/:id", requireRole("admin", "coordinator"), jobsController.delete);
 
 export default router;

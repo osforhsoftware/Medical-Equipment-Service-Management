@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { Button } from "@/components/ui/button";
 import { api, type BackendEquipment } from "@/lib/api";
+import { warrantyTone } from "@/lib/equipmentWarranty";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useListingUrlState } from "@/hooks/useListingUrlState";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
@@ -72,11 +73,26 @@ export default function EquipmentPage() {
     staleTime: 30_000,
   });
 
-  const equipment = equipmentQuery.data?.data ?? [];
+  const equipment = useMemo(() => equipmentQuery.data?.data ?? [], [equipmentQuery.data?.data]);
   const pagination = equipmentQuery.data?.meta ?? EMPTY_PAGINATION_META;
   const customers = (customersQuery.data ?? []).filter((c) => c.status === "active");
   const categories = categoriesQuery.data ?? [];
   const conditions = conditionsQuery.data ?? [];
+
+  const assetTagsQuery = useQuery({
+    queryKey: ["equipment", "asset-tags"],
+    queryFn: () => api.listEquipmentOptions(),
+    staleTime: 30_000,
+    enabled: canManage,
+  });
+
+  const existingAssetTags = useMemo(
+    () => [
+      ...equipment.map((item) => item.assetTag),
+      ...(assetTagsQuery.data ?? []).map((item) => item.assetTag),
+    ],
+    [assetTagsQuery.data, equipment],
+  );
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<BackendEquipment | null>(null);
@@ -136,6 +152,31 @@ export default function EquipmentPage() {
       render: (e) => <StatusBadge status={e.condition} label={termLabel(conditions, e.condition)} />,
     },
     {
+      key: "warranty",
+      header: "Warranty",
+      render: (e) => {
+        const tone = warrantyTone(e);
+        const toneClass =
+          tone === "danger"
+            ? "text-destructive"
+            : tone === "warn"
+              ? "text-warning-foreground"
+              : tone === "ok"
+                ? "text-success"
+                : "text-muted-foreground";
+        const label = e.warrantyEnd
+          ? `Ends ${formatDate(e.warrantyEnd)}`
+          : e.warrantyStart
+            ? `Starts ${formatDate(e.warrantyStart)}`
+            : "No warranty dates";
+        return (
+          <div className="text-sm">
+            <p className={toneClass}>{label}</p>
+          </div>
+        );
+      },
+    },
+    {
       key: "lastServiceDate",
       header: "Last Service",
       render: (e) => (
@@ -176,7 +217,7 @@ export default function EquipmentPage() {
     <div className="space-y-6">
       <PageHeader
         title="Equipment & Machines"
-        description="QR-tracked medical devices with lifetime service history."
+        description="QR-tracked medical devices with lifetime service history. Register multiple units of the same product in one go."
         actions={
           canManage ? (
             <Button
@@ -236,7 +277,7 @@ export default function EquipmentPage() {
           if (!open) setEditing(null);
         }}
         equipment={editing}
-        existingAssetTags={equipment.map((item) => item.assetTag)}
+        existingAssetTags={existingAssetTags}
         onSaved={() => {
           void queryClient.invalidateQueries({ queryKey: ["equipment"] });
           void queryClient.invalidateQueries({ queryKey: ["customers", "options"] });

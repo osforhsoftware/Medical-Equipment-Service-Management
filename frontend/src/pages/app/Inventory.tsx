@@ -2,17 +2,19 @@ import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { Plus, PackageCheck, Loader2, AlertTriangle, Boxes, Lock } from "lucide-react";
+import { Plus, PackageCheck, Loader2, AlertTriangle, Boxes, Lock, Eye, Package, X, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { StatCard } from "@/components/shared/StatCard";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
@@ -42,6 +44,13 @@ import { EMPTY_PAGINATION_META } from "@/lib/listing";
 import { navItems } from "@/config/nav";
 import { INVENTORY_WRITE_ROLES } from "@/config/roles";
 import { activeTerms, termLabel } from "@/lib/taxonomy";
+import { parseCustomerAdditionalFields } from "@/lib/customerFields";
+import {
+  formatInventoryItemClass,
+  INVENTORY_ITEM_CLASS_OPTIONS,
+  inferItemClassFromCategory,
+  type InventoryItemClass,
+} from "@/lib/inventoryItemClass";
 import { userCanAccessModule } from "@/lib/userRoles";
 import { toast } from "@/lib/toast";
 
@@ -59,13 +68,16 @@ const inventorySchema = z
   .object({
     sku: z.string().trim().max(64, "SKU must be 64 characters or fewer."),
     name: fieldRules.requiredString("Name"),
+    itemClass: z.enum(["spare_part", "consumable"]),
     category: z.string(),
-    subcategory: z.string(),
     categoryOther: z.string().optional(),
-    subcategoryOther: z.string().optional(),
     description: fieldRules.optionalString(),
+    manufacturer: fieldRules.optionalString(),
+    compatibleModels: fieldRules.optionalString(),
     inStock: nonNegativeString("Quantity on hand"),
-    reorderLevel: nonNegativeString("Reorder threshold"),
+    reorderLevel: nonNegativeString("Min level"),
+    maxLevel: nonNegativeString("Max level"),
+    binLocation: fieldRules.optionalString(),
     unitCost: nonNegativeString("Cost price"),
     sellingPrice: nonNegativeString("Selling price"),
     deliveryCharge: nonNegativeString("Delivery charge"),
@@ -75,6 +87,13 @@ const inventorySchema = z
     supplierOther: z.string().optional(),
   })
   .superRefine((data, ctx) => {
+    if (!data.itemClass) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["itemClass"],
+        message: "Select Spare Parts or Consumables.",
+      });
+    }
     if (data.category === ADD_OPTION) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -89,20 +108,6 @@ const inventorySchema = z
         message: "Enter a category.",
       });
     }
-    if (data.subcategory === ADD_OPTION) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: data.subcategoryOther?.trim() ? ["subcategoryOther"] : ["subcategory"],
-        message: data.subcategoryOther?.trim() ? "Click Add to save the new subcategory." : "Enter a subcategory, or choose an existing one.",
-      });
-    }
-    if (data.subcategory === ADD_OPTION && !data.subcategoryOther?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["subcategoryOther"],
-        message: "Enter a subcategory.",
-      });
-    }
     if (data.supplierId === ADD_OPTION) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -115,13 +120,18 @@ const inventorySchema = z
 const emptyForm = {
   sku: "",
   name: "",
+  itemClass: "spare_part" as InventoryItemClass,
   category: "",
-  subcategory: "",
   categoryOther: "",
-  subcategoryOther: "",
   description: "",
+  manufacturer: "",
+  compatibleModels: "",
   inStock: "0",
   reorderLevel: "5",
+  maxLevel: "0",
+  binLocation: "",
+  trackBatches: false,
+  trackSerials: false,
   unitCost: "0",
   sellingPrice: "0",
   deliveryCharge: "0",
@@ -210,7 +220,7 @@ export default function Inventory() {
     listParams,
     setPage,
     setLimit,
-  } = useListingUrlState({ filterKeys: ["category"] });
+  } = useListingUrlState({ filterKeys: ["category", "itemClass"] });
 
   const debouncedSearch = useDebouncedValue(search);
   const queryParams = useMemo(
@@ -248,14 +258,18 @@ export default function Inventory() {
   const pagination = itemsQuery.data?.meta ?? EMPTY_PAGINATION_META;
   const statsItems = statsQuery.data?.data ?? items;
   const categories = activeTerms(categoriesQuery.data);
-  const subcategories = activeTerms(subcategoriesQuery.data);
   const suppliers = suppliersQuery.data ?? [];
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [addingTerm, setAddingTerm] = useState<"category" | "subcategory" | "supplier" | null>(null);
+  const [addingTerm, setAddingTerm] = useState<"category" | "supplier" | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [previewState, setPreviewState] = useState<{
+    title: string;
+    images: string[];
+    index: number;
+  } | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -270,13 +284,16 @@ export default function Inventory() {
   } = useFormValidation({
     fieldOrder: [
       "sku",
+      "itemClass",
       "category",
       "categoryOther",
-      "subcategory",
-      "subcategoryOther",
       "name",
+      "manufacturer",
+      "compatibleModels",
       "inStock",
       "reorderLevel",
+      "maxLevel",
+      "binLocation",
       "unitCost",
       "sellingPrice",
       "deliveryCharge",
@@ -292,11 +309,10 @@ export default function Inventory() {
   const lowStock = statsItems.filter((i) => i.inStock <= i.reorderLevel).length;
   const reserved = statsItems.reduce((s, i) => s + i.reserved, 0);
   const totalValue = statsItems.reduce((s, i) => s + i.inStock * Number(i.unitCost), 0);
+  const sparePartsValue = statsItems.filter((i) => i.itemClass === "spare_part").reduce((s, i) => s + i.inStock * Number(i.unitCost), 0);
+  const consumablesValue = statsItems.filter((i) => i.itemClass === "consumable").reduce((s, i) => s + i.inStock * Number(i.unitCost), 0);
 
   const selectedCategory = categories.find((term) => term.slug === form.category);
-  const subcategoryOptions = subcategories.filter(
-    (term) => !term.parentId || term.parentId === selectedCategory?.id,
-  );
 
   const categoryFilterOptions = useMemo(
     () => categories.map((term) => ({ label: term.name, value: term.slug })),
@@ -318,7 +334,7 @@ export default function Inventory() {
     if (!name) return;
     const existing = findExistingTerm(categoriesQuery.data ?? [], name);
     if (existing) {
-      const next = { ...form, category: existing.slug, categoryOther: "", subcategory: "" };
+      const next = { ...form, category: existing.slug, categoryOther: "" };
       setForm(next);
       clearError("category");
       clearError("categoryOther");
@@ -329,45 +345,13 @@ export default function Inventory() {
     try {
       const created = await api.createTaxonomy({ type: "inventory_category", name });
       await queryClient.invalidateQueries({ queryKey: ["taxonomy", "inventory_category"] });
-      const next = { ...form, category: created.slug, categoryOther: "", subcategory: "" };
+      const next = { ...form, category: created.slug, categoryOther: "" };
       setForm(next);
       clearError("category");
       clearError("categoryOther");
       toast({ title: "Category added", description: `"${created.name}" is now available in the dropdown.` });
     } catch (err) {
       toast.apiError(err, { fallback: "Unable to add category" });
-    } finally {
-      setAddingTerm(null);
-    }
-  };
-
-  const addSubcategory = async () => {
-    const name = form.subcategoryOther.trim();
-    if (!name || !selectedCategory) return;
-    const existing = findExistingTerm(subcategoryOptions, name);
-    if (existing) {
-      const next = { ...form, subcategory: existing.slug, subcategoryOther: "" };
-      setForm(next);
-      clearError("subcategory");
-      clearError("subcategoryOther");
-      toast({ title: "Subcategory selected", description: `"${existing.name}" is already in the list.` });
-      return;
-    }
-    setAddingTerm("subcategory");
-    try {
-      const created = await api.createTaxonomy({
-        type: "inventory_subcategory",
-        name,
-        parentId: selectedCategory.id,
-      });
-      await queryClient.invalidateQueries({ queryKey: ["taxonomy", "inventory_subcategory"] });
-      const next = { ...form, subcategory: created.slug, subcategoryOther: "" };
-      setForm(next);
-      clearError("subcategory");
-      clearError("subcategoryOther");
-      toast({ title: "Subcategory added", description: `"${created.name}" is now available in the dropdown.` });
-    } catch (err) {
-      toast.apiError(err, { fallback: "Unable to add subcategory" });
     } finally {
       setAddingTerm(null);
     }
@@ -418,11 +402,17 @@ export default function Inventory() {
       await api.createInventoryItem({
         sku: form.sku.trim(),
         name: form.name.trim(),
+        itemClass: form.itemClass,
         category: form.category,
-        subcategory: form.subcategory,
         description: form.description.trim() || null,
+        manufacturer: form.manufacturer.trim(),
+        compatibleModels: form.compatibleModels.trim() || null,
         inStock: Number(form.inStock) || 0,
         reorderLevel: Number(form.reorderLevel) || 0,
+        maxLevel: Number(form.maxLevel) || 0,
+        binLocation: form.binLocation.trim(),
+        trackBatches: form.trackBatches,
+        trackSerials: form.trackSerials,
         unitCost: Number(form.unitCost) || 0,
         sellingPrice: Number(form.sellingPrice) || 0,
         deliveryCharge: Number(form.deliveryCharge) || 0,
@@ -447,16 +437,77 @@ export default function Inventory() {
 
   const columns: Column<BackendInventoryItem>[] = [
     {
+      key: "image",
+      header: "Product",
+      render: (i) => {
+        const hasImage = Boolean(i.images && i.images.length > 0);
+        const firstImg = hasImage ? i.images![0] : null;
+        return (
+          <div className="flex items-center py-0.5">
+            <div
+              className={cn(
+                "group relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-muted/50 via-muted/30 to-background shadow-2xs transition-all duration-200 hover:border-primary/60 hover:shadow-xs",
+                hasImage ? "cursor-pointer" : ""
+              )}
+              title={hasImage ? "Click to view image preview" : "No product image"}
+              onClick={(e) => {
+                if (hasImage) {
+                  e.stopPropagation();
+                  setPreviewState({
+                    title: i.name,
+                    images: i.images!.map((img) => api.fileDownloadUrl(img.fileId)),
+                    index: 0,
+                  });
+                }
+              }}
+            >
+              {firstImg ? (
+                <>
+                  <img
+                    src={api.fileDownloadUrl(firstImg.fileId)}
+                    alt={i.name}
+                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
+                  />
+                  <div className="absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/25 flex items-center justify-center">
+                    <Eye className="h-4 w-4 text-white opacity-0 transition-opacity group-hover:opacity-100 drop-shadow-md" />
+                  </div>
+                  {i.images!.length > 1 && (
+                    <span className="absolute bottom-0.5 right-0.5 rounded-md bg-black/75 px-1 py-0.2 text-[9px] font-semibold text-white backdrop-blur-xs">
+                      +{i.images!.length - 1}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/10 via-primary/5 to-muted text-primary/70">
+                  <Package className="h-5 w-5 opacity-70" />
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
       key: "name",
       header: "Inventory Item",
       render: (i) => (
         <div>
-          <p className="font-medium">{i.name}</p>
-          <p className="font-mono text-xs text-muted-foreground">
-            {i.sku} · {termLabel(categoriesQuery.data, i.category)}
+          <p className="font-semibold text-foreground hover:text-primary transition-colors">{i.name}</p>
+          <p className="font-mono text-xs text-muted-foreground mt-0.5">
+            {i.sku} · {formatInventoryItemClass(i.itemClass)} · {termLabel(categoriesQuery.data, i.category)}
             {i.subcategory ? ` · ${termLabel(subcategoriesQuery.data, i.subcategory)}` : ""} · {i.unitOfMeasure ?? "pcs"}
           </p>
         </div>
+      ),
+    },
+    {
+      key: "itemClass",
+      header: "Class",
+      render: (i) => (
+        <Badge variant="secondary">{formatInventoryItemClass(i.itemClass)}</Badge>
       ),
     },
     {
@@ -487,16 +538,30 @@ export default function Inventory() {
     {
       key: "stockState",
       header: "Stock",
-      render: (i) =>
-        i.inStock <= i.reorderLevel ? (
-          <Badge className="gap-1 bg-warning/15 text-warning-foreground hover:bg-warning/15">
-            <AlertTriangle className="h-3 w-3" /> Low
-          </Badge>
-        ) : (
-          <Badge className="gap-1 bg-success/12 text-success hover:bg-success/12">
-            <PackageCheck className="h-3 w-3" /> OK
-          </Badge>
-        ),
+      render: (i) => {
+        const fields = parseCustomerAdditionalFields(i.additionalFields);
+        const damaged = fields
+          .filter((f) => f.label === "Damaged Stock")
+          .reduce((sum, f) => sum + (Number(f.value.split(" ")[0]) || 0), 0);
+        return (
+          <div className="flex flex-col gap-1 items-start">
+            {i.inStock <= i.reorderLevel ? (
+              <Badge className="gap-1 bg-warning/15 text-warning-foreground hover:bg-warning/15">
+                <AlertTriangle className="h-3 w-3" /> Low
+              </Badge>
+            ) : (
+              <Badge className="gap-1 bg-success/12 text-success hover:bg-success/12">
+                <PackageCheck className="h-3 w-3" /> OK
+              </Badge>
+            )}
+            {damaged > 0 && (
+              <Badge variant="destructive" className="text-[10px] py-0">
+                🔴 {damaged} Damaged
+              </Badge>
+            )}
+          </div>
+        );
+      },
     },
     { key: "sellingPrice", header: "Sell", render: (i) => <span className="text-sm">{formatCurrency(i.sellingPrice ?? 0)}</span> },
     { key: "unitCost", header: "Cost", render: (i) => <span className="text-sm">{formatCurrency(i.unitCost)}</span> },
@@ -517,10 +582,11 @@ export default function Inventory() {
             ) : undefined
           }
         />
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Total SKUs" value={String(pagination.total)} icon={Boxes} accent="primary" />
           <StatCard label="Reserved Units" value={String(reserved)} icon={Lock} accent="accent" />
-          <StatCard label="Stock Value" value={formatCurrencyShort(totalValue)} icon={PackageCheck} accent="success" />
+          <StatCard label="Spare Parts Value" value={formatCurrencyShort(sparePartsValue)} icon={PackageCheck} accent="success" />
+          <StatCard label="Consumables Value" value={formatCurrencyShort(consumablesValue)} icon={PackageCheck} accent="info" />
         </div>
         {lowStock > 0 && (
           <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm text-warning-foreground">
@@ -539,7 +605,14 @@ export default function Inventory() {
           emptyHint="Try changing your search or filters."
           filterValues={filters}
           onFilterChange={setFilter}
-          filters={[{ key: "category", label: "Category", options: categoryFilterOptions }]}
+          filters={[
+            {
+              key: "itemClass",
+              label: "Class",
+              options: INVENTORY_ITEM_CLASS_OPTIONS.map((o) => ({ label: o.label, value: o.value })),
+            },
+            { key: "category", label: "Category", options: categoryFilterOptions },
+          ]}
           pagination={pagination}
           onPageChange={setPage}
           onLimitChange={setLimit}
@@ -573,14 +646,28 @@ export default function Inventory() {
                   onChange={(e) => setImageFiles(Array.from(e.target.files ?? []))}
                 />
                 {imageFiles.length > 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    {imageFiles.length} file{imageFiles.length === 1 ? "" : "s"} selected
-                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {imageFiles.map((file, idx) => {
+                      const url = URL.createObjectURL(file);
+                      return (
+                        <div key={idx} className="group relative h-14 w-14 overflow-hidden rounded-lg border border-border bg-muted">
+                          <img src={url} alt={file.name} className="h-full w-full object-cover" />
+                          <button
+                            type="button"
+                            className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                            onClick={() => setImageFiles((prev) => prev.filter((_, i) => i !== idx))}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 ) : null}
               </div>
               <div className="grid gap-2" data-field="sku">
                 <Label htmlFor="inventory-sku" className={shouldShow("sku") ? "text-destructive" : undefined}>
-                  SKU / Part Number
+                  Part ID / SKU
                 </Label>
                 <Input
                   id="inventory-sku"
@@ -597,95 +684,99 @@ export default function Inventory() {
                 />
                 {shouldShow("sku") && <FormFieldError field="sku" message={errors.sku} />}
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2" data-field="category">
-                  <div className="flex items-center justify-between gap-2">
-                    <Label className={shouldShow("category") ? "text-destructive" : undefined}>
-                      Category
-                    </Label>
-                    {canManageMasterData ? (
-                      <Link to="/app/master-data?type=inventory_category" className="text-xs text-primary hover:underline">
-                        Manage
-                      </Link>
-                    ) : null}
-                  </div>
-                  <Select
-                    value={form.category || undefined}
-                    onValueChange={(v) => {
-                      const next = {
-                        ...form,
-                        category: v,
-                        subcategory: v === ADD_OPTION ? "" : "",
-                        categoryOther: v === ADD_OPTION ? form.categoryOther : "",
-                      };
-                      setForm(next);
-                      clearError("category");
-                      if (v !== ADD_OPTION) clearError("categoryOther");
-                      handleChange("category", next);
-                    }}
-                  >
-                    <SelectTrigger
-                      id="category"
-                      className={fieldErrorClass(shouldShow("category"))}
-                      {...fieldAria("category", shouldShow("category") ? errors.category : null)}
-                    >
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map((c) => (
-                        <SelectItem key={c.id} value={c.slug}>
-                          {c.name}
-                        </SelectItem>
-                      ))}
-                      <SelectItem value={ADD_OPTION}>+ Add new category</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {shouldShow("category") && <FormFieldError field="category" message={errors.category} />}
+              <div className="grid gap-2" data-field="itemClass">
+                <Label className={shouldShow("itemClass") ? "text-destructive" : undefined}>
+                  Category
+                  <RequiredMark />
+                </Label>
+                <Select
+                  value={form.itemClass}
+                  onValueChange={(v) => {
+                    const itemClass = v as InventoryItemClass;
+                    const suggestedCategory =
+                      itemClass === "consumable"
+                        ? categories.find((c) => c.slug === "consumables")?.slug ?? form.category
+                        : form.category === "consumables"
+                          ? categories.find((c) => c.slug === "spare-parts")?.slug ?? ""
+                          : form.category;
+                    const next = {
+                      ...form,
+                      itemClass,
+                      category: suggestedCategory,
+                    };
+                    setForm(next);
+                    clearError("itemClass");
+                    handleChange("itemClass", next);
+                  }}
+                >
+                  <SelectTrigger className={fieldErrorClass(shouldShow("itemClass"))}>
+                    <SelectValue placeholder="Spare Parts or Consumables" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {INVENTORY_ITEM_CLASS_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Spare Parts or Consumables. Technical category options stay available below.
+                </p>
+                {shouldShow("itemClass") && <FormFieldError field="itemClass" message={errors.itemClass} />}
+              </div>
+              <div className="grid gap-2" data-field="category">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className={shouldShow("category") ? "text-destructive" : undefined}>
+                    Technical category
+                  </Label>
+                  {canManageMasterData ? (
+                    <Link to="/app/master-data?type=inventory_category" className="text-xs text-primary hover:underline">
+                      Manage
+                    </Link>
+                  ) : null}
                 </div>
-                <div className="grid gap-2" data-field="subcategory">
-                  <div className="flex items-center justify-between gap-2">
-                    <Label className={shouldShow("subcategory") ? "text-destructive" : undefined}>
-                      Subcategory
-                    </Label>
-                    {canManageMasterData ? (
-                      <Link to="/app/master-data?type=inventory_subcategory" className="text-xs text-primary hover:underline">
-                        Manage
-                      </Link>
-                    ) : null}
-                  </div>
-                  <Select
-                    value={form.subcategory || undefined}
-                    disabled={!selectedCategory}
-                    onValueChange={(v) => {
-                      const next = {
-                        ...form,
-                        subcategory: v,
-                        subcategoryOther: v === ADD_OPTION ? form.subcategoryOther : "",
-                      };
-                      setForm(next);
-                      clearError("subcategory");
-                      if (v !== ADD_OPTION) clearError("subcategoryOther");
-                      handleChange("subcategory", next);
-                    }}
+                <Select
+                  value={form.category || undefined}
+                  onValueChange={(v) => {
+                    const next = {
+                      ...form,
+                      category: v,
+                      categoryOther: v === ADD_OPTION ? form.categoryOther : "",
+                      itemClass:
+                        v === ADD_OPTION
+                          ? form.itemClass
+                          : inferItemClassFromCategory(v) === "consumable"
+                            ? "consumable"
+                            : form.itemClass === "consumable" && v !== "consumables"
+                              ? form.itemClass
+                              : form.itemClass,
+                    };
+                    if (v !== ADD_OPTION && v === "consumables") next.itemClass = "consumable";
+                    if (v !== ADD_OPTION && v === "spare-parts") next.itemClass = "spare_part";
+                    setForm(next);
+                    clearError("category");
+                    if (v !== ADD_OPTION) clearError("categoryOther");
+                    handleChange("category", next);
+                  }}
+                >
+                  <SelectTrigger
+                    id="category"
+                    className={fieldErrorClass(shouldShow("category"))}
+                    {...fieldAria("category", shouldShow("category") ? errors.category : null)}
                   >
-                    <SelectTrigger
-                      id="subcategory"
-                      className={fieldErrorClass(shouldShow("subcategory"))}
-                      {...fieldAria("subcategory", shouldShow("subcategory") ? errors.subcategory : null)}
-                    >
-                      <SelectValue placeholder={selectedCategory ? "Select subcategory" : "Select a category first"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {subcategoryOptions.map((c) => (
-                        <SelectItem key={c.id} value={c.slug}>
-                          {c.name}
-                        </SelectItem>
-                      ))}
-                      <SelectItem value={ADD_OPTION}>+ Add new subcategory</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {shouldShow("subcategory") && <FormFieldError field="subcategory" message={errors.subcategory} />}
-                </div>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((c) => (
+                      <SelectItem key={c.id} value={c.slug}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={ADD_OPTION}>+ Add new category</SelectItem>
+                  </SelectContent>
+                </Select>
+                {shouldShow("category") && <FormFieldError field="category" message={errors.category} />}
               </div>
               {form.category === ADD_OPTION && (
                 <InlineAddTerm
@@ -702,24 +793,6 @@ export default function Inventory() {
                     handleChange("categoryOther", next);
                   }}
                   onAdd={() => void addCategory()}
-                />
-              )}
-              {form.subcategory === ADD_OPTION && (
-                <InlineAddTerm
-                  id="subcategoryOther"
-                  label="Add new subcategory"
-                  value={form.subcategoryOther}
-                  placeholder="e.g. Probes, Filters"
-                  error={errors.subcategoryOther}
-                  showError={shouldShow("subcategoryOther")}
-                  disabled={!selectedCategory}
-                  adding={addingTerm === "subcategory"}
-                  onChange={(value) => {
-                    const next = { ...form, subcategoryOther: value };
-                    setForm(next);
-                    handleChange("subcategoryOther", next);
-                  }}
-                  onAdd={() => void addSubcategory()}
                 />
               )}
               <div className="grid gap-2" data-field="name">
@@ -745,20 +818,51 @@ export default function Inventory() {
                 <Label htmlFor="inventory-description">Description</Label>
                 <Textarea id="inventory-description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
               </div>
-              <div className="grid gap-2">
-                <Label>Unit of measure</Label>
-                <Select value={form.unitOfMeasure} onValueChange={(v) => setForm({ ...form, unitOfMeasure: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {UOM.map((u) => (
-                      <SelectItem key={u} value={u}>
-                        {u}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2" data-field="manufacturer">
+                  <Label htmlFor="inventory-manufacturer">Manufacturer</Label>
+                  <Input
+                    id="inventory-manufacturer"
+                    value={form.manufacturer}
+                    onChange={(e) => {
+                      const next = { ...form, manufacturer: e.target.value };
+                      setForm(next);
+                      handleChange("manufacturer", next);
+                    }}
+                    onBlur={() => handleBlur("manufacturer", form)}
+                    placeholder="e.g. Siemens"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Stock unit</Label>
+                  <Select value={form.unitOfMeasure} onValueChange={(v) => setForm({ ...form, unitOfMeasure: v })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {UOM.map((u) => (
+                        <SelectItem key={u} value={u}>
+                          {u}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid gap-2" data-field="compatibleModels">
+                <Label htmlFor="inventory-compatible">Compatible models</Label>
+                <Textarea
+                  id="inventory-compatible"
+                  value={form.compatibleModels}
+                  onChange={(e) => {
+                    const next = { ...form, compatibleModels: e.target.value };
+                    setForm(next);
+                    handleChange("compatibleModels", next);
+                  }}
+                  onBlur={() => handleBlur("compatibleModels", form)}
+                  rows={2}
+                  placeholder="e.g. Magnetom Vida, Magnetom Sola"
+                />
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="grid gap-2" data-field="inStock">
@@ -780,7 +884,7 @@ export default function Inventory() {
                   {shouldShow("inStock") && <FormFieldError field="inStock" message={errors.inStock} />}
                 </div>
                 <div className="grid gap-2" data-field="reorderLevel">
-                  <Label htmlFor="inventory-reorder">Reorder threshold</Label>
+                  <Label htmlFor="inventory-reorder">Min/max level (min)</Label>
                   <Input
                     id="inventory-reorder"
                     type="number"
@@ -797,8 +901,42 @@ export default function Inventory() {
                   />
                   {shouldShow("reorderLevel") && <FormFieldError field="reorderLevel" message={errors.reorderLevel} />}
                 </div>
+                <div className="grid gap-2" data-field="maxLevel">
+                  <Label htmlFor="inventory-max">Min/max level (max)</Label>
+                  <Input
+                    id="inventory-max"
+                    type="number"
+                    min={0}
+                    value={form.maxLevel}
+                    onChange={(e) => {
+                      const next = { ...form, maxLevel: e.target.value };
+                      setForm(next);
+                      handleChange("maxLevel", next);
+                    }}
+                    onBlur={() => handleBlur("maxLevel", form)}
+                    className={fieldErrorClass(shouldShow("maxLevel"))}
+                    {...fieldAria("maxLevel", shouldShow("maxLevel") ? errors.maxLevel : null)}
+                  />
+                  {shouldShow("maxLevel") && <FormFieldError field="maxLevel" message={errors.maxLevel} />}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2" data-field="binLocation">
+                  <Label htmlFor="inventory-bin">Bin/location</Label>
+                  <Input
+                    id="inventory-bin"
+                    value={form.binLocation}
+                    onChange={(e) => {
+                      const next = { ...form, binLocation: e.target.value };
+                      setForm(next);
+                      handleChange("binLocation", next);
+                    }}
+                    onBlur={() => handleBlur("binLocation", form)}
+                    placeholder="e.g. A-12-03"
+                  />
+                </div>
                 <div className="grid gap-2" data-field="unitCost">
-                  <Label htmlFor="inventory-cost">Cost price</Label>
+                  <Label htmlFor="inventory-cost">Cost / selling price (cost)</Label>
                   <Input
                     id="inventory-cost"
                     type="number"
@@ -818,7 +956,7 @@ export default function Inventory() {
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="grid gap-2" data-field="sellingPrice">
-                  <Label htmlFor="inventory-selling">Selling price</Label>
+                  <Label htmlFor="inventory-selling">Cost / selling price (selling)</Label>
                   <Input
                     id="inventory-selling"
                     type="number"
@@ -867,6 +1005,29 @@ export default function Inventory() {
                       <SelectItem value="perUnit">Per unit</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+              </div>
+              <div className="space-y-3 rounded-lg border border-border p-3">
+                <p className="text-sm font-medium">Batch / serial tracking</p>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="track-batches"
+                    checked={form.trackBatches}
+                    onCheckedChange={(checked) => setForm({ ...form, trackBatches: checked === true })}
+                  />
+                  <Label htmlFor="track-batches" className="font-normal">
+                    Track batches
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="track-serials"
+                    checked={form.trackSerials}
+                    onCheckedChange={(checked) => setForm({ ...form, trackSerials: checked === true })}
+                  />
+                  <Label htmlFor="track-serials" className="font-normal">
+                    Track serial numbers
+                  </Label>
                 </div>
               </div>
               <div className="grid gap-2">
@@ -928,6 +1089,91 @@ export default function Inventory() {
             </form>
           </DialogContent>
         </Dialog>
+
+        {previewState ? (
+          <Dialog open={Boolean(previewState)} onOpenChange={(open) => !open && setPreviewState(null)}>
+            <DialogContent className="sm:max-w-xl p-0 overflow-hidden bg-background border-border">
+              <DialogHeader className="p-4 border-b border-border flex flex-row items-center justify-between">
+                <div>
+                  <DialogTitle className="text-base font-semibold">{previewState.title}</DialogTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Image {previewState.index + 1} of {previewState.images.length}
+                  </p>
+                </div>
+              </DialogHeader>
+              <div className="relative flex items-center justify-center min-h-[340px] max-h-[520px] bg-black/95 p-4">
+                <img
+                  src={previewState.images[previewState.index]}
+                  alt={previewState.title}
+                  className="max-h-[480px] max-w-full rounded-md object-contain shadow-2xl"
+                />
+                {previewState.images.length > 1 ? (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/60 border-white/20 text-white hover:bg-black/80"
+                      onClick={() =>
+                        setPreviewState((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                index: (prev.index - 1 + prev.images.length) % prev.images.length,
+                              }
+                            : null
+                        )
+                      }
+                    >
+                      <ChevronLeft className="h-5 w-5" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/60 border-white/20 text-white hover:bg-black/80"
+                      onClick={() =>
+                        setPreviewState((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                index: (prev.index + 1) % prev.images.length,
+                              }
+                            : null
+                        )
+                      }
+                    >
+                      <ChevronRight className="h-5 w-5" />
+                    </Button>
+                  </>
+                ) : null}
+              </div>
+              <div className="p-3 border-t border-border flex justify-between items-center bg-muted/30">
+                <div className="flex gap-2 overflow-x-auto">
+                  {previewState.images.map((url, i) => (
+                    <button
+                      key={url}
+                      type="button"
+                      onClick={() => setPreviewState((prev) => (prev ? { ...prev, index: i } : null))}
+                      className={cn(
+                        "h-10 w-10 overflow-hidden rounded-lg border transition-all cursor-pointer",
+                        i === previewState.index ? "border-primary ring-2 ring-primary/30" : "border-border opacity-60 hover:opacity-100"
+                      )}
+                    >
+                      <img src={url} alt="" className="h-full w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  onClick={() => window.open(previewState.images[previewState.index], "_blank")}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" /> Open original
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        ) : null}
       </div>
     </RoleGuard>
   );

@@ -152,12 +152,8 @@ export function ProfessionalDocument({
       <div className="doc-sheet">
         <header className="doc-header">
           <div className="doc-brand">
-            <div className="doc-logo">
-              {settings?.logoUrl ? (
-                <img src={settings.logoUrl} alt="" />
-              ) : (
-                <MesmsLogo size="lg" className="h-12 max-w-[3.5rem]" />
-              )}
+            <div className="doc-logo flex items-center">
+              <MesmsLogo size="sm" variant="horizontal" customLogoUrl={settings?.logoUrl} />
             </div>
             <div className="doc-company">
               <p className="doc-company-name">{company}</p>

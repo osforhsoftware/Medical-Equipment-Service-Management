@@ -12,7 +12,8 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
-import type { Role } from "@/data/types";
+import type { AppUser, Role } from "@/data/types";
+import { userCanAccessModule } from "@/lib/userRoles";
 
 export interface MobileNavTab {
   id: string;
@@ -47,6 +48,7 @@ const MOBILE_NAV_ORDER: Record<Role, string[]> = {
   engineer: ["home", "jobs", "scan", "alerts", "profile"],
   inventory: ["home", "inventory", "scan", "alerts", "profile"],
   billing: ["home", "billing", "sales", "alerts", "profile"],
+  qa: ["home", "jobs", "alerts", "profile"],
   customer: ["home", "profile"],
 };
 
@@ -54,8 +56,10 @@ function canAccessModule(
   module: string | undefined,
   roles: Role[],
   rbacMatrix: Record<string, Role[]>,
+  user?: AppUser,
 ): boolean {
   if (!module) return true;
+  if (user) return userCanAccessModule(user, module, rbacMatrix);
   const allowed = rbacMatrix[module];
   return allowed ? roles.some((role) => allowed.includes(role)) : true;
 }
@@ -63,6 +67,7 @@ function canAccessModule(
 export function getMobileNavTabs(
   roleOrRoles: Role | Role[],
   rbacMatrix: Record<string, Role[]>,
+  user?: AppUser,
 ): MobileNavTab[] {
   const roles = Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles];
   const primary = roles[0] ?? "engineer";
@@ -76,7 +81,7 @@ export function getMobileNavTabs(
       if (seen.has(id) || tabs.length >= 5) continue;
       const tab = MOBILE_NAV_TABS.find((entry) => entry.id === id);
       if (!tab) continue;
-      if (tab.id !== "profile" && !canAccessModule(tab.module, roles, rbacMatrix)) continue;
+      if (tab.id !== "profile" && !canAccessModule(tab.module, roles, rbacMatrix, user)) continue;
       seen.add(id);
       tabs.push(tab);
     }
@@ -96,9 +101,15 @@ export function isMobileTabActive(pathname: string, tabTo: string): boolean {
 }
 
 /** Roles that may create service tickets from the mobile FAB. */
-export function canCreateFromMobileFab(roles: Role | Role[], rbacMatrix: Record<string, Role[]>): boolean {
+export function canCreateFromMobileFab(
+  roles: Role | Role[],
+  rbacMatrix: Record<string, Role[]>,
+  user?: AppUser,
+): boolean {
   const userRoles = Array.isArray(roles) ? roles : [roles];
   return userRoles.some(
-    (role) => canAccessModule("Service Tickets", [role], rbacMatrix) && ["admin", "coordinator"].includes(role),
+    (role) =>
+      canAccessModule("Service Tickets", [role], rbacMatrix, user) &&
+      ["admin", "coordinator"].includes(role),
   );
 }

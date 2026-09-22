@@ -12,6 +12,7 @@ import type { BackendCatalogItem, BackendInventoryItem, EstimateLineInput } from
 import { ESTIMATE_LINE_TYPES, formatLineType, lineTotal, newEstimateLine } from "@/lib/estimates";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { MarginWarningBadge } from "@/components/shared/InventoryHelpers";
 
 const LINE_GRID =
   "grid grid-cols-[minmax(0,1.5fr)_8.5rem_5.5rem_7rem_5.5rem_6.5rem_7.5rem] items-start gap-x-2";
@@ -70,6 +71,8 @@ export function EstimateItemsTable({
       description: item.name,
       partNumber: item.sku,
       unitPrice: Number(item.sellingPrice ?? item.unitCost) + delivery / Math.max(qty, 1),
+      // Store cost price for margin warnings
+      costPrice: Number(item.unitCost),
     });
   };
 
@@ -190,15 +193,27 @@ export function EstimateItemsTable({
                   </div>
                   <div className="min-w-0">
                     {editable ? (
-                      <Input
-                        type="number"
-                        min={0}
-                        size={1}
-                        className={numberInputClass}
-                        value={line.unitPrice}
-                        onChange={(e) => updateLine(index, { unitPrice: Number(e.target.value) || 0 })}
-                        aria-label={`Line ${index + 1} unit price`}
-                      />
+                      <div className="space-y-1">
+                        <Input
+                          type="number"
+                          min={0}
+                          size={1}
+                          className={numberInputClass}
+                          value={line.unitPrice}
+                          onChange={(e) => updateLine(index, { unitPrice: Number(e.target.value) || 0 })}
+                          aria-label={`Line ${index + 1} unit price`}
+                        />
+                        {/* Margin warning shown when inventory cost is known */}
+                        {(line as EstimateLineInput & { costPrice?: number }).costPrice !== undefined &&
+                          (line as EstimateLineInput & { costPrice?: number }).costPrice! > 0 && (
+                          <MarginWarningBadge
+                            unitPrice={line.unitPrice}
+                            unitCost={(line as EstimateLineInput & { costPrice?: number }).costPrice!}
+                            quantity={line.quantity}
+                            minMarginPct={10}
+                          />
+                        )}
+                      </div>
                     ) : (
                       <span className="block py-2 pr-2 text-right tabular-nums">{formatCurrency(line.unitPrice)}</span>
                     )}
