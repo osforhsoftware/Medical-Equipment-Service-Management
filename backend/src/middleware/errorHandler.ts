@@ -56,6 +56,25 @@ export const errorHandler = (
       res.status(404).json(failure("Record not found"));
       return;
     }
+    // P2021 = table does not exist; P2022 = column missing (pending/failed migrations).
+    if (err.code === "P2021" || err.code === "P2022") {
+      const column = typeof err.meta?.column === "string" ? err.meta.column : null;
+      const table = typeof err.meta?.table === "string" ? err.meta.table : null;
+      const detail =
+        column
+          ? `missing column: ${column}`
+          : table
+            ? `missing table: ${table}`
+            : null;
+      res.status(503).json(
+        failure(
+          detail
+            ? `Database schema is out of date (${detail}). Run pending migrations on the server.`
+            : "Database schema is out of date. Run pending migrations on the server.",
+        ),
+      );
+      return;
+    }
     res.status(400).json(failure(`Database error: ${err.code}`));
     return;
   }

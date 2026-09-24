@@ -92,7 +92,12 @@ export default function WarrantyClaims() {
     status: "approved",
   });
 
-  const { data: claims = [], isLoading } = useQuery<WarrantyClaimData[]>({
+  const {
+    data: claims = [],
+    isLoading,
+    isError,
+    error: loadError,
+  } = useQuery<WarrantyClaimData[]>({
     queryKey: ["warranty-claims"],
     queryFn: async () => {
       const res = await api.get<WarrantyClaimData[]>("/warranty-claims");
@@ -109,8 +114,14 @@ export default function WarrantyClaims() {
     }
     try {
       await api.post("/warranty-claims", {
-        ...form,
-        equipmentId: form.equipmentId || "EQUIP-GENERIC",
+        equipmentId: form.equipmentId.trim() || "EQUIP-GENERIC",
+        equipmentName: form.equipmentName.trim(),
+        customerName: form.customerName.trim(),
+        serviceRequestId: form.serviceRequestId.trim() || null,
+        underWarranty: form.underWarranty,
+        isPhysicalDamage: form.isPhysicalDamage,
+        componentCovered: form.componentCovered,
+        inspectorNotes: form.inspectorNotes.trim() || null,
       });
       toast.success("Warranty claim logged successfully");
       setCreateOpen(false);
@@ -160,7 +171,7 @@ export default function WarrantyClaims() {
   };
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "inspector", "estimator", "sales", "billing", "engineer"]}>
+    <RoleGuard roles={["admin", "coordinator", "inspector", "estimator", "sales", "billing", "engineer", "qa"]}>
       <div className="space-y-5">
         <PageHeader
           title="Warranty Claims"
@@ -231,6 +242,21 @@ export default function WarrantyClaims() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
+        ) : isError ? (
+          <Card className="border-destructive/40">
+            <CardContent className="py-12 text-center space-y-3">
+              <AlertTriangle className="mx-auto h-10 w-10 text-destructive/70" />
+              <p className="font-medium text-foreground">Could not load warranty claims</p>
+              <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                {loadError instanceof Error
+                  ? loadError.message
+                  : "The server rejected the request. Pending database migrations are a common cause."}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => refetch()}>
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
         ) : filtered.length === 0 ? (
           <Card>
             <CardContent className="py-16 text-center">
