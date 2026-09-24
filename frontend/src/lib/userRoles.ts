@@ -21,7 +21,11 @@ export function userCanAccessModule(
   if (!getUserRoles(user).some((role) => allowed.includes(role))) return false;
 
   const override = user.permissions?.modules?.[module];
-  if (override === "none") return false;
+  if (override === "none") {
+    // Older estimator records stored Inspections as Hidden before this desk could view reports.
+    if (module === "Inspections" && getUserRoles(user).includes("estimator")) return true;
+    return false;
+  }
   return true;
 }
 

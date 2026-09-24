@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { Camera, ClipboardList, Loader2, PackageMinus, Pencil, PlusCircle, Trash2, UserPlus, Wrench } from "lucide-react";
+import { Camera, ClipboardList, Download, Loader2, PackageMinus, Pencil, PlusCircle, Trash2, UserPlus, Wrench } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
@@ -19,6 +19,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { JobWorkReportPanel } from "@/components/jobs/JobWorkReportPanel";
 import { pickWorkReportLog, useJobWorkReportEditor } from "@/components/jobs/useJobWorkReportEditor";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,7 +30,9 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/AuthContext";
-import { JOB_CREATE_ROLES } from "@/config/roles";
+import { useSettings } from "@/context/SettingsContext";
+import { JOB_CREATE_ROLES, QA_APPROVER_ROLES, SERVICE_BILLING_ROLES, ESTIMATE_READ_ROLES } from "@/config/roles";
+import { userCanAccessPath } from "@/lib/userRoles";
 import {
   api,
   ApiError,
@@ -57,6 +60,7 @@ import {
 } from "@/lib/jobStages";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
+import { downloadServiceReportPdf } from "@/lib/serviceReport";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
@@ -139,15 +143,26 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { hasRole } = useAuth();
+  const { hasRole, canMutate, user } = useAuth();
+  const { rbacMatrix } = useSettings();
   const isProject = variant === "project";
   const backTo = isProject ? "/app/projects" : "/app/jobs";
   const backLabel = isProject ? "Back to Projects" : "Back to Jobs";
   const recordLabel = isProject ? "Project" : "Job";
   const guardRoles = isProject
-    ? (["admin", "coordinator", "estimator"] as Role[])
-    : (["admin", "coordinator", "engineer"] as Role[]);
+    ? (["admin", "coordinator", "qa"] as Role[])
+    : (["admin", "coordinator", "engineer", "qa"] as Role[]);
   const canAssignTeam = isProject && hasRole(["admin", "coordinator"]);
+  const canAccessBilling =
+    Boolean(user) &&
+    (hasRole(SERVICE_BILLING_ROLES) || userCanAccessPath(user!, "/app/billing", rbacMatrix));
+  const canAccessEstimates =
+    Boolean(user) &&
+    (hasRole(ESTIMATE_READ_ROLES) || userCanAccessPath(user!, "/app/estimates", rbacMatrix));
+  const canAccessInspections =
+    Boolean(user) && userCanAccessPath(user!, "/app/inspections", rbacMatrix);
+  const canAccessTickets =
+    Boolean(user) && userCanAccessPath(user!, "/app/service-tickets", rbacMatrix);
   const [job, setJob] = useState<BackendServiceJob | null>(null);
   const [activities, setActivities] = useState<BackendJobActivity[]>([]);
   const [loading, setLoading] = useState(true);
@@ -203,6 +218,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
   const [waybillNumber, setWaybillNumber] = useState("");
   const [dispatchDate, setDispatchDate] = useState("");
   const [estimatedDeliveryDate, setEstimatedDeliveryDate] = useState("");
+  const [downloadingReport, setDownloadingReport] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const photosDialogRef = useRef<HTMLDivElement>(null);
   const scopeDialogRef = useRef<HTMLDivElement>(null);
@@ -249,10 +265,13 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
     schema: assignTeamSchema,
   });
 
-  const canUpdateJob = hasRole(["engineer", "admin"]);
-  const canApproveComplete = hasRole(["coordinator", "admin"]);
-  const canReviewExtras = hasRole(["coordinator", "admin"]);
+  const canUpdateJob = hasRole(["engineer", "admin"]) && canMutate;
+  /** Pass/fail QA + confirm delivery — only admin / coordinator / QA (and not read-only). */
+  const canApproveComplete = hasRole(QA_APPROVER_ROLES) && canMutate;
+  const canReviewExtras = hasRole(QA_APPROVER_ROLES) && canMutate;
   const canManageRegistration = hasRole(JOB_CREATE_ROLES);
+  /** Overdue escalation notes — matches POST /jobs/:id/activities roles. */
+  const canLogEscalation = hasRole(["admin", "coordinator", "engineer"]) && canMutate;
   const statusOptions = canApproveComplete ? JOB_STATUS_OPTIONS : ENGINEER_STATUS_OPTIONS;
   const awaitingQa = job?.status === "review";
   const awaitingDelivery = job?.status === "delivery";
@@ -260,6 +279,8 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
     canUpdateJob && job && !["review", "delivery", "completed"].includes(job.status);
   const canEditWorkReport = canUpdateJob && job && job.status !== "completed";
   const hasWorkReport = Boolean(job && pickWorkReportLog(job.workLogs));
+  const canDownloadServiceReport =
+    hasRole(["engineer", "admin", "coordinator", "qa"]) && Boolean(job) && hasWorkReport;
   const tab = searchParams.get("tab") ?? "overview";
   const stageDetails = parseJobStageDetails(job?.stageDetails);
   const activeStageIndex = job ? jobWorkflowStageIndex(job.status) : 0;
@@ -476,15 +497,36 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
     }
     try {
       await api.updateJob(job.id, { status: "review", progress: Math.max(job.progress, 90) });
-      const doc = await api.generateDocument("service-report", job.id);
+      await downloadServiceReportPdf(job.id);
       toast({
         title: "Submitted for QA",
-        description: "Service report generated. Awaiting coordinator or admin quality check.",
+        description: "Service report generated. Awaiting coordinator, admin, or QA quality check.",
       });
-      if (doc.file?.id) window.open(api.fileDownloadUrl(doc.file.id), "_blank");
       await load();
     } catch (err) {
       toast.apiError(err, { fallback: "Unable to submit job for QA" });
+    }
+  };
+
+  const generateServiceReport = async () => {
+    if (!job) return;
+    if (!pickWorkReportLog(job.workLogs)) {
+      toast({
+        title: "Work report required",
+        description: "Fill the work report before generating the service report.",
+        variant: "destructive",
+      });
+      workReport.openReport(job);
+      return;
+    }
+    setDownloadingReport(true);
+    try {
+      await downloadServiceReportPdf(job.id);
+      toast({ title: "Service report ready", description: "PDF downloaded." });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to generate service report" });
+    } finally {
+      setDownloadingReport(false);
     }
   };
 
@@ -566,7 +608,9 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
       setJob(updated);
       toast({
         title: "Delivery confirmed",
-        description: "Job completed. Continue to billing to invoice and update warranty.",
+        description: canAccessBilling
+          ? "Job completed. Continue to billing to invoice and update service warranty."
+          : "Job completed. Billing staff can generate the invoice when ready.",
       });
       await refreshActivities(job.id);
     } catch (err) {
@@ -639,25 +683,19 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
 
       if (editingExtraId) {
         await api.updateJobExtra(editingExtraId, payload);
-        toast({ title: "Parts / scope request updated" });
+        toast({
+          title: "Parts / scope request updated",
+          description: selectedItem
+            ? "Stock purchase request quantity and item were updated."
+            : undefined,
+        });
       } else {
         await api.addJobExtra(job.id, payload);
-        const available = selectedItem ? Math.max(0, selectedItem.inStock - selectedItem.reserved) : 0;
-        if (selectedItem && partsQty > available) {
-          await api.createStockPurchaseRequest({
-            inventoryItemId: selectedItem.id,
-            quantity: partsQty - available,
-            serviceRequestId: job.serviceRequestId,
-            jobId: job.id,
-            note: `Shortage for ${job.reference}: ${partsNote.trim()}`,
-            force: true,
-          });
-        }
         await api.requestJobParts(job.id, partsNote.trim());
         toast({
           title: "Parts / scope request submitted",
-          description: selectedItem && partsQty > available
-            ? "The shortage was sent to the service coordinator and purchasing."
+          description: selectedItem
+            ? "The requested parts were sent to purchasing and the service coordinator."
             : "Sent to the service coordinator for approval.",
         });
       }
@@ -843,17 +881,43 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                   <Link to={`/app/projects/${job.id}`}>Open project</Link>
                 </Button>
               ) : null}
-              {job.status === "completed" ? (
+              {job.serviceRequestId ? (
                 <>
-                  <Button variant="brand" asChild>
-                    <Link to={`/app/billing/jobs/${job.id}`}>Continue to billing</Link>
-                  </Button>
-                  {job.serviceRequestId ? (
+                  {canAccessTickets ? (
                     <Button variant="outline" asChild>
                       <Link to={`/app/service-tickets/${job.serviceRequestId}`}>Open service ticket</Link>
                     </Button>
                   ) : null}
+                  {canAccessInspections ? (
+                    <Button variant="outline" asChild>
+                      <Link to={`/app/inspections/${job.serviceRequestId}`}>Open inspection</Link>
+                    </Button>
+                  ) : null}
                 </>
+              ) : null}
+              {job.estimateId && canAccessEstimates ? (
+                <Button variant="outline" asChild>
+                  <Link to={`/app/estimates/${job.estimateId}`}>Open estimate</Link>
+                </Button>
+              ) : null}
+              {job.status === "completed" && canAccessBilling ? (
+                <Button variant="brand" asChild>
+                  <Link to={`/app/billing/jobs/${job.id}`}>Continue to billing</Link>
+                </Button>
+              ) : null}
+              {canDownloadServiceReport ? (
+                <Button
+                  variant="outline"
+                  disabled={downloadingReport}
+                  onClick={() => void generateServiceReport()}
+                >
+                  {downloadingReport ? (
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-1.5 h-4 w-4" />
+                  )}
+                  {downloadingReport ? "Generating…" : "Download Service Report"}
+                </Button>
               ) : null}
               {canManageRegistration ? (
                 <>
@@ -927,14 +991,16 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                         Scheduled date was {formatDate(job.scheduledFor)}. Escalation is required for delayed jobs.
                       </AlertDescription>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="border-destructive/40 text-destructive hover:bg-destructive/10 shrink-0 ml-3"
-                      onClick={() => void handleLogEscalation()}
-                    >
-                      Log Escalation
-                    </Button>
+                    {canLogEscalation ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-destructive/40 text-destructive hover:bg-destructive/10 shrink-0 ml-3"
+                        onClick={() => void handleLogEscalation()}
+                      >
+                        Log Escalation
+                      </Button>
+                    ) : null}
                   </Alert>
                 )}
 
@@ -1052,6 +1118,20 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                         {hasWorkReport ? "Update Work Report" : "Work Report"}
                       </Button>
                     ) : null}
+                    {canDownloadServiceReport ? (
+                      <Button
+                        variant="outline"
+                        disabled={downloadingReport}
+                        onClick={() => void generateServiceReport()}
+                      >
+                        {downloadingReport ? (
+                          <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="mr-1.5 h-4 w-4" />
+                        )}
+                        {downloadingReport ? "Generating…" : "Download Service Report"}
+                      </Button>
+                    ) : null}
                     {canSubmitForReview ? (
                       <Button onClick={() => void submitForReview()}>Submit for QA & Report</Button>
                     ) : null}
@@ -1065,7 +1145,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
 
                 <DetailSection title="QA">
                   <p className="mb-3 text-sm text-muted-foreground">
-                    Coordinator/admin quality check before equipment leaves for delivery.
+                    Quality check by coordinator, admin, or QA staff before equipment leaves for delivery.
                   </p>
                   <div className="grid gap-3">
                     {awaitingQa && canApproveComplete && (
@@ -1152,7 +1232,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                         </Button>
                       </div>
                     ) : awaitingQa ? (
-                      <p className="text-sm text-muted-foreground">Waiting for coordinator/admin QA.</p>
+                      <p className="text-sm text-muted-foreground">Waiting for coordinator, admin, or QA approval.</p>
                     ) : job.status === "scheduled" || job.status === "inProgress" || job.status === "partsPending" ? (
                       <p className="text-sm text-muted-foreground">QA unlocks after Repair is submitted.</p>
                     ) : (
@@ -1260,7 +1340,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                     <Button className="mt-3" onClick={() => void confirmDelivery()}>
                       Confirm Delivery & Complete
                     </Button>
-                  ) : job.status === "completed" ? (
+                  ) : job.status === "completed" && canAccessBilling ? (
                     <Button className="mt-3" variant="brand" asChild>
                       <Link to={`/app/billing/jobs/${job.id}`}>Continue to billing</Link>
                     </Button>
@@ -1482,12 +1562,31 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                 {job.status === "completed" ? (
                   <div className="space-y-3">
                     <p className="text-sm text-muted-foreground">
-                      Delivery is complete. Continue to Billing to generate the invoice and record warranty on the equipment.
+                      {canAccessBilling
+                        ? "Delivery is complete. Download the service report, or continue to Billing to generate the invoice and record service warranty on the equipment."
+                        : "Delivery is complete. Download the service report if needed. Billing is handled by billing staff."}
                     </p>
-                    <Button className="w-full" asChild>
-                      <Link to={`/app/billing/jobs/${job.id}`}>Open billing for this job</Link>
-                    </Button>
-                    {job.serviceRequestId ? (
+                    {canDownloadServiceReport ? (
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        disabled={downloadingReport}
+                        onClick={() => void generateServiceReport()}
+                      >
+                        {downloadingReport ? (
+                          <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="mr-1.5 h-4 w-4" />
+                        )}
+                        {downloadingReport ? "Generating…" : "Download Service Report"}
+                      </Button>
+                    ) : null}
+                    {canAccessBilling ? (
+                      <Button className="w-full" asChild>
+                        <Link to={`/app/billing/jobs/${job.id}`}>Open billing for this job</Link>
+                      </Button>
+                    ) : null}
+                    {job.serviceRequestId && canAccessTickets ? (
                       <Button variant="outline" className="w-full" asChild>
                         <Link to={`/app/service-tickets/${job.serviceRequestId}`}>Open linked ticket</Link>
                       </Button>
@@ -1497,18 +1596,26 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                   <>
                     {awaitingQa ? (
                       <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
-                        Work submitted for QA. A coordinator or admin must pass QA before Delivery.
+                        {canApproveComplete
+                          ? "Work submitted for QA. Pass to send to Delivery, or fail to return to Repair."
+                          : "Work submitted for QA. A coordinator, admin, or QA staff member must pass QA before Delivery."}
                       </p>
                     ) : null}
                     {awaitingDelivery ? (
                       <p className="rounded-md border border-info/30 bg-info/10 px-3 py-2 text-sm text-foreground">
-                        QA passed. Confirm Delivery to complete the job and continue to billing.
+                        {canAccessBilling
+                          ? "QA passed. Confirm Delivery to complete the job and continue to billing."
+                          : "QA passed. Confirm Delivery to complete the job."}
                       </p>
                     ) : null}
                     {(canUpdateJob || canApproveComplete) && job.status !== "completed" ? (
                       <div className="space-y-2">
                         <Label>Update status</Label>
-                        <Select value={selectedApiStatus} onValueChange={(v) => void updateJobStatus(v)}>
+                        <Select
+                          value={selectedApiStatus}
+                          onValueChange={(v) => void updateJobStatus(v)}
+                          disabled={Boolean((awaitingQa || awaitingDelivery) && !canApproveComplete)}
+                        >
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
                             {statusOptions.map((o) => (
@@ -1692,18 +1799,15 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
               </div>
               <div className="grid gap-2" data-field="partsItemId">
                 <Label>Inventory product (optional)</Label>
-                <Select value={partsItemId} onValueChange={setPartsItemId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a product, if required" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {inventory.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {item.name} ({item.sku}) — {Math.max(0, item.inStock - item.reserved)} available
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <InventoryProductSelect
+                  items={inventory}
+                  value={partsItemId}
+                  onValueChange={(id) => setPartsItemId(id)}
+                  placeholder="Select a product, if required"
+                  getOptionLabel={(item) =>
+                    `${item.name} (${item.sku}) — ${Math.max(0, item.inStock - item.reserved)} available`
+                  }
+                />
               </div>
               <div className="grid gap-2" data-field="partsQty">
                 <Label htmlFor="parts-qty">Quantity</Label>
@@ -1798,29 +1902,21 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                   Inventory item
                   <RequiredMark />
                 </Label>
-                <Select
+                <InventoryProductSelect
+                  id="stockItemId"
+                  items={stockInventoryOptions}
                   value={stockItemId}
                   onValueChange={(v) => {
                     setStockItemId(v);
                     stockValidation.clearError("stockItemId");
                     stockValidation.clearError("stockQty");
                   }}
-                >
-                  <SelectTrigger
-                    id="stockItemId"
-                    className={fieldErrorClass(stockValidation.shouldShow("stockItemId"))}
-                    {...fieldAria("stockItemId", stockValidation.shouldShow("stockItemId") ? stockValidation.errors.stockItemId : null)}
-                  >
-                    <SelectValue placeholder="Select item" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {stockInventoryOptions.map((i) => (
-                      <SelectItem key={i.id} value={i.id}>
-                        {formatInventoryItemClass(i.itemClass)} · {i.name} ({i.sku}) — {i.inStock} in stock
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder="Select item"
+                  getOptionLabel={(i) =>
+                    `${formatInventoryItemClass(i.itemClass)} · ${i.name} (${i.sku}) — ${i.inStock} in stock`
+                  }
+                  triggerClassName={fieldErrorClass(stockValidation.shouldShow("stockItemId"))}
+                />
                 {stockValidation.shouldShow("stockItemId") && (
                   <FormFieldError field="stockItemId" message={stockValidation.errors.stockItemId} />
                 )}

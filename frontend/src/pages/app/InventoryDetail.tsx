@@ -155,7 +155,7 @@ export default function InventoryDetail() {
   };
 
   return (
-    <RoleGuard roles={["admin", "inventory", "engineer", "inspector"]}>
+    <RoleGuard roles={["admin", "inventory", "engineer"]}>
       <RecordDetailLayout
         backTo="/app/inventory"
         backLabel="Back to Inventory"

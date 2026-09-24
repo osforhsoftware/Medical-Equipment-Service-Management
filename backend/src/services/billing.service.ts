@@ -3,7 +3,7 @@ import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
 import { extraChargeType, extraLineTotal, summarizeChargeGroups } from "@/utils/invoiceCharges";
-import { hasEquipmentWarrantyCoverage } from "@/lib/equipmentWarranty";
+import { hasServiceWarrantyCoverage } from "@/lib/equipmentWarranty";
 
 export const BILLING_CHECKLIST = [
   { key: "engineerReportSubmitted", label: "Engineer Report Submitted" },
@@ -14,7 +14,7 @@ export const BILLING_CHECKLIST = [
   { key: "serviceReportUploaded", label: "Service Report Uploaded (optional)" },
   { key: "customerSignatureAvailable", label: "Customer Signature Available (optional)" },
   { key: "equipmentReturned", label: "Equipment Returned" },
-  { key: "warrantyUpdated", label: "Warranty Updated" },
+  { key: "warrantyUpdated", label: "Service Warranty Updated" },
   { key: "stockAdjusted", label: "Stock Adjusted" },
 ] as const;
 
@@ -105,6 +105,10 @@ export function computeVerificationChecklist(job: {
   equipment?: {
     warrantyStart?: Date | string | null;
     warrantyEnd?: Date | string | null;
+    noMachineWarranty?: boolean | null;
+    serviceWarrantyStart?: Date | string | null;
+    serviceWarrantyEnd?: Date | string | null;
+    noServiceWarranty?: boolean | null;
     amcStatus?: string | null;
   } | null;
   serviceReportDoc?: boolean;
@@ -128,7 +132,7 @@ export function computeVerificationChecklist(job: {
   const linkedEquipment = job.equipmentId || job.equipment;
   const warrantyUpdated = !linkedEquipment
     ? job.status === "completed"
-    : hasEquipmentWarrantyCoverage(job.equipment);
+    : hasServiceWarrantyCoverage(job.equipment);
 
   const checks: Record<string, boolean> = {
     engineerReportSubmitted: workLogs.length > 0,
@@ -202,9 +206,14 @@ export class BillingService {
     });
   }
 
-  async getQueue(tenantId: string, queue?: BillingQueueKey) {
+  /**
+   * `limit` caps how many completed jobs and invoices are loaded (most recent
+   * first) so the queue cannot fetch the entire history unbounded.
+   */
+  async getQueue(tenantId: string, queue?: BillingQueueKey, limit = 200) {
     await this.syncOverdueInvoices(tenantId);
 
+    const take = Math.max(1, Math.min(Math.trunc(limit) || 200, 500));
     const [completedJobs, invoices] = await Promise.all([
       prisma.serviceJob.findMany({
         where: { tenantId, status: "completed" },
@@ -213,6 +222,7 @@ export class BillingService {
           invoices: { where: { status: { not: "closed" } }, take: 1 },
         },
         orderBy: { completedAt: "desc" },
+        take,
       }),
       prisma.invoice.findMany({
         where: { tenantId },
@@ -228,6 +238,7 @@ export class BillingService {
           serviceRequest: true,
         },
         orderBy: { issuedAt: "desc" },
+        take,
       }),
     ]);
 
@@ -561,17 +572,24 @@ export class BillingService {
         const existingById = new Map(invoice.lineItems.map((line) => [line.id, line]));
         const keptIds = new Set<string>();
         const computedLines = input.lineItems.map((lineInput) => {
+          if (lineInput.id && !existingById.has(lineInput.id)) {
+            throw new AppError("Invoice line does not belong to this invoice", 422);
+          }
           const qty = money(lineInput.quantity);
           const unitPrice = money(lineInput.unitPrice);
           const discount = money(lineInput.discount ?? 0);
           const taxRate = money(lineInput.taxRate ?? 0);
-          const net = money(qty.mul(unitPrice).minus(discount));
+          // Clamp the net to >= 0 so an oversized discount cannot produce a
+          // negative line (mirrors the estimate revision clamping).
+          const rawNet = qty.mul(unitPrice).minus(discount);
+          const net = money(rawNet.isNegative() ? new Prisma.Decimal(0) : rawNet);
           const lineTotal = money(net.plus(net.mul(taxRate.div(100))));
           const existing = lineInput.id ? existingById.get(lineInput.id) : undefined;
           if (lineInput.id) keptIds.add(lineInput.id);
 
           return {
             id: lineInput.id,
+            net,
             estimateLineItemId: existing?.estimateLineItemId ?? null,
             jobExtraId: existing?.jobExtraId ?? null,
             catalogItemId: existing?.catalogItemId ?? null,
@@ -586,10 +604,7 @@ export class BillingService {
         });
 
         const amount = money(
-          computedLines.reduce(
-            (sum, line) => sum.plus(money(line.quantity).mul(line.unitPrice).minus(line.discount)),
-            new Prisma.Decimal(0),
-          ),
+          computedLines.reduce((sum, line) => sum.plus(line.net), new Prisma.Decimal(0)),
         );
         const total = money(
           computedLines.reduce((sum, line) => sum.plus(line.lineTotal), new Prisma.Decimal(0)),

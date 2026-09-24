@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useListingUrlState } from "@/hooks/useListingUrlState";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
@@ -219,16 +220,29 @@ export default function PurchaseOrdersProfessional() {
               {lines.map((line, index) => (
                 <div key={index} className="space-y-2 rounded-lg border p-3">
                   <div className="flex gap-2">
-                    <Select value={line.inventoryItemId} onValueChange={(id) => { const item = inventory.find((row) => row.id === id); if (!item) return; updateLines((current) => current.map((row, i) => i === index ? { ...row, inventoryItemId: item.id, sku: item.sku, description: item.name, unitCost: Number(item.unitCost) } : row)); }}>
-                      <SelectTrigger><SelectValue placeholder="Link inventory item" /></SelectTrigger>
-                      <SelectContent>
-                        {purchaseInventoryOptions.map((item) => (
-                          <SelectItem key={item.id} value={item.id}>
-                            {formatInventoryItemClass(item.itemClass)} · {item.sku} · {item.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <InventoryProductSelect
+                      items={purchaseInventoryOptions}
+                      value={line.inventoryItemId || ""}
+                      onValueChange={(_id, item) => {
+                        updateLines((current) =>
+                          current.map((row, i) =>
+                            i === index
+                              ? {
+                                  ...row,
+                                  inventoryItemId: item.id,
+                                  sku: item.sku,
+                                  description: item.name,
+                                  unitCost: Number(item.unitCost),
+                                }
+                              : row,
+                          ),
+                        );
+                      }}
+                      placeholder="Link inventory item"
+                      getOptionLabel={(item) =>
+                        `${formatInventoryItemClass(item.itemClass)} · ${item.sku} · ${item.name}`
+                      }
+                    />
                     <Button type="button" size="icon" variant="ghost" disabled={lines.length === 1} onClick={() => updateLines((current) => current.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                   <div className="grid grid-cols-[1fr_2fr] gap-2">

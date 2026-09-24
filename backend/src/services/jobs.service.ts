@@ -20,10 +20,12 @@ import {
   startWorkLog,
 } from "@/services/jobWorkLog.helpers";
 import { userHasAnyRoleKey } from "@/utils/userRoles";
+import { QA_APPROVER_ROLES } from "@/config/apiAccess";
 import { normalizeAdditionalFields } from "@/lib/additionalFields";
 import { mergeJobStageDetails } from "@/lib/jobStageDetails";
+import { upsertOpenStockPurchaseRequest } from "@/lib/stockPurchaseRequest";
 
-const ASSIGNABLE_JOB_ROLES = ["coordinator", "engineer"];
+const ASSIGNABLE_JOB_ROLES = ["coordinator", "engineer", "qa"];
 const jobSyncInflight = new Map<string, Promise<void>>();
 
 type CreateJobData = {
@@ -88,7 +90,7 @@ export class JobsService {
     if (actorRole === "engineer" && actorId) {
       await this.syncJobsFromAssignedTickets(tenantId, actorId);
       engineerId = actorId;
-    } else if (actorId && (actorRole === "admin" || actorRole === "coordinator")) {
+    } else if (actorId && (actorRole === "admin" || actorRole === "coordinator" || actorRole === "qa")) {
       await this.syncMissingJobsForTenant(tenantId, actorId);
     }
     return jobsRepository.findPaginated(tenantId, { ...filters, engineerId });
@@ -99,7 +101,7 @@ export class JobsService {
     if (actorRole === "engineer" && actorId) {
       await this.syncJobsFromAssignedTickets(tenantId, actorId);
       engineerId = actorId;
-    } else if (actorId && (actorRole === "admin" || actorRole === "coordinator")) {
+    } else if (actorId && (actorRole === "admin" || actorRole === "coordinator" || actorRole === "qa")) {
       await this.syncMissingJobsForTenant(tenantId, actorId);
     }
     return jobsRepository.findAll(tenantId, { status, engineerId });
@@ -297,7 +299,7 @@ export class JobsService {
     actorId?: string,
     actorRole?: string,
   ) {
-    if (!actorRole || actorRole === "admin" || actorRole === "coordinator") return;
+    if (!actorRole || actorRole === "admin" || actorRole === "coordinator" || actorRole === "qa") return;
     if (actorRole === "engineer" && actorId) {
       if (job.engineerId && job.engineerId === actorId) return;
       const assignment = await prisma.jobAssignment.findFirst({
@@ -306,6 +308,10 @@ export class JobsService {
       if (assignment) return;
       const actor = await usersRepository.findById(actorId, tenantId);
       if (job.engineer === actor?.name) return;
+    }
+    // Secondary QA role assignment (primary role may differ)
+    if (actorId && (await userHasAnyRoleKey(actorId, tenantId, actorRole ?? "", ["qa"]))) {
+      return;
     }
     throw new AppError("Access denied", 403);
   }
@@ -444,8 +450,15 @@ export class JobsService {
   async update(id: string, tenantId: string, data: Record<string, unknown>, actorId?: string, actorRole?: string) {
     const existing = await this.getById(id, tenantId, actorId, actorRole);
 
+    const isQaApprover =
+      !!actorId &&
+      !!actorRole &&
+      (await userHasAnyRoleKey(actorId, tenantId, actorRole, QA_APPROVER_ROLES));
+
+    // Engineers may only patch status/progress — unless they also hold a QA approver role.
     if (
       actorRole === "engineer" &&
+      !isQaApprover &&
       Object.keys(data).some((field) => !["status", "progress"].includes(field))
     ) {
       throw new AppError("Engineers can only update job status and progress", 403);
@@ -472,14 +485,11 @@ export class JobsService {
     const advancingPastQa =
       (data.status === "delivery" && existing.status !== "delivery") ||
       (data.status === "completed" && existing.status !== "completed");
-    if (advancingPastQa) {
-      const canAdvance =
-        !!actorId &&
-        !!actorRole &&
-        (await userHasAnyRoleKey(actorId, tenantId, actorRole, ["admin", "coordinator"]));
-      if (!canAdvance) {
+    const returningFromQa = existing.status === "review" && data.status === "inProgress";
+    if (advancingPastQa || returningFromQa) {
+      if (!isQaApprover) {
         throw new AppError(
-          "Only administrators and service coordinators can approve QA or confirm delivery",
+          "Only administrators, service coordinators, and quality assurance staff can approve QA or confirm delivery",
           403,
         );
       }
@@ -501,6 +511,10 @@ export class JobsService {
           include: { reservations: { where: { status: "active" } } },
         });
         if (!job) throw new AppError("Job not found", 404);
+        const pendingExtras = await tx.jobExtra.count({ where: { jobId: id, status: "pending" } });
+        if (pendingExtras > 0) {
+          throw new AppError("Approve or reject pending extras before completing the job", 409);
+        }
         for (const reservation of job.reservations) {
           const remaining = reservation.quantity - reservation.consumed - reservation.released;
           if (remaining <= 0) continue;
@@ -583,7 +597,7 @@ export class JobsService {
         await jobActionsRepository.addActivity(id, {
           actor: actor?.name ?? actorId ?? "system",
           action: "Submitted for QA",
-          note: "Repair submitted — awaiting coordinator or admin quality check",
+          note: "Repair submitted — awaiting coordinator, admin, or QA quality check",
         });
       }
       if (data.status === "delivery") {
@@ -820,6 +834,8 @@ export class JobsService {
     const actor = await usersRepository.findById(actorId, tenantId);
     const actorName = actor?.name ?? actorId;
 
+    assertJobTransition(job.status, "partsPending");
+
     const request = await jobActionsRepository.addPartsRequest(id, {
       notes,
       requestedBy: actorName,
@@ -931,15 +947,13 @@ export class JobsService {
       const freelyAvailable = item.inStock - item.reserved;
       if (item.inStock < quantity || freelyAvailable < unreservedNeeded) {
         const shortage = quantity - (freelyAvailable + reservedToConsume);
-        await tx.stockPurchaseRequest.create({
-          data: {
-            tenantId,
-            inventoryItemId,
-            quantity: Math.max(shortage, quantity),
-            requestedBy: actorId,
-            jobId: id,
-            note: `Shortage while deducting stock for job`,
-          },
+        await upsertOpenStockPurchaseRequest(tx, {
+          tenantId,
+          inventoryItemId,
+          quantity: Math.max(shortage, quantity),
+          requestedBy: actorId,
+          jobId: id,
+          note: `Shortage while deducting stock for job`,
         });
         await tx.notification.createMany({
           data: [

@@ -8,6 +8,7 @@ import { EstimateSummary } from "@/components/estimates/EstimateSummary";
 import { EstimateWorkflowSteps } from "@/components/estimates/EstimateWorkflowSteps";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { CreditExposureBanner } from "@/components/shared/CreditExposureBanner";
+import { firstPositivePrice } from "@/components/shared/InventoryHelpers";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -39,6 +40,7 @@ import {
   type BackendServiceRequest,
   type EstimateLineInput,
 } from "@/lib/api";
+import { splitInspectionFindings } from "@/components/inspections/useInspectionReportEditor";
 import { estimateStatusLabel, newEstimateLine, summarizeLines, workflowStepIndex } from "@/lib/estimates";
 import { useSettings } from "@/context/SettingsContext";
 import { defaultDatePlusDays, formatDate } from "@/lib/format";
@@ -189,7 +191,8 @@ export default function EstimateBuilder() {
                 description: r.title,
                 inventoryItemId: r.inventoryItemId,
                 quantity: Number(r.quantity) || 1,
-                unitPrice: Number(item?.sellingPrice ?? r.estimatedCost ?? item?.unitCost ?? 0) + delivery,
+                unitPrice:
+                  firstPositivePrice(item?.sellingPrice, r.estimatedCost, item?.unitCost) + delivery,
               });
             }),
           );
@@ -203,7 +206,7 @@ export default function EstimateBuilder() {
               description: r.title || item?.name || "Part",
               inventoryItemId: r.inventoryItemId,
               quantity: Number(r.quantity) || 1,
-              unitPrice: Number(item?.sellingPrice ?? r.estimatedCost ?? item?.unitCost ?? 0),
+              unitPrice: firstPositivePrice(item?.sellingPrice, r.estimatedCost, item?.unitCost),
             });
           }),
         );
@@ -249,6 +252,7 @@ export default function EstimateBuilder() {
 
   const formValues = useMemo(() => ({ validUntil, lines }), [validUntil, lines]);
   const inspection = ticket?.inspectionReport;
+  const inspectionSplit = inspection ? splitInspectionFindings(inspection.findings ?? "") : null;
   const step = workflowStepIndex(estimate?.status, lines.some((l) => l.description.trim()), Boolean(validUntil));
 
   const persist = async (sendForApproval: boolean, thenPreview = false) => {
@@ -374,20 +378,26 @@ export default function EstimateBuilder() {
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Equipment condition</p>
-                <p className="mt-1 whitespace-pre-line text-muted-foreground">{inspection.findings || "—"}</p>
+                <p className="mt-1 whitespace-pre-line text-muted-foreground">{inspectionSplit?.findings || "—"}</p>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Recommended work</p>
                 <p className="mt-1 whitespace-pre-line text-muted-foreground">{inspection.recommendation || "—"}</p>
               </div>
             </div>
+            {inspectionSplit?.workDetails.trim() ? (
+              <div className="mt-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Work details</p>
+                <p className="mt-1 whitespace-pre-line text-muted-foreground">{inspectionSplit.workDetails}</p>
+              </div>
+            ) : null}
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">
                 Inspector {inspection.reportedBy} · {formatDate(inspection.reportedAt)}
               </p>
-              {ticketId ? (
+              {ticket?.id ? (
                 <Button variant="link" size="sm" className="h-auto p-0 text-xs" asChild>
-                  <Link to={`/app/inspections/${ticketId}/report`}>View full inspection report</Link>
+                  <Link to={`/app/inspections/${ticket.id}/report?from=estimate`}>View full inspection report</Link>
                 </Button>
               ) : null}
             </div>

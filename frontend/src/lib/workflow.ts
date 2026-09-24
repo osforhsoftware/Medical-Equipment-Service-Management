@@ -26,6 +26,7 @@ const REQUEST_STATUS_TO_STAGE: Record<string, WorkflowStageKey> = {
   pending_invoice: "billing",
   invoiced: "billing",
   closed: "completed",
+  cancelled: "completed",
   finished: "completed",
 };
 

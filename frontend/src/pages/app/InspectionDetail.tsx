@@ -26,7 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { TICKET_CREATE_ROLES } from "@/config/roles";
+import { INSPECTION_READ_ROLES, INSPECTION_WRITE_ROLES, TICKET_CREATE_ROLES } from "@/config/roles";
 import { useAuth } from "@/context/AuthContext";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { api, ApiError, type BackendInspectionReport, type BackendServiceRequest, type BackendTimelineEvent } from "@/lib/api";
@@ -119,7 +119,10 @@ export default function InspectionDetail() {
 
   const editor = useInspectionReportEditor(load);
   const split = splitInspectionFindings(report?.findings ?? "");
-  const canInspect = Boolean(request) && ["new", "inspection", "estimate"].includes(request!.status);
+  const canInspect =
+    hasRole(INSPECTION_WRITE_ROLES) &&
+    Boolean(request) &&
+    ["new", "inspection", "estimate"].includes(request!.status);
   const inspectLabel = report ? "Update report" : "Conduct inspection";
 
   const openEditTicket = () => {
@@ -180,7 +183,7 @@ export default function InspectionDetail() {
   };
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "inspector"]}>
+    <RoleGuard roles={INSPECTION_READ_ROLES}>
       <RecordDetailLayout
         backTo={fromHistory ? "/app/inspections?view=history" : "/app/inspections"}
         backLabel={fromHistory ? "Back to inspection history" : "Back to inspections"}
@@ -478,6 +481,9 @@ export default function InspectionDetail() {
         setSeverity={editor.setSeverity}
         additionalFields={editor.additionalFields}
         setAdditionalFields={editor.setAdditionalFields}
+        recommendedParts={editor.recommendedParts}
+        setRecommendedParts={editor.setRecommendedParts}
+        inventory={editor.inventory}
         machineImages={editor.machineImages}
         setMachineImages={editor.setMachineImages}
         setMachineImage={editor.setMachineImage}

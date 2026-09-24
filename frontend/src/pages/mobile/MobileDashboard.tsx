@@ -40,12 +40,14 @@ function matchesFilter(status: string, filter: string): boolean {
     return ["new", "scheduled", "assigned_engineer", "assigned-engineer"].includes(s);
   }
   if (filter === "inspection") return s === "inspection";
-  if (filter === "estimate") return ["estimate", "approval", "pending_approval", "review"].includes(s);
+  if (filter === "estimate") return ["estimate", "approval", "pending_approval"].includes(s);
   if (filter === "in-progress") {
     return ["in-progress", "parts-pending", "assigned_engineer", "change_pending_approval"].includes(s);
   }
+  if (filter === "qa") return s === "review";
+  if (filter === "delivery") return s === "delivery";
   if (filter === "completed") return s === "completed";
-  if (filter === "billing") return ["invoiced", "sent"].includes(s);
+  if (filter === "billing") return ["pending_invoice", "invoiced", "sent"].includes(s);
   return true;
 }
 

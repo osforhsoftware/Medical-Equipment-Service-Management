@@ -31,8 +31,8 @@ const convertSchema = z.object({
 export default function StockPurchaseRequestDetail() {
   const { id = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuth();
-  const canConvert = user?.role === "admin" || user?.role === "inventory";
+  const { hasRole } = useAuth();
+  const canConvert = hasRole(["admin", "inventory"]);
   const [request, setRequest] = useState<BackendStockPurchaseRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

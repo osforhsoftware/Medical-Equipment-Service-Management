@@ -25,16 +25,9 @@ export function ShareButtons({
 }: ShareButtonsProps) {
   const handleWhatsApp = () => {
     const cleanPhone = sanitizeWhatsAppPhone(phone);
-    if (!cleanPhone) {
-      // If no valid phone number provided, open generic wa.me share line
-      const genericUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
-      window.open(genericUrl, "_blank", "noopener,noreferrer");
-      toast.success("Opened WhatsApp share");
-      return;
-    }
     const url = buildWhatsAppShareUrl(cleanPhone, message);
     window.open(url, "_blank", "noopener,noreferrer");
-    toast.success("Opened WhatsApp chat");
+    toast.success(cleanPhone ? "Opened WhatsApp chat" : "Opened WhatsApp share");
   };
 
   const handleEmail = () => {

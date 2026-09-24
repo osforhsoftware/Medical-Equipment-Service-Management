@@ -14,7 +14,6 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Check, X, UserCog } from "lucide-react";
 import { Link } from "react-router-dom";
-import { RoleGuard } from "@/components/auth/RoleGuard";
 import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import {
   AlertDialog,
@@ -298,16 +297,13 @@ export default function Settings() {
 
   if (loading && !settings) {
     return (
-      <RoleGuard roles={["admin"]}>
-        <div className="flex items-center justify-center gap-2 py-24 text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" /> Loading settings…
-        </div>
-      </RoleGuard>
+      <div className="flex items-center justify-center gap-2 py-24 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" /> Loading settings…
+      </div>
     );
   }
 
   return (
-    <RoleGuard roles={["admin"]}>
       <div className="space-y-6">
         <PageHeader title="Settings" description="Tenant configuration and role-based access control." />
 
@@ -434,6 +430,48 @@ export default function Settings() {
                 </div>
               </div>
             </form>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardHeader>
+            <CardTitle className="text-base">Guided setup</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              After adding a customer, ask to register their equipment (customer already filled in), then offer to create a service ticket (equipment already selected). Skip at any step to stay on the normal pages.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between py-1">
+              <div>
+                <p className="text-sm font-medium">Customer → equipment → ticket</p>
+                <p className="text-xs text-muted-foreground">
+                  Turn off to use Add Customer, Add Equipment, and New Ticket as separate steps only.
+                </p>
+              </div>
+              <Switch
+                checked={settings?.guidedSetupFlow !== false}
+                disabled={togglingKey === "guidedSetupFlow"}
+                onCheckedChange={(checked) => {
+                  void (async () => {
+                    if (!settings) return;
+                    setTogglingKey("guidedSetupFlow");
+                    try {
+                      const updated = await api.updateSettings({ guidedSetupFlow: checked });
+                      updateLocal(updated);
+                      toast.success("Guided setup updated", {
+                        description: checked
+                          ? "Staff will be offered the next step after adding a customer or equipment."
+                          : "Create forms stay on their own pages.",
+                      });
+                    } catch (err) {
+                      toast.apiError(err, { fallback: "Unable to save setting" });
+                    } finally {
+                      setTogglingKey(null);
+                    }
+                  })();
+                }}
+              />
+            </div>
           </CardContent>
         </Card>
 
@@ -688,7 +726,6 @@ export default function Settings() {
             </p>
           </CardContent>
         </Card>
-      </div>
 
       <DeleteConfirmDialog
         open={removeDemoOpen}
@@ -699,6 +736,6 @@ export default function Settings() {
         loading={removingDemo}
         onConfirm={() => void handleRemoveDemo()}
       />
-    </RoleGuard>
+      </div>
   );
 }

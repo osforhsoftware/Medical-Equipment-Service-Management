@@ -11,6 +11,7 @@ export const TICKET_STATUS_VALUES = [
   "pending_invoice",
   "invoiced",
   "closed",
+  "cancelled",
   // Legacy values kept for backward compatibility
   "approval",
   "inProgress",
@@ -160,6 +161,11 @@ export const rejectFinalApprovalSchema = z.object({
 
 export const closeTicketSchema = z.object({
   note: z.string().trim().max(5000).optional(),
+  force: z.boolean().optional(),
+});
+
+export const cancelTicketSchema = z.object({
+  reason: z.string().trim().min(1, "A cancellation reason is required").max(5000),
 });
 
 export const inspectionReportSchema = z.object({
@@ -190,7 +196,7 @@ export const inspectionReportSchema = z.object({
     .array(
       z.object({
         label: z.string().trim().min(1).max(80),
-        value: z.string().trim().max(5000).default(""),
+        value: z.string().trim().default(""),
       }),
     )
     .max(30)

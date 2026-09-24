@@ -42,4 +42,18 @@ describe("invoice charge grouping", () => {
     assert.equal(extraLineTotal({ quantity: 2, unitPrice: 100, taxRate: 18 }), 236);
     assert.equal(lineAmount({ type: "product", quantity: 1, unitPrice: 100, taxRate: 18 }), 118);
   });
+
+  it("recomputes amounts and ignores stored/client lineTotal", () => {
+    // 2 × 100 − 50 = 150 net, +10% tax = 165 — the bogus lineTotal must not win.
+    assert.equal(
+      lineAmount({ type: "part", quantity: 2, unitPrice: 100, discount: 50, taxRate: 10, lineTotal: 9999 }),
+      165,
+    );
+  });
+
+  it("applies discount on extras and clamps negative nets to zero", () => {
+    assert.equal(extraLineTotal({ quantity: 2, unitPrice: 100, discount: 50, taxRate: 10 }), 165);
+    assert.equal(extraLineTotal({ quantity: 1, unitPrice: 100, discount: 500, taxRate: 18 }), 0);
+    assert.equal(lineAmount({ type: "part", quantity: 1, unitPrice: 100, discount: 500 }), 0);
+  });
 });

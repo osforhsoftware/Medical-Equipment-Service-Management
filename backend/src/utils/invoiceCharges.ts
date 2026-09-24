@@ -36,6 +36,7 @@ export type ChargeLine = {
   unitPrice: number;
   discount?: number;
   taxRate?: number;
+  /** Accepted for compatibility but ignored — totals are always recomputed. */
   lineTotal?: number;
 };
 
@@ -59,9 +60,8 @@ export function chargeGroupForType(type: string): { key: BillingChargeGroupKey; 
 }
 
 export function lineAmount(line: ChargeLine) {
-  if (typeof line.lineTotal === "number" && Number.isFinite(line.lineTotal)) {
-    return Math.max(0, line.lineTotal);
-  }
+  // Never trust a stored/client-supplied lineTotal — always recompute
+  // qty × unitPrice − discount (clamped at 0) + tax.
   const net = Math.max(0, Number(line.quantity || 0) * Number(line.unitPrice || 0) - Number(line.discount || 0));
   return net + net * (Number(line.taxRate || 0) / 100);
 }
@@ -79,7 +79,15 @@ export function extraChargeType(extra: { type?: string | null }) {
   return extra.type || "product";
 }
 
-export function extraLineTotal(extra: { quantity: unknown; unitPrice: unknown; taxRate?: unknown }) {
-  const net = Number(extra.quantity ?? 0) * Number(extra.unitPrice ?? 0);
+export function extraLineTotal(extra: {
+  quantity: unknown;
+  unitPrice: unknown;
+  discount?: unknown;
+  taxRate?: unknown;
+}) {
+  const net = Math.max(
+    0,
+    Number(extra.quantity ?? 0) * Number(extra.unitPrice ?? 0) - Number(extra.discount ?? 0),
+  );
   return net + net * (Number(extra.taxRate ?? 0) / 100);
 }

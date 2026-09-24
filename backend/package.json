@@ -12,6 +12,7 @@
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
     "prisma:reset": "prisma migrate reset --force",
+    "prisma:repair": "node scripts/repair-stuck-migrations.js",
     "seed": "ts-node prisma/seed.ts",
     "db:clean": "ts-node -r tsconfig-paths/register prisma/clean.ts"
   },

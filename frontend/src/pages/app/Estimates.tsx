@@ -255,16 +255,13 @@ export default function Estimates() {
 
         {canBuild ? (
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardHeader className="space-y-0 pb-2">
               <div>
                 <CardTitle className="text-base">Tickets awaiting estimate</CardTitle>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Assigned Estimate-stage tickets. Open the builder, save the quotation, then Send for Approval.
                 </p>
               </div>
-              <Button size="sm" variant="outline" onClick={() => setNewOpen(true)}>
-                <Plus className="mr-1 h-3.5 w-3.5" /> Add estimate
-              </Button>
             </CardHeader>
             <CardContent>
               {assignedQueueQuery.isLoading ? (
@@ -334,7 +331,7 @@ export default function Estimates() {
           onSearchChange={setSearch}
           searchPlaceholder="Search estimates, customers, tickets, equipment…"
           emptyMessage="No estimates yet"
-          emptyHint="Use Add estimate or open a ticket from the queue above to create one."
+          emptyHint="Use New Estimate or open a ticket from the queue above to create one."
           filterValues={filters}
           onFilterChange={setFilter}
           filters={[{ key: "status", label: "Status", options: [...ESTIMATE_STATUS_OPTIONS] }]}

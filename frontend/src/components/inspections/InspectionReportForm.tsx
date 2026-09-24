@@ -1,17 +1,22 @@
 import { useRef, type Dispatch, type SetStateAction } from "react";
-import { AlertTriangle, Camera, ImagePlus, Loader2, Plus } from "lucide-react";
+import { AlertTriangle, Camera, ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
 import { CustomerAdditionalFieldsEditor } from "@/components/customers/CustomerAdditionalFieldsEditor";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { PhotoCaptionTile } from "@/components/shared/PhotoCaptionTile";
+import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 import {
   api,
   type BackendInspectionReport,
+  type BackendInventoryItem,
   type BackendServiceRequest,
 } from "@/lib/api";
 import type { CustomerAdditionalField } from "@/lib/customerFields";
 import { cn } from "@/lib/utils";
 import { InspectionSection } from "./InspectionSection";
+import type { RecommendedPartDraft } from "./useInspectionReportEditor";
 
 const SEVERITY_OPTIONS = [
   {
@@ -60,6 +65,9 @@ interface InspectionReportFormProps {
   setSeverity: (v: string) => void;
   additionalFields: CustomerAdditionalField[];
   setAdditionalFields: Dispatch<SetStateAction<CustomerAdditionalField[]>>;
+  recommendedParts: RecommendedPartDraft[];
+  setRecommendedParts: Dispatch<SetStateAction<RecommendedPartDraft[]>>;
+  inventory: BackendInventoryItem[];
   machineImages: File[];
   setMachineImages: Dispatch<SetStateAction<File[]>>;
   setMachineImage: (file: File | null) => void;
@@ -83,6 +91,9 @@ export function InspectionReportForm({
   setSeverity,
   additionalFields,
   setAdditionalFields,
+  recommendedParts,
+  setRecommendedParts,
+  inventory,
   setMachineImages,
   setMachineImage,
   imageCaptions,
@@ -347,6 +358,67 @@ export function InspectionReportForm({
             className={cn(mobile && "min-h-[96px] resize-none rounded-xl text-base leading-relaxed")}
             placeholder="e.g. Replace compressor filter and schedule follow-up calibration…"
           />
+        </div>
+      </InspectionSection>
+
+      <InspectionSection
+        title="Requested parts"
+        description="Spare parts needed for this job. These update Stock Purchase Requests for inventory."
+        optional
+      >
+        <div className="space-y-3">
+          {recommendedParts.map((part, index) => (
+            <div key={`${part.inventoryItemId}-${index}`} className="grid gap-2 sm:grid-cols-[1fr_88px_auto] sm:items-end">
+              <div className="grid gap-1.5">
+                <Label className={index > 0 ? "sr-only" : undefined}>Inventory item</Label>
+                <InventoryProductSelect
+                  items={inventory}
+                  value={part.inventoryItemId || ""}
+                  onValueChange={(value) => {
+                    setRecommendedParts((prev) =>
+                      prev.map((row, i) => (i === index ? { ...row, inventoryItemId: value } : row)),
+                    );
+                  }}
+                  placeholder="Select a spare part"
+                  getOptionLabel={(item) => `${item.name} (${item.sku})`}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor={`part-qty-${index}`} className={index > 0 ? "sr-only" : undefined}>Qty</Label>
+                <Input
+                  id={`part-qty-${index}`}
+                  type="number"
+                  min={1}
+                  value={part.quantity}
+                  onChange={(e) => {
+                    const quantity = Math.max(1, Number(e.target.value) || 1);
+                    setRecommendedParts((prev) =>
+                      prev.map((row, i) => (i === index ? { ...row, quantity } : row)),
+                    );
+                  }}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="shrink-0"
+                aria-label="Remove requested part"
+                onClick={() => setRecommendedParts((prev) => prev.filter((_, i) => i !== index))}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          ))}
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full sm:w-auto"
+            onClick={() => setRecommendedParts((prev) => [...prev, { inventoryItemId: "", quantity: 1 }])}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add requested part
+          </Button>
         </div>
       </InspectionSection>
 

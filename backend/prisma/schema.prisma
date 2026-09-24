@@ -88,6 +88,7 @@ model TenantSettings {
   autoAssignCoordinatorAfterInspection   Boolean @default(true) @map("auto_assign_coordinator_after_inspection")
   autoAssignEstimatorAfterInspection     Boolean @default(true) @map("auto_assign_estimator_after_inspection")
   autoAssignEngineerOnApproval           Boolean @default(false) @map("auto_assign_engineer_on_approval")
+  guidedSetupFlow                        Boolean @default(true) @map("guided_setup_flow")
   defaultCoordinatorUserId               String? @map("default_coordinator_user_id")
   defaultInspectorUserId                 String? @map("default_inspector_user_id")
   defaultEstimatorUserId                 String? @map("default_estimator_user_id")
@@ -294,6 +295,10 @@ model Equipment {
   installDate          DateTime?              @map("install_date")
   warrantyStart        DateTime?              @map("warranty_start")
   warrantyEnd          DateTime?              @map("warranty_end")
+  noMachineWarranty    Boolean                @default(false) @map("no_machine_warranty")
+  serviceWarrantyStart DateTime?              @map("service_warranty_start")
+  serviceWarrantyEnd   DateTime?              @map("service_warranty_end")
+  noServiceWarranty    Boolean                @default(false) @map("no_service_warranty")
   amcStatus            AmcStatus              @default(none) @map("amc_status")
   condition            String                 @default("operational")
   currentStatus        EquipmentCurrentStatus @default(in_service) @map("current_status")
@@ -600,6 +605,7 @@ enum ServiceStatus {
   pending_invoice       @map("pending-invoice")
   invoiced
   closed
+  cancelled
   approval
   inProgress            @map("in-progress")
   completed

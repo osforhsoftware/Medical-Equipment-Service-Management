@@ -86,6 +86,12 @@ const JOB_SORT_FIELDS = {
   createdAt: "createdAt",
 } as const;
 
+function parseQaScope(value: unknown): "pending" | "history" | undefined {
+  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (raw === "pending" || raw === "history") return raw;
+  return undefined;
+}
+
 export function parseJobListQuery(req: Request) {
   const { page, limit, skip } = parsePaginationQuery(req.query);
   const sort = parseSortQuery(req.query, JOB_SORT_FIELDS, "scheduledFor");
@@ -103,6 +109,7 @@ export function parseJobListQuery(req: Request) {
     scheduledFrom: parseOptionalFilter(req.query.scheduledFrom),
     scheduledTo: parseOptionalFilter(req.query.scheduledTo),
     overdue,
+    qaScope: parseQaScope(req.query.qaScope),
     completedScope,
     orderBy: toOrderBy(sort),
   };

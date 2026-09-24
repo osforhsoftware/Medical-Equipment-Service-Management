@@ -63,11 +63,12 @@ export interface InspectionReportBundle {
 }
 
 export async function loadInspectionReportBundle(requestId: string): Promise<InspectionReportBundle> {
-  const [request, report, timeline] = await Promise.all([
-    api.getServiceRequest(requestId),
-    api.getInspectionReport(requestId),
+  const request = await api.getServiceRequest(requestId);
+  const [fetchedReport, timeline] = await Promise.all([
+    api.getInspectionReport(requestId).catch(() => null),
     api.getServiceRequestTimeline(requestId).catch(() => [] as BackendTimelineEvent[]),
   ]);
+  const report = fetchedReport ?? request.inspectionReport;
 
   if (!report) {
     throw new Error("Inspection report not found");
@@ -79,7 +80,7 @@ export async function loadInspectionReportBundle(requestId: string): Promise<Ins
 
   const equipmentIds = [
     ...(request.equipmentId ? [request.equipmentId] : []),
-    ...request.equipmentItems.map((item) => item.equipmentId).filter(Boolean),
+    ...(request.equipmentItems ?? []).map((item) => item.equipmentId).filter(Boolean),
   ];
   const uniqueIds = [...new Set(equipmentIds)];
   const equipment = (

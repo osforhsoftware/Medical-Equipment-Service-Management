@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Camera,
   ClipboardList,
+  Download,
   HardDrive,
   Loader2,
   MapPin,
@@ -20,9 +21,11 @@ import { useMobilePullRefresh } from "@/hooks/useMobilePullRefresh";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PhotoCaptionTile } from "@/components/shared/PhotoCaptionTile";
+import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 import { JobWorkReportPanel } from "@/components/jobs/JobWorkReportPanel";
 import { pickWorkReportLog, useJobWorkReportEditor } from "@/components/jobs/useJobWorkReportEditor";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { QA_APPROVER_ROLES, SERVICE_BILLING_ROLES } from "@/config/roles";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { fieldAria, fieldErrorClass, fieldRules, type FieldErrors } from "@/lib/formValidation";
 import { Progress } from "@/components/ui/progress";
@@ -44,10 +47,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
+import { userCanAccessPath } from "@/lib/userRoles";
 import { api, type BackendInventoryItem, type BackendServiceJob, type JobPhotoInput } from "@/lib/api";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
 import { defaultDatePlusDays, formatDate, formatDateTime, formatJobStatus } from "@/lib/format";
 import { formatInventoryItemClass } from "@/lib/inventoryItemClass";
+import { downloadServiceReportPdf } from "@/lib/serviceReport";
 import { toast } from "@/lib/toast";
 
 const JOB_STATUS_OPTIONS = [
@@ -60,7 +66,7 @@ const JOB_STATUS_OPTIONS = [
 ] as const;
 
 const ENGINEER_STATUS_OPTIONS = JOB_STATUS_OPTIONS.filter(
-  (o) => o.value !== "completed" && o.value !== "delivery",
+  (o) => !["completed", "delivery", "review"].includes(o.value),
 );
 
 const scopeSchema = z.object({
@@ -97,7 +103,8 @@ function toApiJobStatus(display: string) {
 export default function MobileJobDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { hasRole } = useAuth();
+  const { hasRole, canMutate, user } = useAuth();
+  const { rbacMatrix } = useSettings();
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const [job, setJob] = useState<BackendServiceJob | null>(null);
@@ -110,10 +117,13 @@ export default function MobileJobDetail() {
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoCaptions, setPhotoCaptions] = useState<string[]>([]);
   const [partsNote, setPartsNote] = useState("");
+  const [partsItemId, setPartsItemId] = useState("");
+  const [partsQty, setPartsQty] = useState(1);
   const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
   const [stockItemId, setStockItemId] = useState("");
   const [stockQty, setStockQty] = useState(1);
   const [actionSaving, setActionSaving] = useState(false);
+  const [downloadingReport, setDownloadingReport] = useState(false);
   const photosDrawerRef = useRef<HTMLDivElement>(null);
   const scopeDrawerRef = useRef<HTMLDivElement>(null);
   const stockDrawerRef = useRef<HTMLDivElement>(null);
@@ -147,14 +157,19 @@ export default function MobileJobDetail() {
     fieldOrder: ["stockItemId", "stockQty"],
   });
 
-  const canUpdateJob = hasRole(["engineer", "admin"]);
-  const canApproveComplete = hasRole(["coordinator", "admin"]);
+  const canUpdateJob = hasRole(["engineer", "admin"]) && canMutate;
+  const canApproveComplete = hasRole(QA_APPROVER_ROLES) && canMutate;
+  const canAccessBilling =
+    Boolean(user) &&
+    (hasRole(SERVICE_BILLING_ROLES) || userCanAccessPath(user!, "/app/billing", rbacMatrix));
   const statusOptions = canApproveComplete ? JOB_STATUS_OPTIONS : ENGINEER_STATUS_OPTIONS;
   const awaitingQa = job?.status === "review";
   const awaitingDelivery = job?.status === "delivery";
   const canSubmitForReview =
     canUpdateJob && job && !["review", "delivery", "completed"].includes(job.status);
   const hasWorkReport = Boolean(job && pickWorkReportLog(job.workLogs));
+  const canDownloadServiceReport =
+    hasRole(["engineer", "admin", "coordinator", "qa"]) && Boolean(job) && hasWorkReport;
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -206,15 +221,36 @@ export default function MobileJobDetail() {
     }
     try {
       await api.updateJob(job.id, { status: "review", progress: Math.max(job.progress, 90) });
-      const doc = await api.generateDocument("service-report", job.id);
+      await downloadServiceReportPdf(job.id);
       toast({
         title: "Submitted for QA",
         description: "Awaiting coordinator or admin quality check.",
       });
-      if (doc.file?.id) window.open(api.fileDownloadUrl(doc.file.id), "_blank");
       await load();
     } catch (err) {
       toast.apiError(err, { fallback: "Error" });
+    }
+  };
+
+  const generateServiceReport = async () => {
+    if (!job) return;
+    if (!pickWorkReportLog(job.workLogs)) {
+      toast({
+        title: "Work report required",
+        description: "Fill the work report before generating the service report.",
+        variant: "destructive",
+      });
+      workReport.openReport(job);
+      return;
+    }
+    setDownloadingReport(true);
+    try {
+      await downloadServiceReportPdf(job.id);
+      toast({ title: "Service report ready", description: "PDF downloaded." });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to generate service report" });
+    } finally {
+      setDownloadingReport(false);
     }
   };
 
@@ -255,8 +291,12 @@ export default function MobileJobDetail() {
         progress: 100,
         stageDetails: { delivery: { method: "site_return", deliveredAt: new Date().toISOString() } },
       });
-      toast({ title: "Delivery confirmed", description: "Job completed — continue to billing." });
-      navigate(`/app/billing/jobs/${job.id}`);
+      toast({ title: "Delivery confirmed", description: canAccessBilling ? "Job completed — continue to billing." : "Job completed." });
+      if (canAccessBilling) {
+        navigate(`/app/billing/jobs/${job.id}`);
+      } else {
+        await load();
+      }
     } catch (err) {
       toast.apiError(err, { fallback: "Error" });
     }
@@ -302,15 +342,24 @@ export default function MobileJobDetail() {
 
     setActionSaving(true);
     try {
+      const selectedItem = inventory.find((item) => item.id === partsItemId);
       await api.addJobExtra(job.id, {
-        description: partsNote.trim().slice(0, 120),
+        inventoryItemId: selectedItem?.id ?? null,
+        description: selectedItem?.name ?? partsNote.trim().slice(0, 120),
         type: "product",
         reason: partsNote.trim(),
-        quantity: 1,
-        unitPrice: 0,
+        quantity: partsQty,
+        unitPrice: Number(selectedItem?.unitCost ?? 0),
         taxRate: 0,
       });
+      try {
+        await api.requestJobParts(job.id, partsNote.trim());
+      } catch {
+        /* job may already be partsPending */
+      }
       setPartsNote("");
+      setPartsItemId("");
+      setPartsQty(1);
       setPartsOpen(false);
       scopeValidation.reset();
       await load();
@@ -403,7 +452,7 @@ export default function MobileJobDetail() {
   const stockShortage = stockItemId && stockQty > (inventory.find((item) => item.id === stockItemId)?.inStock ?? 0);
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "engineer"]}>
+    <RoleGuard roles={["admin", "coordinator", "engineer", "qa"]}>
       <div className="mobile-page pb-8">
         <div className="mobile-sticky-header">
           <button
@@ -539,7 +588,14 @@ export default function MobileJobDetail() {
                     label={hasWorkReport ? "Edit report" : "Work report"}
                     onClick={() => workReport.openReport(job)}
                   />
-                  <FieldAction icon={PlusCircle} label="Extra Scope" onClick={() => { scopeValidation.reset(); setPartsNote(""); setPartsOpen(true); }} />
+                  <FieldAction icon={PlusCircle} label="Extra Scope" onClick={() => {
+                    scopeValidation.reset();
+                    setPartsNote("");
+                    setPartsItemId("");
+                    setPartsQty(1);
+                    setPartsOpen(true);
+                    void api.listInventory({ limit: 100, page: 1 }).then((r) => setInventory(r.data)).catch(() => setInventory([]));
+                  }} />
                   <FieldAction icon={PackageMinus} label="Deduct Stock" onClick={() => void openStockDialog()} />
                   <FieldAction icon={Camera} label="Quick photos" onClick={() => { photosValidation.reset(); resetPhotoDraft(); setPhotosOpen(true); }} />
                 </div>
@@ -577,6 +633,21 @@ export default function MobileJobDetail() {
                 {hasWorkReport ? "Update Work Report" : "Work Report"}
               </button>
             ) : null}
+            {canDownloadServiceReport ? (
+              <button
+                type="button"
+                className="mobile-btn-secondary w-full"
+                disabled={downloadingReport}
+                onClick={() => void generateServiceReport()}
+              >
+                {downloadingReport ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                {downloadingReport ? "Generating…" : "Download Service Report"}
+              </button>
+            ) : null}
             {canSubmitForReview ? (
               <button type="button" className="mobile-btn-primary w-full" onClick={() => void submitForReview()}>
                 Submit for QA & Report
@@ -605,6 +676,32 @@ export default function MobileJobDetail() {
             ) : null}
           </div>
         )}
+        {job.status === "completed" && canDownloadServiceReport ? (
+          <div className="mobile-sticky-footer mt-6 space-y-2">
+            <button
+              type="button"
+              className="mobile-btn-primary w-full"
+              disabled={downloadingReport}
+              onClick={() => void generateServiceReport()}
+            >
+              {downloadingReport ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              {downloadingReport ? "Generating…" : "Download Service Report"}
+            </button>
+            {canAccessBilling ? (
+              <button
+                type="button"
+                className="mobile-btn-secondary w-full"
+                onClick={() => navigate(`/app/billing/jobs/${job.id}`)}
+              >
+                Continue to billing
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <ActionDrawer open={photosOpen} onOpenChange={(open) => { if (!open) { photosValidation.reset(); resetPhotoDraft(); } setPhotosOpen(open); }} title="Upload Photos" contentRef={photosDrawerRef}>
@@ -664,8 +761,31 @@ export default function MobileJobDetail() {
         </form>
       </ActionDrawer>
 
-      <ActionDrawer open={partsOpen} onOpenChange={(open) => { if (!open) { scopeValidation.reset(); setPartsNote(""); } setPartsOpen(open); }} title="Request Extra Scope" contentRef={scopeDrawerRef}>
+      <ActionDrawer open={partsOpen} onOpenChange={(open) => { if (!open) { scopeValidation.reset(); setPartsNote(""); setPartsItemId(""); setPartsQty(1); } setPartsOpen(open); }} title="Request Extra Scope" contentRef={scopeDrawerRef}>
         <form noValidate onSubmit={(e) => { e.preventDefault(); void handleScopeChange(); }}>
+          <div className="space-y-3">
+            <div>
+              <Label>Inventory product (optional)</Label>
+              <InventoryProductSelect
+                items={inventory}
+                value={partsItemId || ""}
+                onValueChange={setPartsItemId}
+                placeholder="Select a product, if required"
+                getOptionLabel={(item) => `${item.name} (${item.sku})`}
+                triggerClassName="mt-1.5"
+              />
+            </div>
+            <div>
+              <Label htmlFor="mobile-parts-qty">Quantity</Label>
+              <Input
+                id="mobile-parts-qty"
+                type="number"
+                min={1}
+                className="mt-1.5"
+                value={partsQty}
+                onChange={(e) => setPartsQty(Number(e.target.value) || 1)}
+              />
+            </div>
           <div data-field="partsNote">
             <Label htmlFor="mobile-parts-note" className={scopeValidation.shouldShow("partsNote") ? "text-destructive" : undefined}>
               Scope change details
@@ -687,6 +807,7 @@ export default function MobileJobDetail() {
             {scopeValidation.shouldShow("partsNote") && (
               <FormFieldError field="partsNote" message={scopeValidation.errors.partsNote} className="mt-2" />
             )}
+          </div>
           </div>
           <DrawerFooter className="px-0">
             <button type="submit" className="mobile-btn-primary w-full" disabled={actionSaving}>
@@ -711,28 +832,20 @@ export default function MobileJobDetail() {
                 Inventory item
                 <RequiredMark />
               </Label>
-              <Select
+              <InventoryProductSelect
+                items={inventory}
                 value={stockItemId}
                 onValueChange={(v) => {
                   setStockItemId(v);
                   stockValidation.clearError("stockItemId");
                   stockValidation.clearError("stockQty");
                 }}
-              >
-                <SelectTrigger
-                  className={`mt-1.5 h-12 rounded-[14px] ${fieldErrorClass(stockValidation.shouldShow("stockItemId"))}`}
-                  {...fieldAria("stockItemId", stockValidation.shouldShow("stockItemId") ? stockValidation.errors.stockItemId : null)}
-                >
-                  <SelectValue placeholder="Select item" />
-                </SelectTrigger>
-                <SelectContent>
-                  {inventory.map((i) => (
-                    <SelectItem key={i.id} value={i.id}>
-                      {formatInventoryItemClass(i.itemClass)} · {i.name} — {i.inStock} in stock
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder="Select item"
+                getOptionLabel={(i) =>
+                  `${formatInventoryItemClass(i.itemClass)} · ${i.name} — ${i.inStock} in stock`
+                }
+                triggerClassName={`mt-1.5 h-12 rounded-[14px] ${fieldErrorClass(stockValidation.shouldShow("stockItemId"))}`}
+              />
               {stockValidation.shouldShow("stockItemId") && (
                 <FormFieldError field="stockItemId" message={stockValidation.errors.stockItemId} className="mt-2" />
               )}

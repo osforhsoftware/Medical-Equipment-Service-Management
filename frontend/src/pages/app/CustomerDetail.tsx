@@ -31,8 +31,10 @@ import {
 import { CustomerAdditionalFieldsEditor } from "@/components/customers/CustomerAdditionalFieldsEditor";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
-import { CUSTOMER_WRITE_ROLES, ESTIMATE_WRITE_ROLES, SALES_WRITE_ROLES } from "@/config/roles";
+import { CUSTOMER_WRITE_ROLES, ESTIMATE_WRITE_ROLES, SALES_WRITE_ROLES, SERVICE_BILLING_ROLES } from "@/config/roles";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
+import { userCanAccessPath } from "@/lib/userRoles";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { api, ApiError, type BackendCustomer, type BackendEquipment, type BackendEstimate, type BackendInvoice, type BackendServiceJob, type BackendServiceRequest } from "@/lib/api";
 import { parseCustomerAdditionalFields, sanitizeCustomerAdditionalFields, type CustomerAdditionalField } from "@/lib/customerFields";
@@ -107,10 +109,14 @@ function customerToForm(customer: BackendCustomer): EditForm {
 }
 
 export default function CustomerDetail() {
-  const { hasRole } = useAuth();
+  const { hasRole, user } = useAuth();
+  const { rbacMatrix } = useSettings();
   const canQuote = hasRole(ESTIMATE_WRITE_ROLES);
   const canSell = hasRole(SALES_WRITE_ROLES);
   const canEdit = hasRole(CUSTOMER_WRITE_ROLES);
+  const canAccessBilling =
+    Boolean(user) &&
+    (hasRole(SERVICE_BILLING_ROLES) || userCanAccessPath(user!, "/app/billing", rbacMatrix));
   const { id = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [customer, setCustomer] = useState<BackendCustomer | null>(null);
@@ -535,15 +541,25 @@ export default function CustomerDetail() {
                   <p className="text-sm text-muted-foreground">No invoices.</p>
                 ) : (
                   <div className="space-y-2">
-                    {invoices.map((i) => (
-                      <Link key={i.id} to={`/app/billing/invoices/${i.id}`} className="flex items-center justify-between rounded-lg border p-3 text-sm hover:bg-secondary/40">
-                        <div>
-                          <p className="font-mono font-medium">{i.reference}</p>
-                          <p className="text-xs text-muted-foreground">{formatCurrency(Number(i.total))}</p>
+                    {invoices.map((i) =>
+                      canAccessBilling ? (
+                        <Link key={i.id} to={`/app/billing/invoices/${i.id}`} className="flex items-center justify-between rounded-lg border p-3 text-sm hover:bg-secondary/40">
+                          <div>
+                            <p className="font-mono font-medium">{i.reference}</p>
+                            <p className="text-xs text-muted-foreground">{formatCurrency(Number(i.total))}</p>
+                          </div>
+                          <StatusBadge status={i.status} />
+                        </Link>
+                      ) : (
+                        <div key={i.id} className="flex items-center justify-between rounded-lg border p-3 text-sm">
+                          <div>
+                            <p className="font-mono font-medium">{i.reference}</p>
+                            <p className="text-xs text-muted-foreground">{formatCurrency(Number(i.total))}</p>
+                          </div>
+                          <StatusBadge status={i.status} />
                         </div>
-                        <StatusBadge status={i.status} />
-                      </Link>
-                    ))}
+                      ),
+                    )}
                   </div>
                 )}
               </DetailSection>

@@ -34,7 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAuth } from "@/context/AuthContext";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
@@ -319,7 +319,7 @@ export default function SalesEnquiries() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<SalesEnquiry | null>(null);
 
-  const { data: enquiries = [], isLoading } = useQuery<SalesEnquiry[]>({
+  const { data: enquiries = [], isLoading, isError, error, refetch: refetchQuery } = useQuery<SalesEnquiry[]>({
     queryKey: ["sales-enquiries"],
     queryFn: async () => {
       const res = await api.get<SalesEnquiry[]>("/sales-enquiries");
@@ -412,6 +412,17 @@ export default function SalesEnquiries() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
+        ) : isError ? (
+          <Card>
+            <CardContent className="py-12 text-center space-y-3">
+              <p className="text-sm font-medium text-destructive">
+                {error instanceof ApiError ? error.message : "Unable to load sales enquiries"}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => void refetchQuery()}>
+                Try again
+              </Button>
+            </CardContent>
+          </Card>
         ) : filtered.length === 0 ? (
           <Card>
             <CardContent className="py-16 text-center">

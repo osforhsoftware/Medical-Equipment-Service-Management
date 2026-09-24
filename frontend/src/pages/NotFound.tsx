@@ -21,7 +21,7 @@ const NotFound = () => {
           The page you requested may have moved or is not available in your workspace.
         </p>
         <Button asChild className="mt-6">
-          <Link to="/"><ArrowLeft className="h-4 w-4" /> Return home</Link>
+          <Link to="/app"><ArrowLeft className="h-4 w-4" /> Return home</Link>
         </Button>
       </div>
     </div>

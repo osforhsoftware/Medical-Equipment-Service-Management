@@ -96,6 +96,7 @@ async function main() {
     ["engineer", "Service Engineer"],
     ["inventory", "Inventory Staff"],
     ["billing", "Billing Staff"],
+    ["qa", "Quality Assurance"],
     ["customer", "Customer"],
   ] as const;
 
@@ -205,6 +206,14 @@ async function main() {
       role: "billing",
       branchKey: "hq",
       color: "45 80% 42%",
+    },
+    {
+      username: "qa1",
+      name: "Dana Cole",
+      email: "dana.cole@mesms.io",
+      role: "qa",
+      branchKey: "hq",
+      color: "210 55% 40%",
     },
   ];
 

@@ -309,6 +309,10 @@ export interface BackendEquipment {
   installDate: string | null;
   warrantyStart: string | null;
   warrantyEnd: string | null;
+  noMachineWarranty?: boolean;
+  serviceWarrantyStart?: string | null;
+  serviceWarrantyEnd?: string | null;
+  noServiceWarranty?: boolean;
   amcStatus: string;
   condition: string;
   currentStatus?: string;
@@ -375,6 +379,10 @@ export interface CreateEquipmentInput {
   installDate?: string | null;
   warrantyStart?: string | null;
   warrantyEnd?: string | null;
+  noMachineWarranty?: boolean;
+  serviceWarrantyStart?: string | null;
+  serviceWarrantyEnd?: string | null;
+  noServiceWarranty?: boolean;
   amcStatus?: string;
   condition?: string;
   currentStatus?: string;
@@ -774,7 +782,7 @@ export interface BackendEstimateLine {
 }
 
 export interface EstimateLineInput {
-  type: "labor" | "part" | "transport" | "testing" | "calibration" | "service" | "other";
+  type: "labor" | "part" | "transport" | "testing" | "calibration" | "service" | "custom" | "other";
   description: string;
   catalogItemId?: string | null;
   inventoryItemId?: string | null;
@@ -1129,14 +1137,6 @@ export interface BackendStockMovement {
   inventoryItem?: { sku: string; name: string };
 }
 
-export interface CreatePurchaseOrderInput {
-  supplier: string;
-  items: number;
-  total: number;
-  expectedDate: string;
-  status?: string;
-}
-
 export interface BackendStockTransfer {
   id: string;
   tenantId: string;
@@ -1156,13 +1156,6 @@ export interface BackendStockTransfer {
     quantity: number;
     quantityReceived?: number;
   }>;
-}
-
-export interface CreateStockTransferInput {
-  fromBranch: string;
-  toBranch: string;
-  items: number;
-  status?: string;
 }
 
 export interface CreateDomainStockTransferInput {
@@ -1189,6 +1182,7 @@ export interface BackendSettings {
   autoAssignCoordinatorAfterInspection: boolean;
   autoAssignEstimatorAfterInspection: boolean;
   autoAssignEngineerOnApproval: boolean;
+  guidedSetupFlow: boolean;
   defaultCoordinatorUserId: string | null;
   defaultInspectorUserId: string | null;
   defaultEstimatorUserId: string | null;
@@ -1212,6 +1206,7 @@ export interface UpdateSettingsInput {
   autoAssignCoordinatorAfterInspection?: boolean;
   autoAssignEstimatorAfterInspection?: boolean;
   autoAssignEngineerOnApproval?: boolean;
+  guidedSetupFlow?: boolean;
   defaultCoordinatorUserId?: string | null;
   defaultInspectorUserId?: string | null;
   defaultEstimatorUserId?: string | null;
@@ -1438,6 +1433,8 @@ export interface DashboardData {
     completed: number;
   };
   myQueue: DashboardQueueItem[];
+  /** QA completed history (pass/fail). Empty for non-QA roles. */
+  historyQueue?: DashboardQueueItem[];
   todaySchedule: DashboardScheduleItem[];
   upcomingJobs: DashboardScheduleItem[];
   trends: {
@@ -1896,10 +1893,22 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  closeServiceTicket: (id: string, data?: { note?: string }) =>
+  closeServiceTicket: (id: string, data?: { note?: string; force?: boolean }) =>
     request<BackendServiceRequest>(`/api/service-requests/${id}/close`, {
       method: "POST",
       body: JSON.stringify(data ?? {}),
+    }),
+
+  cancelServiceTicket: (id: string, reason?: string) =>
+    request<BackendServiceRequest>(`/api/service-requests/${id}/cancel`, {
+      method: "PUT",
+      body: JSON.stringify(reason ? { reason } : {}),
+    }),
+
+  reopenServiceTicket: (id: string, data: { status: string; note: string }) =>
+    request<BackendServiceRequest>(`/api/service-requests/${id}/reopen`, {
+      method: "PUT",
+      body: JSON.stringify(data),
     }),
 
   getInspectionReport: (requestId: string) =>
@@ -2095,19 +2104,7 @@ export const api = {
   getPurchaseOrder: (id: string) =>
     request<BackendPurchaseOrder>(`/api/purchase-orders/${id}`),
 
-  createPurchaseOrder: (data: CreatePurchaseOrderInput) =>
-    request<BackendPurchaseOrder>("/api/purchase-orders", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-
   listStockTransfers: () => request<BackendStockTransfer[]>("/api/stock-transfers"),
-
-  createStockTransfer: (data: CreateStockTransferInput) =>
-    request<BackendStockTransfer>("/api/stock-transfers", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
 
   listDomainStockTransfers: () =>
     request<BackendStockTransfer[]>("/api/domain/stock-transfers"),
@@ -2479,6 +2476,10 @@ export const api = {
     equipmentWarranty?: {
       warrantyStart?: string | null;
       warrantyEnd?: string | null;
+      noMachineWarranty?: boolean;
+      serviceWarrantyStart?: string | null;
+      serviceWarrantyEnd?: string | null;
+      noServiceWarranty?: boolean;
       amcStatus?: "active" | "expiring" | "expired" | "none";
     },
   ) =>

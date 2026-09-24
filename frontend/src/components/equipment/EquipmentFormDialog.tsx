@@ -7,6 +7,7 @@ import { EquipmentQrPanel } from "@/components/shared/EquipmentQrPanel";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -51,6 +52,10 @@ type FormState = {
   installDate: string;
   warrantyStart: string;
   warrantyEnd: string;
+  noMachineWarranty: boolean;
+  serviceWarrantyStart: string;
+  serviceWarrantyEnd: string;
+  noServiceWarranty: boolean;
   condition: string;
   currentStatus: string;
   purchaseSaleHistory: string;
@@ -76,6 +81,8 @@ const equipmentSchema = z.object({
   installDate: fieldRules.optionalString(),
   warrantyStart: fieldRules.optionalString(),
   warrantyEnd: fieldRules.optionalString(),
+  serviceWarrantyStart: fieldRules.optionalString(),
+  serviceWarrantyEnd: fieldRules.optionalString(),
   condition: fieldRules.optionalString(),
   currentStatus: fieldRules.optionalString(),
   purchaseSaleHistory: fieldRules.optionalString(),
@@ -103,6 +110,10 @@ const emptyForm = (): FormState => ({
   installDate: "",
   warrantyStart: "",
   warrantyEnd: "",
+  noMachineWarranty: false,
+  serviceWarrantyStart: "",
+  serviceWarrantyEnd: "",
+  noServiceWarranty: false,
   condition: "",
   currentStatus: "in_service",
   purchaseSaleHistory: "",
@@ -123,6 +134,10 @@ function fromEquipment(item: BackendEquipment): FormState {
     installDate: toDateInput(item.installDate),
     warrantyStart: toDateInput(item.warrantyStart),
     warrantyEnd: toDateInput(item.warrantyEnd),
+    noMachineWarranty: Boolean(item.noMachineWarranty),
+    serviceWarrantyStart: toDateInput(item.serviceWarrantyStart),
+    serviceWarrantyEnd: toDateInput(item.serviceWarrantyEnd),
+    noServiceWarranty: Boolean(item.noServiceWarranty),
     condition: item.condition ?? "",
     currentStatus: item.currentStatus ?? "in_service",
     purchaseSaleHistory: item.purchaseSaleHistory ?? "",
@@ -142,8 +157,12 @@ function toPayload(form: FormState, unit?: Pick<UnitEntry, "assetTag" | "serialN
     customerId: form.customerId || null,
     location: form.location.trim(),
     installDate: form.installDate || null,
-    warrantyStart: form.warrantyStart || null,
-    warrantyEnd: form.warrantyEnd || null,
+    warrantyStart: form.noMachineWarranty ? null : form.warrantyStart || null,
+    warrantyEnd: form.noMachineWarranty ? null : form.warrantyEnd || null,
+    noMachineWarranty: form.noMachineWarranty,
+    serviceWarrantyStart: form.noServiceWarranty ? null : form.serviceWarrantyStart || null,
+    serviceWarrantyEnd: form.noServiceWarranty ? null : form.serviceWarrantyEnd || null,
+    noServiceWarranty: form.noServiceWarranty,
     condition: form.condition || undefined,
     currentStatus: form.currentStatus || "in_service",
     purchaseSaleHistory: form.purchaseSaleHistory.trim() || null,
@@ -213,6 +232,9 @@ type EquipmentFormDialogProps = {
   onOpenChange: (open: boolean) => void;
   equipment?: BackendEquipment | null;
   existingAssetTags?: string[];
+  defaultCustomerId?: string;
+  defaultCustomerName?: string;
+  defaultLocation?: string;
   onSaved?: (record: BackendEquipment) => void;
 };
 
@@ -221,6 +243,9 @@ export function EquipmentFormDialog({
   onOpenChange,
   equipment = null,
   existingAssetTags = [],
+  defaultCustomerId = "",
+  defaultCustomerName = "",
+  defaultLocation = "",
   onSaved,
 }: EquipmentFormDialogProps) {
   const { user } = useAuth();
@@ -265,6 +290,8 @@ export function EquipmentFormDialog({
           "installDate",
           "warrantyStart",
           "warrantyEnd",
+          "serviceWarrantyStart",
+          "serviceWarrantyEnd",
           "condition",
           "currentStatus",
           "purchaseSaleHistory",
@@ -280,6 +307,8 @@ export function EquipmentFormDialog({
           "installDate",
           "warrantyStart",
           "warrantyEnd",
+          "serviceWarrantyStart",
+          "serviceWarrantyEnd",
           "condition",
           "currentStatus",
           "purchaseSaleHistory",
@@ -321,16 +350,20 @@ export function EquipmentFormDialog({
       setForm(fromEquipment(equipment));
       setUnits([]);
     } else {
-      setForm(emptyForm());
+      setForm({
+        ...emptyForm(),
+        customerId: defaultCustomerId,
+        location: defaultLocation,
+      });
       setUnits([createUnit(existingAssetTags)]);
     }
     setUnitErrors({});
     setUnitsTouched(false);
     setUsedAssetTags([]);
     resetValidation();
-    // Reset only when the dialog opens or the edited record changes.
+    // Reset only when the dialog opens, the edited record changes, or guided defaults change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, equipment?.id]);
+  }, [open, equipment?.id, defaultCustomerId, defaultLocation]);
 
   const showUnitError = (field: string) => Boolean(unitErrors[field] && unitsTouched);
 
@@ -454,7 +487,9 @@ export function EquipmentFormDialog({
           </DialogTitle>
           {!editing ? (
             <p className="text-sm text-muted-foreground">
-              Add asset tag and serial number first, then product details.
+              {defaultCustomerId
+                ? `${defaultCustomerName || "This customer"} is already selected. Add the machine details, or change the customer if needed.`
+                : "Add asset tag and serial number first, then product details."}
             </p>
           ) : null}
         </DialogHeader>
@@ -665,6 +700,11 @@ export function EquipmentFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NONE}>Not specified</SelectItem>
+                  {defaultCustomerId && !customers.some((c) => c.id === defaultCustomerId) ? (
+                    <SelectItem value={defaultCustomerId}>
+                      {defaultCustomerName || "New customer"}
+                    </SelectItem>
+                  ) : null}
                   {customers.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.name}
@@ -704,35 +744,107 @@ export function EquipmentFormDialog({
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2" data-field="warrantyStart">
-              <Label htmlFor="warranty-start">Warranty start (optional)</Label>
-              <Input
-                id="warranty-start"
-                type="date"
-                value={form.warrantyStart}
-                onChange={(e) => {
-                  const next = { ...form, warrantyStart: e.target.value };
+          <div className="space-y-3">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={form.noMachineWarranty}
+                onCheckedChange={(checked) => {
+                  const noMachineWarranty = checked === true;
+                  const next = {
+                    ...form,
+                    noMachineWarranty,
+                    warrantyStart: noMachineWarranty ? "" : form.warrantyStart,
+                    warrantyEnd: noMachineWarranty ? "" : form.warrantyEnd,
+                  };
                   setForm(next);
                   handleChange("warrantyStart", next);
                 }}
-                onBlur={() => handleBlur("warrantyStart", form)}
               />
-            </div>
-            <div className="grid gap-2" data-field="warrantyEnd">
-              <Label htmlFor="warranty-end">Warranty end (optional)</Label>
-              <Input
-                id="warranty-end"
-                type="date"
-                value={form.warrantyEnd}
-                onChange={(e) => {
-                  const next = { ...form, warrantyEnd: e.target.value };
+              <span>No machine warranty</span>
+            </label>
+            {!form.noMachineWarranty ? (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2" data-field="warrantyStart">
+                  <Label htmlFor="warranty-start">Machine warranty start (optional)</Label>
+                  <Input
+                    id="warranty-start"
+                    type="date"
+                    value={form.warrantyStart}
+                    onChange={(e) => {
+                      const next = { ...form, warrantyStart: e.target.value };
+                      setForm(next);
+                      handleChange("warrantyStart", next);
+                    }}
+                    onBlur={() => handleBlur("warrantyStart", form)}
+                  />
+                </div>
+                <div className="grid gap-2" data-field="warrantyEnd">
+                  <Label htmlFor="warranty-end">Machine warranty end (optional)</Label>
+                  <Input
+                    id="warranty-end"
+                    type="date"
+                    value={form.warrantyEnd}
+                    onChange={(e) => {
+                      const next = { ...form, warrantyEnd: e.target.value };
+                      setForm(next);
+                      handleChange("warrantyEnd", next);
+                    }}
+                    onBlur={() => handleBlur("warrantyEnd", form)}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <div className="space-y-3">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={form.noServiceWarranty}
+                onCheckedChange={(checked) => {
+                  const noServiceWarranty = checked === true;
+                  const next = {
+                    ...form,
+                    noServiceWarranty,
+                    serviceWarrantyStart: noServiceWarranty ? "" : form.serviceWarrantyStart,
+                    serviceWarrantyEnd: noServiceWarranty ? "" : form.serviceWarrantyEnd,
+                  };
                   setForm(next);
-                  handleChange("warrantyEnd", next);
+                  handleChange("serviceWarrantyStart", next);
                 }}
-                onBlur={() => handleBlur("warrantyEnd", form)}
               />
-            </div>
+              <span>No service warranty</span>
+            </label>
+            {!form.noServiceWarranty ? (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2" data-field="serviceWarrantyStart">
+                  <Label htmlFor="service-warranty-start">Service warranty start (optional)</Label>
+                  <Input
+                    id="service-warranty-start"
+                    type="date"
+                    value={form.serviceWarrantyStart}
+                    onChange={(e) => {
+                      const next = { ...form, serviceWarrantyStart: e.target.value };
+                      setForm(next);
+                      handleChange("serviceWarrantyStart", next);
+                    }}
+                    onBlur={() => handleBlur("serviceWarrantyStart", form)}
+                  />
+                </div>
+                <div className="grid gap-2" data-field="serviceWarrantyEnd">
+                  <Label htmlFor="service-warranty-end">Service warranty end (optional)</Label>
+                  <Input
+                    id="service-warranty-end"
+                    type="date"
+                    value={form.serviceWarrantyEnd}
+                    onChange={(e) => {
+                      const next = { ...form, serviceWarrantyEnd: e.target.value };
+                      setForm(next);
+                      handleChange("serviceWarrantyEnd", next);
+                    }}
+                    onBlur={() => handleBlur("serviceWarrantyEnd", form)}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2" data-field="condition">
@@ -789,7 +901,7 @@ export function EquipmentFormDialog({
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Lifecycle status — separate from condition and warranty.
+                Lifecycle status — separate from condition and machine/service warranty.
               </p>
             </div>
           </div>

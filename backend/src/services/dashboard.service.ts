@@ -1,6 +1,7 @@
 import { prisma } from "@/db/prisma";
 import { notificationsService } from "@/services/notifications.service";
 import { jobsService } from "@/services/jobs.service";
+import { qaReviewedWhere } from "@/repositories/jobs.repository";
 import type { Prisma } from "@prisma/client";
 
 const CLOSED_REQUEST_STATUSES = ["completed", "invoiced", "closed", "finished"] as const;
@@ -13,7 +14,8 @@ type StaffRole =
   | "sales"
   | "engineer"
   | "inventory"
-  | "billing";
+  | "billing"
+  | "qa";
 
 type QueueKind = "request" | "job" | "estimate" | "invoice" | "purchaseOrder" | "transfer" | "parts";
 
@@ -172,7 +174,7 @@ export class DashboardService {
     const staffRole = (role as StaffRole) || "admin";
     if (staffRole === "engineer") {
       await jobsService.syncJobsFromAssignedTickets(tenantId, userId);
-    } else if (staffRole === "admin" || staffRole === "coordinator") {
+    } else if (staffRole === "admin" || staffRole === "coordinator" || staffRole === "qa") {
       await jobsService.syncMissingJobsForTenant(tenantId, userId);
     }
 
@@ -189,6 +191,39 @@ export class DashboardService {
     const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
     const { from: rangeFrom, to: rangeTo } = resolveDateRange(range?.from, range?.to);
     const { mode: chartMode, buckets: chartBuckets } = buildRangeBuckets(rangeFrom, rangeTo);
+
+    const seesCompanyActivity = staffRole === "admin" || staffRole === "coordinator" || staffRole === "qa";
+    const assignedScope = this.assignedWorkWhere(staffRole, userId);
+    const hasAssigneeScope = Object.keys(assignedScope).length > 0;
+
+    const actorUser = await prisma.user.findFirst({
+      where: { id: userId, tenantId },
+      select: { name: true },
+    });
+    const actorName = actorUser?.name?.trim() || null;
+
+    const timelineWhere: Prisma.TimelineEventWhereInput = seesCompanyActivity
+      ? { request: { tenantId } }
+      : hasAssigneeScope
+        ? { request: { tenantId, ...assignedScope } }
+        : {
+            request: { tenantId },
+            ...(actorName
+              ? {
+                  OR: [
+                    { actor: actorName },
+                    { action: { contains: actorName } },
+                    { note: { contains: actorName } },
+                  ],
+                }
+              : { actor: "__none__" }),
+          };
+
+    const auditWhere: Prisma.AuditLogWhereInput = seesCompanyActivity
+      ? { tenantId }
+      : actorName
+        ? { tenantId, actor: actorName }
+        : { tenantId, actor: "__none__" };
 
     const [
       openRequests,
@@ -247,6 +282,19 @@ export class DashboardService {
         where: { ...jobScope, status: { not: "completed" } },
         orderBy: { updatedAt: "desc" },
         take: 8,
+        select: {
+          id: true,
+          reference: true,
+          customerName: true,
+          equipmentName: true,
+          engineer: true,
+          type: true,
+          status: true,
+          progress: true,
+          scheduledFor: true,
+          engineerId: true,
+          updatedAt: true,
+        },
       }),
       prisma.serviceJob.findMany({
         where: jobScope,
@@ -257,13 +305,13 @@ export class DashboardService {
         select: { total: true, issuedAt: true, status: true, salesOrderId: true, jobId: true, serviceRequestId: true },
       }),
       prisma.timelineEvent.findMany({
-        where: { request: { tenantId } },
+        where: timelineWhere,
         orderBy: { at: "desc" },
         take: 6,
         select: { id: true, action: true, actor: true, at: true },
       }),
       prisma.auditLog.findMany({
-        where: { tenantId },
+        where: auditWhere,
         orderBy: { createdAt: "desc" },
         take: 6,
         select: { id: true, action: true, actor: true, createdAt: true },
@@ -311,23 +359,56 @@ export class DashboardService {
         },
         orderBy: [{ slaDue: "asc" }, { updatedAt: "desc" }],
         take: 12,
+        select: {
+          id: true,
+          reference: true,
+          customerName: true,
+          equipmentName: true,
+          type: true,
+          status: true,
+          priority: true,
+          slaDue: true,
+          updatedAt: true,
+        },
       }),
       prisma.serviceJob.findMany({
-        where: {
-          ...jobScope,
-          ...assignedJobWhere(userId),
-          status: { not: "completed" },
-        },
+        where:
+          staffRole === "qa"
+            ? { ...jobScope, status: "review" }
+            : {
+                ...jobScope,
+                ...assignedJobWhere(userId),
+                status: { not: "completed" },
+              },
         orderBy: [{ scheduledFor: "asc" }, { updatedAt: "desc" }],
         take: 12,
+        select: {
+          id: true,
+          reference: true,
+          customerName: true,
+          equipmentName: true,
+          engineer: true,
+          type: true,
+          status: true,
+          progress: true,
+          scheduledFor: true,
+          updatedAt: true,
+        },
       }),
       prisma.serviceJob.count({
-        where: {
-          ...jobScope,
-          ...(staffRole === "engineer" ? assignedJobWhere(userId) : {}),
-          status: "completed",
-          updatedAt: { gte: mtdStart },
-        },
+        where:
+          staffRole === "qa"
+            ? {
+                ...jobScope,
+                ...qaReviewedWhere(),
+                updatedAt: { gte: mtdStart },
+              }
+            : {
+                ...jobScope,
+                ...(staffRole === "engineer" ? assignedJobWhere(userId) : {}),
+                status: "completed",
+                updatedAt: { gte: mtdStart },
+              },
       }),
       prisma.serviceRequest.count({
         where: {
@@ -508,33 +589,78 @@ export class DashboardService {
       serviceQueue,
     });
 
+    const historyQueue =
+      staffRole === "qa"
+        ? (
+            await prisma.serviceJob.findMany({
+              where: { ...jobScope, ...qaReviewedWhere() },
+              orderBy: { updatedAt: "desc" },
+              take: 10,
+              select: {
+                id: true,
+                reference: true,
+                customerName: true,
+                equipmentName: true,
+                type: true,
+                status: true,
+                progress: true,
+                scheduledFor: true,
+                stageDetails: true,
+                updatedAt: true,
+              },
+            })
+          ).map((j) => {
+            const qa = (j.stageDetails as { qa?: { result?: string; notes?: string | null } } | null)?.qa;
+            const resultLabel = qa?.result === "fail" ? "Fail" : qa?.result === "pass" ? "Pass" : "Reviewed";
+            return {
+              id: j.id,
+              kind: "job" as const,
+              reference: j.reference,
+              title: j.equipmentName,
+              subtitle: `${j.customerName} · QA ${resultLabel}${qa?.notes ? ` — ${qa.notes}` : ""}`,
+              status: mapJobStatus(j.status),
+              dueAt: j.scheduledFor.toISOString(),
+              progress: j.progress,
+              href: `/app/jobs/${j.id}`,
+            };
+          })
+        : [];
+
     const roleQueues = {
       newAssigned:
-        staffRole === "engineer"
-          ? myJobs.filter((j) => j.status === "scheduled").length
-              || myAssignedRequests.filter((r) => r.status === "assigned_engineer" || r.status === "new").length
-          : myAssignedRequests.filter((r) => r.status === "new").length,
-      inspection: inspectionQueue.length,
-      estimatePending: myAssignedRequests.filter((r) => r.status === "estimate").length + pendingEstimates,
-      waitingApproval: myAssignedRequests.filter((r) => r.status === "approval" || r.status === "pending_approval").length + sentEstimates,
+        staffRole === "qa"
+          ? 0
+          : staffRole === "engineer"
+            ? myJobs.filter((j) => j.status === "scheduled").length
+                || myAssignedRequests.filter((r) => r.status === "assigned_engineer" || r.status === "new").length
+            : myAssignedRequests.filter((r) => r.status === "new").length,
+      inspection: staffRole === "qa" ? 0 : inspectionQueue.length,
+      estimatePending: staffRole === "qa" ? 0 : myAssignedRequests.filter((r) => r.status === "estimate").length + pendingEstimates,
+      waitingApproval:
+        staffRole === "qa"
+          ? myJobs.length
+          : myAssignedRequests.filter((r) => r.status === "approval" || r.status === "pending_approval").length + sentEstimates,
       servicePending:
-        staffRole === "engineer"
-          ? myJobs.filter((j) => j.status !== "completed").length
-              || serviceQueue.length
-          : serviceQueue.length + myJobs.filter((j) => j.status !== "completed").length,
+        staffRole === "qa"
+          ? 0
+          : staffRole === "engineer"
+            ? myJobs.filter((j) => j.status !== "completed").length
+                || serviceQueue.length
+            : serviceQueue.length + myJobs.filter((j) => j.status !== "completed").length,
       completed: completedJobsMonth,
     };
 
     const showFinance = staffRole === "admin" || staffRole === "billing" || staffRole === "coordinator" || staffRole === "sales";
     const showCompanyOps = staffRole === "admin" || staffRole === "coordinator";
     const showInventoryAlerts = staffRole === "admin" || staffRole === "inventory" || staffRole === "engineer";
+    const showQaWorkspace = staffRole === "qa";
 
     return {
       role: staffRole,
       stats: {
         openRequests: showCompanyOps || staffRole === "billing" ? openRequests : personal.assignedOpen,
         activeJobs:
-          staffRole === "engineer"
+          staffRole === "engineer" || staffRole === "qa"
             ? myJobs.length
             : showCompanyOps
               ? activeJobsCount
@@ -558,6 +684,7 @@ export class DashboardService {
       personal,
       roleQueues,
       myQueue,
+      historyQueue,
       todaySchedule: myJobsToday.map((j) => ({
         id: j.id,
         reference: j.reference,
@@ -597,8 +724,8 @@ export class DashboardService {
             saleRevenue: 0,
             serviceRevenue: 0,
           })),
-      jobsByType: showCompanyOps || staffRole === "engineer" || staffRole === "billing" ? jobsByType : [],
-      jobsByStatus: showCompanyOps || staffRole === "engineer" || staffRole === "billing" ? jobsByStatus : [],
+      jobsByType: showCompanyOps || staffRole === "engineer" || staffRole === "billing" || showQaWorkspace ? jobsByType : [],
+      jobsByStatus: showCompanyOps || staffRole === "engineer" || staffRole === "billing" || showQaWorkspace ? jobsByStatus : [],
       period: {
         from: dayKey(rangeFrom),
         to: dayKey(rangeTo),
@@ -607,7 +734,7 @@ export class DashboardService {
           ? periodTotals
           : { ...periodTotals, revenue: 0, saleRevenue: 0, serviceRevenue: 0 },
       },
-      activeJobs: (staffRole === "engineer" ? myJobs : activeJobsList).slice(0, 6).map((j) => ({
+      activeJobs: (staffRole === "engineer" || staffRole === "qa" ? myJobs : activeJobsList).slice(0, 6).map((j) => ({
         id: j.id,
         reference: j.reference,
         equipmentName: j.equipmentName,
@@ -630,7 +757,7 @@ export class DashboardService {
         showFinance,
         showCompanyOps,
         showInventoryAlerts,
-        showCharts: showCompanyOps || staffRole === "billing" || staffRole === "engineer",
+        showCharts: showCompanyOps || staffRole === "billing" || staffRole === "engineer" || showQaWorkspace,
         showSchedule: staffRole === "engineer" || staffRole === "coordinator" || staffRole === "admin",
         canUpdateJobStatus: staffRole === "engineer" || staffRole === "admin" || staffRole === "coordinator",
       },
@@ -761,6 +888,27 @@ export class DashboardService {
             const start = new Date();
             start.setHours(0, 0, 0, 0);
             return j.scheduledFor < start && j.status !== "completed";
+          }).length,
+        };
+      case "qa":
+        return {
+          ...base,
+          assignedOpen: input.myJobs.length,
+          inProgress: input.myJobs.length,
+          pendingApprovals: input.myJobs.length,
+          completedThisMonth: input.completedJobsMonth,
+          dueToday: input.myJobs.filter((j) => {
+            const d = j.scheduledFor;
+            const start = new Date();
+            start.setHours(0, 0, 0, 0);
+            const end = new Date();
+            end.setHours(23, 59, 59, 999);
+            return d >= start && d <= end;
+          }).length,
+          overdue: input.myJobs.filter((j) => {
+            const start = new Date();
+            start.setHours(0, 0, 0, 0);
+            return j.scheduledFor < start;
           }).length,
         };
       default:
@@ -906,6 +1054,9 @@ export class DashboardService {
         return input.serviceQueue.map((r) => requestItem(r, "/app/jobs"));
       }
 
+      case "qa":
+        return input.myJobs.map(jobItem);
+
       case "billing": {
         const invoices = await prisma.invoice.findMany({
           where: {
@@ -933,17 +1084,40 @@ export class DashboardService {
             where: { tenantId: input.tenantId, status: { in: ["draft", "sent", "partial"] } },
             orderBy: { updatedAt: "desc" },
             take: 5,
+            select: {
+              id: true,
+              reference: true,
+              supplier: true,
+              items: true,
+              status: true,
+              expectedDate: true,
+            },
           }),
           prisma.stockTransfer.findMany({
             where: { tenantId: input.tenantId, status: { in: ["pending", "inTransit"] } },
             orderBy: { updatedAt: "desc" },
             take: 4,
+            select: {
+              id: true,
+              reference: true,
+              fromBranch: true,
+              toBranch: true,
+              items: true,
+              status: true,
+              createdAt: true,
+            },
           }),
           prisma.jobPartsRequest.findMany({
             where: { status: "pending", job: { tenantId: input.tenantId } },
             orderBy: { createdAt: "desc" },
             take: 4,
-            include: { job: { select: { reference: true, customerName: true } } },
+            select: {
+              id: true,
+              notes: true,
+              status: true,
+              createdAt: true,
+              job: { select: { reference: true, customerName: true } },
+            },
           }),
         ]);
 
@@ -991,6 +1165,16 @@ export class DashboardService {
           },
           orderBy: [{ priority: "desc" }, { slaDue: "asc" }],
           take: 10,
+          select: {
+            id: true,
+            reference: true,
+            customerName: true,
+            equipmentName: true,
+            type: true,
+            status: true,
+            priority: true,
+            slaDue: true,
+          },
         });
         return open.map((r) => requestItem(r));
       }

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Truck,
@@ -11,9 +12,12 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  Trash2,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { RequiredMark } from "@/components/shared/RequiredMark";
+import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -36,14 +40,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAuth } from "@/context/AuthContext";
-import { api } from "@/lib/api";
+import { api, type BackendInventoryItem, type BackendSupplier } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { formatInventoryItemClass } from "@/lib/inventoryItemClass";
 import { toast } from "@/lib/toast";
 
 export interface RFQLine {
   description: string;
   quantity: number;
   unitCostEstimate?: number;
+  /** UI-only: optional inventory link used to prefill description / estimate */
+  inventoryItemId?: string;
+}
+
+function blankRfqLine(): RFQLine {
+  return { description: "", quantity: 1, unitCostEstimate: 0, inventoryItemId: "" };
 }
 
 export interface SupplierQuoteLine {
@@ -81,6 +92,7 @@ export default function RFQs() {
   const { hasRole } = useAuth();
   const queryClient = useQueryClient();
   const canManage = hasRole(["admin", "inventory", "coordinator"]);
+  const canManageSuppliers = hasRole(["admin", "inventory"]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
@@ -91,10 +103,11 @@ export default function RFQs() {
 
   // New RFQ form state
   const [rfqForm, setRfqForm] = useState({
+    supplierId: "",
     supplierName: "",
     dueDate: "",
     notes: "",
-    lines: [{ description: "", quantity: 1, unitCostEstimate: 0 }],
+    lines: [blankRfqLine()],
   });
 
   // Quote form state
@@ -116,46 +129,90 @@ export default function RFQs() {
     },
   });
 
+  const suppliersQuery = useQuery({
+    queryKey: ["suppliers", "options"],
+    queryFn: () => api.listSuppliers({ limit: 100, page: 1 }).then((r) => r.data),
+    staleTime: 60_000,
+    enabled: createOpen,
+    retry: 1,
+  });
+
+  const inventoryQuery = useQuery({
+    queryKey: ["inventory", "options"],
+    queryFn: () => api.listInventory({ limit: 100, page: 1 }).then((r) => r.data),
+    staleTime: 60_000,
+    enabled: createOpen,
+  });
+
+  const suppliers: BackendSupplier[] = suppliersQuery.data ?? [];
+  const inventory: BackendInventoryItem[] = inventoryQuery.data ?? [];
+
   const refetch = () => queryClient.invalidateQueries({ queryKey: ["supplier-rfqs"] });
+
+  const resetRfqForm = () => {
+    setRfqForm({
+      supplierId: "",
+      supplierName: "",
+      dueDate: "",
+      notes: "",
+      lines: [blankRfqLine()],
+    });
+  };
 
   const toggleExpand = (id: string) => {
     setExpandedRfqs((p) => ({ ...p, [id]: !p[id] }));
   };
 
+  const updateLines = (updater: (current: RFQLine[]) => RFQLine[]) => {
+    setRfqForm((p) => ({ ...p, lines: updater(p.lines) }));
+  };
+
   const handleAddLine = () => {
-    setRfqForm((p) => ({
-      ...p,
-      lines: [...p.lines, { description: "", quantity: 1, unitCostEstimate: 0 }],
-    }));
+    updateLines((current) => [...current, blankRfqLine()]);
   };
 
   const handleRemoveLine = (idx: number) => {
     if (rfqForm.lines.length <= 1) return;
-    setRfqForm((p) => ({
-      ...p,
-      lines: p.lines.filter((_, i) => i !== idx),
-    }));
+    updateLines((current) => current.filter((_, i) => i !== idx));
   };
 
+  const estimatedTotal = useMemo(
+    () =>
+      rfqForm.lines.reduce(
+        (sum, line) => sum + (Number(line.quantity) || 0) * (Number(line.unitCostEstimate) || 0),
+        0,
+      ),
+    [rfqForm.lines],
+  );
+
   const handleCreateRfq = async () => {
-    if (!rfqForm.supplierName.trim()) {
-      toast.error("Supplier name required");
+    if (!rfqForm.supplierId.trim() || !rfqForm.supplierName.trim()) {
+      toast.error("Select a supplier");
       return;
     }
     if (rfqForm.lines.some((l) => !l.description.trim())) {
       toast.error("All item lines require a description");
       return;
     }
+    if (rfqForm.lines.some((l) => !(Number(l.quantity) > 0))) {
+      toast.error("Quantity must be at least 1 on every line");
+      return;
+    }
     try {
-      await api.post("/rfqs", rfqForm);
+      await api.post("/rfqs", {
+        supplierId: rfqForm.supplierId,
+        supplierName: rfqForm.supplierName,
+        dueDate: rfqForm.dueDate || null,
+        notes: rfqForm.notes || null,
+        lines: rfqForm.lines.map(({ description, quantity, unitCostEstimate }) => ({
+          description: description.trim(),
+          quantity: Number(quantity) || 1,
+          unitCostEstimate: Number(unitCostEstimate) || 0,
+        })),
+      });
       toast.success("RFQ created successfully");
       setCreateOpen(false);
-      setRfqForm({
-        supplierName: "",
-        dueDate: "",
-        notes: "",
-        lines: [{ description: "", quantity: 1, unitCostEstimate: 0 }],
-      });
+      resetRfqForm();
       refetch();
     } catch (err) {
       toast.apiError(err, { fallback: "Failed to create RFQ" });
@@ -399,7 +456,13 @@ export default function RFQs() {
         )}
 
         {/* Create RFQ Dialog */}
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <Dialog
+          open={createOpen}
+          onOpenChange={(open) => {
+            setCreateOpen(open);
+            if (!open) resetRfqForm();
+          }}
+        >
           <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -414,12 +477,67 @@ export default function RFQs() {
             <div className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <Label>Supplier Name <span className="text-destructive">*</span></Label>
-                  <Input
-                    placeholder="e.g. MedTech Supplies Ltd"
-                    value={rfqForm.supplierName}
-                    onChange={(e) => setRfqForm((p) => ({ ...p, supplierName: e.target.value }))}
-                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <Label>
+                      Supplier <RequiredMark />
+                    </Label>
+                    {canManageSuppliers ? (
+                      <Link to="/app/suppliers" className="text-xs text-primary hover:underline">
+                        Manage
+                      </Link>
+                    ) : null}
+                  </div>
+                  <Select
+                    value={rfqForm.supplierId || undefined}
+                    onValueChange={(value) => {
+                      const supplier = suppliers.find((row) => row.id === value);
+                      setRfqForm((p) => ({
+                        ...p,
+                        supplierId: value,
+                        supplierName: supplier?.name ?? "",
+                      }));
+                    }}
+                    disabled={suppliersQuery.isLoading || suppliersQuery.isError}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={
+                          suppliersQuery.isLoading
+                            ? "Loading suppliers…"
+                            : suppliersQuery.isError
+                              ? "Could not load suppliers"
+                              : "Select supplier"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {suppliers.map((supplier) => (
+                        <SelectItem key={supplier.id} value={supplier.id}>
+                          {supplier.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {suppliersQuery.isError ? (
+                    <p className="text-xs text-destructive">
+                      Unable to load suppliers. Try again or ask an inventory admin to add vendors.
+                    </p>
+                  ) : !suppliersQuery.isLoading && suppliers.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      No suppliers found.
+                      {canManageSuppliers ? (
+                        <>
+                          {" "}
+                          <Link to="/app/suppliers" className="text-primary hover:underline">
+                            Add a supplier
+                          </Link>{" "}
+                          first.
+                        </>
+                      ) : (
+                        " Ask an inventory admin to add vendors first."
+                      )}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="space-y-1">
                   <Label>Response Due Date</Label>
@@ -431,69 +549,111 @@ export default function RFQs() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
                   <Label>Line Items</Label>
-                  <Button type="button" size="sm" variant="ghost" onClick={handleAddLine}>
-                    + Add Line
+                  <Button type="button" size="sm" variant="outline" onClick={handleAddLine}>
+                    <Plus className="mr-1 h-3.5 w-3.5" />
+                    Add Line
                   </Button>
                 </div>
-                {rfqForm.lines.map((l, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <Input
-                      placeholder="Item description"
-                      className="flex-1"
-                      value={l.description}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setRfqForm((p) => {
-                          const updated = [...p.lines];
-                          updated[idx].description = val;
-                          return { ...p, lines: updated };
-                        });
-                      }}
-                    />
-                    <Input
-                      type="number"
-                      placeholder="Qty"
-                      className="w-20"
-                      min={1}
-                      value={l.quantity}
-                      onChange={(e) => {
-                        const val = Number(e.target.value) || 1;
-                        setRfqForm((p) => {
-                          const updated = [...p.lines];
-                          updated[idx].quantity = val;
-                          return { ...p, lines: updated };
-                        });
-                      }}
-                    />
-                    <Input
-                      type="number"
-                      placeholder="Est. Unit Cost"
-                      className="w-28"
-                      value={l.unitCostEstimate || ""}
-                      onChange={(e) => {
-                        const val = Number(e.target.value) || 0;
-                        setRfqForm((p) => {
-                          const updated = [...p.lines];
-                          updated[idx].unitCostEstimate = val;
-                          return { ...p, lines: updated };
-                        });
-                      }}
-                    />
-                    {rfqForm.lines.length > 1 && (
+                {rfqForm.lines.map((line, idx) => (
+                  <div key={idx} className="space-y-2 rounded-lg border border-border p-3">
+                    <div className="flex gap-2">
+                      <InventoryProductSelect
+                        items={inventory}
+                        value={line.inventoryItemId || ""}
+                        onValueChange={(_id, item) => {
+                          updateLines((current) =>
+                            current.map((row, i) =>
+                              i === idx
+                                ? {
+                                    ...row,
+                                    inventoryItemId: item.id,
+                                    description: item.name,
+                                    unitCostEstimate: Number(item.unitCost) || 0,
+                                  }
+                                : row,
+                            ),
+                          );
+                        }}
+                        placeholder="Link inventory item (optional)"
+                        getOptionLabel={(item) =>
+                          `${formatInventoryItemClass(item.itemClass)} · ${item.sku} · ${item.name}`
+                        }
+                      />
                       <Button
                         type="button"
-                        size="sm"
-                        variant="destructive"
+                        size="icon"
+                        variant="ghost"
+                        disabled={rfqForm.lines.length <= 1}
                         onClick={() => handleRemoveLine(idx)}
+                        aria-label={`Remove line ${idx + 1}`}
                       >
-                        ✕
+                        <Trash2 className="h-4 w-4" />
                       </Button>
-                    )}
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-[1fr_5.5rem_7.5rem]">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Description</Label>
+                        <Input
+                          placeholder="Item description"
+                          value={line.description}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            updateLines((current) =>
+                              current.map((row, i) =>
+                                i === idx ? { ...row, description: val } : row,
+                              ),
+                            );
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Qty</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={line.quantity}
+                          onChange={(e) => {
+                            const val = Number(e.target.value) || 1;
+                            updateLines((current) =>
+                              current.map((row, i) =>
+                                i === idx ? { ...row, quantity: val } : row,
+                              ),
+                            );
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Est. Unit Cost</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          placeholder="0"
+                          value={line.unitCostEstimate || ""}
+                          onChange={(e) => {
+                            const val = Number(e.target.value) || 0;
+                            updateLines((current) =>
+                              current.map((row, i) =>
+                                i === idx ? { ...row, unitCostEstimate: val } : row,
+                              ),
+                            );
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      Line estimate:{" "}
+                      {formatCurrency(
+                        (Number(line.quantity) || 0) * (Number(line.unitCostEstimate) || 0),
+                      )}
+                    </p>
                   </div>
                 ))}
+                <div className="flex justify-end text-sm font-medium tabular-nums">
+                  Estimated total: {formatCurrency(estimatedTotal)}
+                </div>
               </div>
 
               <div className="space-y-1">
@@ -507,7 +667,9 @@ export default function RFQs() {
             </div>
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
+              <Button variant="outline" onClick={() => setCreateOpen(false)}>
+                Cancel
+              </Button>
               <Button onClick={handleCreateRfq}>Create RFQ</Button>
             </DialogFooter>
           </DialogContent>

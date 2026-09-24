@@ -213,7 +213,7 @@ export function InspectionReportDocument({
 
         <Section title="Recommendations">
           <p className="doc-text-block whitespace-pre-wrap">
-            {report.recommendation.trim() || "—"}
+            {(report.recommendation ?? "").trim() || "—"}
           </p>
           {report.recommendations?.length ? (
             <div className="doc-parts-list">

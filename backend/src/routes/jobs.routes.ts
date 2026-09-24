@@ -15,13 +15,15 @@ import {
 const router = Router();
 router.use(authenticate, resolveTenant);
 
-const canRead = requireRole("admin", "coordinator", "engineer");
+const canRead = requireRole("admin", "coordinator", "engineer", "qa");
 const canExecute = requireRole("admin", "engineer");
-const canUpdate = requireRole("admin", "coordinator", "engineer");
+const canUpdate = requireRole("admin", "coordinator", "engineer", "qa");
+/** Timeline notes / escalation — ops leads + engineers (not field-only execute actions). */
+const canLogActivity = requireRole("admin", "coordinator", "engineer");
 
 router.get("/", canRead, jobsController.getAll);
 router.get("/:id/activities", canRead, jobsController.getActivities);
-router.post("/:id/activities", canExecute, jobsController.addActivity);
+router.post("/:id/activities", canLogActivity, jobsController.addActivity);
 router.get("/:id", canRead, jobsController.getById);
 router.post("/", requireRole("admin", "coordinator"), validate(createJobSchema), jobsController.create);
 router.post("/:id/photos", canExecute, validate(uploadJobPhotosSchema), jobsController.uploadPhotos);

@@ -3,18 +3,25 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, QrCode } from "lucide-react";
 import { EquipmentFormDialog } from "@/components/equipment/EquipmentFormDialog";
+import { GuidedNextStepDialog } from "@/components/shared/GuidedNextStepDialog";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { Button } from "@/components/ui/button";
 import { api, type BackendEquipment } from "@/lib/api";
 import { warrantyTone } from "@/lib/equipmentWarranty";
+import {
+  isGuidedSetupEnabled,
+  serviceTicketPrefillPath,
+  ticketDescriptionFromEquipment,
+} from "@/lib/guidedSetup";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useListingUrlState } from "@/hooks/useListingUrlState";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { EMPTY_PAGINATION_META } from "@/lib/listing";
 import { useAuth } from "@/context/AuthContext";
-import { CUSTOMER_READ_ROLES } from "@/config/roles";
+import { useSettings } from "@/context/SettingsContext";
+import { CUSTOMER_READ_ROLES, TICKET_CREATE_ROLES } from "@/config/roles";
 import { termLabel } from "@/lib/taxonomy";
 
 function formatDate(value: string | null | undefined) {
@@ -30,8 +37,11 @@ export default function EquipmentPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { hasRole } = useAuth();
+  const { settings } = useSettings();
   const canManage = hasRole(["admin", "coordinator", "inventory"]);
   const canReadCustomers = hasRole(CUSTOMER_READ_ROLES);
+  const canCreateTicket = hasRole(TICKET_CREATE_ROLES);
+  const guidedSetup = isGuidedSetupEnabled(settings);
   const {
     search,
     setSearch,
@@ -96,6 +106,7 @@ export default function EquipmentPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<BackendEquipment | null>(null);
+  const [ticketPrompt, setTicketPrompt] = useState<BackendEquipment | null>(null);
 
   const loadEquipment = () => void queryClient.invalidateQueries({ queryKey: ["equipment"] });
 
@@ -164,14 +175,24 @@ export default function EquipmentPage() {
               : tone === "ok"
                 ? "text-success"
                 : "text-muted-foreground";
-        const label = e.warrantyEnd
-          ? `Ends ${formatDate(e.warrantyEnd)}`
-          : e.warrantyStart
-            ? `Starts ${formatDate(e.warrantyStart)}`
-            : "No warranty dates";
+        const machineLabel = e.noMachineWarranty
+          ? "No machine warranty"
+          : e.warrantyEnd
+            ? `Machine ends ${formatDate(e.warrantyEnd)}`
+            : e.warrantyStart
+              ? `Machine starts ${formatDate(e.warrantyStart)}`
+              : null;
+        const serviceLabel = e.noServiceWarranty
+          ? "No service warranty"
+          : e.serviceWarrantyEnd
+            ? `Service ends ${formatDate(e.serviceWarrantyEnd)}`
+            : e.serviceWarrantyStart
+              ? `Service starts ${formatDate(e.serviceWarrantyStart)}`
+              : null;
         return (
-          <div className="text-sm">
-            <p className={toneClass}>{label}</p>
+          <div className={`text-sm ${toneClass}`}>
+            <p>{machineLabel ?? "No machine warranty set"}</p>
+            <p className="text-xs text-muted-foreground">{serviceLabel ?? "No service warranty set"}</p>
           </div>
         );
       },
@@ -278,10 +299,32 @@ export default function EquipmentPage() {
         }}
         equipment={editing}
         existingAssetTags={existingAssetTags}
-        onSaved={() => {
+        onSaved={(saved) => {
           void queryClient.invalidateQueries({ queryKey: ["equipment"] });
           void queryClient.invalidateQueries({ queryKey: ["customers", "options"] });
+          if (!editing && guidedSetup && canCreateTicket && saved.customerId) {
+            setTicketPrompt(saved);
+          }
         }}
+      />
+
+      <GuidedNextStepDialog
+        open={Boolean(ticketPrompt)}
+        step="ticket"
+        subjectName={ticketPrompt?.name ?? "this equipment"}
+        onConfirm={() => {
+          if (!ticketPrompt?.customerId) {
+            setTicketPrompt(null);
+            return;
+          }
+          navigate(serviceTicketPrefillPath({
+            customerId: ticketPrompt.customerId,
+            equipmentIds: [ticketPrompt.id],
+            description: ticketDescriptionFromEquipment(ticketPrompt),
+          }));
+          setTicketPrompt(null);
+        }}
+        onSkip={() => setTicketPrompt(null)}
       />
     </div>
   );

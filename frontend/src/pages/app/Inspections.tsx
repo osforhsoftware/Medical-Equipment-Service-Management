@@ -17,6 +17,8 @@ import { InspectionCard } from "@/components/inspections/InspectionCard";
 import { InspectionReportPanel } from "@/components/inspections/InspectionReportPanel";
 import { useInspectionReportEditor } from "@/components/inspections/useInspectionReportEditor";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { INSPECTION_READ_ROLES, INSPECTION_WRITE_ROLES } from "@/config/roles";
+import { useAuth } from "@/context/AuthContext";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { api, type BackendServiceRequest } from "@/lib/api";
 import { toast } from "@/lib/toast";
@@ -52,7 +54,7 @@ const HISTORY_STATUSES = [
   "finished",
 ].join(",");
 
-const CLOSED_STATUSES = new Set(["closed", "finished", "completed", "invoiced"]);
+const CLOSED_STATUSES = new Set(["closed", "finished", "cancelled"]);
 
 function matchesStatusFilter(status: string, filter: StatusFilter) {
   if (filter === "all") return true;
@@ -71,9 +73,12 @@ function equipmentLabel(task: BackendServiceRequest) {
 }
 
 export default function Inspections() {
+  const { hasRole } = useAuth();
+  const canWriteInspection = hasRole(INSPECTION_WRITE_ROLES);
   const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
-  const view: ViewMode = searchParams.get("view") === "history" ? "history" : "queue";
+  const view: ViewMode =
+    !canWriteInspection || searchParams.get("view") === "history" ? "history" : "queue";
   const [requests, setRequests] = useState<BackendServiceRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -195,7 +200,7 @@ export default function Inspections() {
           { key: "critical", label: "Critical", value: stats.critical },
         ];
 
-  const viewTabs = (
+  const viewTabs = canWriteInspection ? (
     <Tabs value={view} onValueChange={(value) => setView(value as ViewMode)}>
       <TabsList className={cn(isMobile && "grid h-11 w-full grid-cols-2 rounded-xl")}>
         <TabsTrigger value="queue" className={cn(isMobile && "rounded-lg")}>
@@ -206,7 +211,7 @@ export default function Inspections() {
         </TabsTrigger>
       </TabsList>
     </Tabs>
-  );
+  ) : null;
 
   const renderStatusOptions = () =>
     view === "history" ? (
@@ -229,7 +234,7 @@ export default function Inspections() {
     );
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "inspector"]}>
+    <RoleGuard roles={INSPECTION_READ_ROLES}>
       <div className={cn("space-y-5", isMobile && "mobile-page space-y-4")}>
         {!isMobile ? (
           <PageHeader
@@ -447,6 +452,7 @@ export default function Inspections() {
                 task={task}
                 mobile={isMobile}
                 mode={view}
+                canInspect={canWriteInspection}
                 onInspect={(t) => void editor.startInspection(t)}
               />
             ))}
@@ -472,6 +478,9 @@ export default function Inspections() {
         setSeverity={editor.setSeverity}
         additionalFields={editor.additionalFields}
         setAdditionalFields={editor.setAdditionalFields}
+        recommendedParts={editor.recommendedParts}
+        setRecommendedParts={editor.setRecommendedParts}
+        inventory={editor.inventory}
         machineImages={editor.machineImages}
         setMachineImages={editor.setMachineImages}
         setMachineImage={editor.setMachineImage}

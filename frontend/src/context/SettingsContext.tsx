@@ -53,6 +53,24 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       const roles = settings.rbacMatrix[item.label];
       if (Array.isArray(roles)) merged[item.label] = roles as Role[];
     }
+    // Ensure estimate staff and QA keep their desk modules on older tenant matrices.
+    for (const [module, role] of [
+      ["Estimates", "estimator"],
+      ["Service Catalog", "estimator"],
+      ["Customers", "estimator"],
+      ["Inspections", "estimator"],
+    ] as const) {
+      const allowed = merged[module] ?? [];
+      if (!allowed.includes(role) && (defaults[module] ?? []).includes(role)) {
+        merged[module] = [...allowed, role];
+      }
+    }
+    for (const item of navItems) {
+      const allowed = merged[item.label] ?? [];
+      if ((defaults[item.label] ?? []).includes("qa") && !allowed.includes("qa")) {
+        merged[item.label] = [...allowed, "qa"];
+      }
+    }
     // Drop known over-grants that would show a nav item the API rejects.
     const prune: Array<[string, Role]> = [
       ["Projects", "estimator"],

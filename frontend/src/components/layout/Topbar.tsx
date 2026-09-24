@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, LogOut, PanelLeft, PanelLeftClose, Search, Settings } from "lucide-react";
+import { Bell, LogOut, PanelLeft, PanelLeftClose, Search, Settings, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,9 +14,13 @@ import {
 import { MesmsLogo } from "@/components/shared/MesmsLogo";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { useAuth } from "@/context/AuthContext";
+import { navItems } from "@/config/nav";
+import { userCanAccessModule } from "@/lib/userRoles";
 import { useSettings } from "@/context/SettingsContext";
 import { api } from "@/lib/api";
 import { NOTIFICATIONS_UPDATED } from "@/lib/notifications-events";
+
+const SETTINGS_NAV = navItems.find((item) => item.label === "Settings");
 
 export function Topbar({
   sidebarOpen,
@@ -26,9 +30,14 @@ export function Topbar({
   onToggleSidebar: () => void;
 }) {
   const { user, logout } = useAuth();
-  const { settings } = useSettings();
+  const { settings, rbacMatrix } = useSettings();
   const navigate = useNavigate();
   const [unread, setUnread] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  // Same RBAC check as sidebar / ModuleGuard — hide Settings for staff who would only see Access restricted.
+  const canOpenSettings = user
+    ? userCanAccessModule(user, "Settings", rbacMatrix, SETTINGS_NAV?.roles)
+    : false;
 
   const loadUnreadCount = async () => {
     try {
@@ -71,10 +80,20 @@ export function Topbar({
 
       <div className="relative hidden max-w-md flex-1 md:block">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Search requests, equipment, customers…"
-          className="h-9 border-border bg-background pl-9 pr-10 text-[13px] shadow-none"
-        />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const q = searchQuery.trim();
+            navigate(q ? `/app/service-tickets?search=${encodeURIComponent(q)}` : "/app/service-tickets");
+          }}
+        >
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search tickets, equipment, customers…"
+            className="h-9 border-border bg-background pl-9 pr-10 text-[13px] shadow-none"
+          />
+        </form>
         <kbd className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded border border-border bg-card px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline">
           /
         </kbd>
@@ -113,9 +132,14 @@ export function Topbar({
               <p className="text-sm font-medium">{user.name}</p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => navigate("/app/settings")}>
-              <Settings className="mr-2 h-4 w-4" /> Settings
+            <DropdownMenuItem onClick={() => navigate("/app/profile")}>
+              <User className="mr-2 h-4 w-4" /> Profile
             </DropdownMenuItem>
+            {canOpenSettings ? (
+              <DropdownMenuItem onClick={() => navigate("/app/settings")}>
+                <Settings className="mr-2 h-4 w-4" /> Settings
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem
               onClick={() => {
                 void logout().then(() => navigate("/login"));

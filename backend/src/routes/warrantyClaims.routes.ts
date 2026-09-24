@@ -9,7 +9,7 @@ import { success } from "@/utils/response";
 const router = Router();
 router.use(authenticate, resolveTenant);
 
-const canAccess = requireRole("admin", "coordinator", "inspector", "estimator", "sales", "billing", "engineer");
+const canAccess = requireRole("admin", "coordinator", "inspector", "estimator", "sales", "billing", "engineer", "qa");
 const canManage = requireRole("admin", "coordinator", "inspector");
 
 router.get("/", canAccess, async (req: Request, res: Response, next: NextFunction) => {

@@ -14,6 +14,7 @@ export const RBAC_ROLES: Role[] = [
   "engineer",
   "inventory",
   "billing",
+  "qa",
 ];
 
 export const RBAC_MODULES = navItems.map((item) => item.label);

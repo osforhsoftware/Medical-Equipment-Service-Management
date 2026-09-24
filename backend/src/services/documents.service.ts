@@ -69,6 +69,35 @@ function splitInspectionFindings(raw: string) {
   return { findings: raw.trim(), workDetails: "" };
 }
 
+const WORK_REC_MARKER = "\n\nRecommendation:\n";
+const AUTO_WORK_LOG_PREFIXES = [
+  "Field work started",
+  "Work paused — parts pending",
+  "Work paused — awaiting review",
+  "Job completed",
+  "Customer sign-off captured",
+];
+
+function splitWorkRecommendation(raw: string | null | undefined) {
+  const text = raw ?? "";
+  const idx = text.indexOf(WORK_REC_MARKER);
+  if (idx >= 0) {
+    return {
+      calibrationResult: text.slice(0, idx).trim(),
+      recommendation: text.slice(idx + WORK_REC_MARKER.length).trim(),
+    };
+  }
+  if (text.startsWith("Recommendation:\n")) {
+    return { calibrationResult: "", recommendation: text.slice("Recommendation:\n".length).trim() };
+  }
+  return { calibrationResult: text.trim(), recommendation: "" };
+}
+
+function isNarrativeWorkLog(workPerformed: string) {
+  const text = workPerformed.trim();
+  return !AUTO_WORK_LOG_PREFIXES.some((prefix) => text === prefix || text.startsWith(`${prefix}\n`));
+}
+
 function displayValue(value: unknown) {
   if (value === null || value === undefined) return "";
   return String(value).trim();
@@ -764,31 +793,47 @@ export class DocumentsService {
         },
       });
       if (!job) throw new AppError("Service job not found", 404);
-      if (job.status !== "completed") throw new AppError("Only completed jobs have a final service report", 409);
+      const narrativeLogs = job.workLogs.filter((log) => isNarrativeWorkLog(log.workPerformed));
+      if (!narrativeLogs.length) {
+        throw new AppError("Fill the work report before generating a service report", 409);
+      }
       reference = job.reference;
       filename = `${reference}-service-report.pdf`;
-      await this.header(doc, tenantId, "Service Report", reference);
+      await this.header(doc, tenantId, "Service Report", reference, [
+        { label: "Status", value: job.status },
+        { label: "Scheduled", value: fmtDate(job.scheduledFor) },
+      ]);
       doc.fillColor(INK).font("Helvetica-Bold").fontSize(12).text(job.equipmentName, LEFT, doc.y);
       doc.font("Helvetica").fontSize(9).fillColor(MUTED);
       doc.text(`Customer: ${job.customerName}`);
       doc.text(`Service type: ${job.type}`);
-      doc.text(`Scheduled: ${fmtDate(job.scheduledFor)}`);
       doc.text(`Team: ${job.assignments.map((assignment) => assignment.user.name).join(", ") || job.engineer}`).moveDown();
       doc.fillColor(INK).font("Helvetica-Bold").text("Work performed").moveDown(0.4);
-      for (const log of job.workLogs) {
-        doc.font("Helvetica-Bold").text(`${log.user.name} — ${log.startedAt.toLocaleString()}`);
+      for (const log of narrativeLogs) {
+        const { calibrationResult, recommendation } = splitWorkRecommendation(log.calibrationResult);
+        doc.font("Helvetica-Bold").text(`${log.user.name} — ${fmtDateTime(log.startedAt)}`);
         doc.font("Helvetica").text(log.workPerformed);
         if (log.testingResult) doc.text(`Testing: ${log.testingResult}`);
-        if (log.calibrationResult) doc.text(`Calibration: ${log.calibrationResult}`);
+        if (calibrationResult) doc.text(`Calibration: ${calibrationResult}`);
+        if (recommendation) doc.text(`Recommendation: ${recommendation}`);
         doc.moveDown(0.6);
       }
       if (job.stockDeductions.length) {
         doc.font("Helvetica-Bold").text("Parts consumed");
         for (const item of job.stockDeductions) doc.font("Helvetica").text(`${item.quantity} × ${item.itemName} (${item.sku})`);
+        doc.moveDown(0.4);
+      }
+      const approvedExtras = job.extras.filter((extra) => extra.status === "approved");
+      if (approvedExtras.length) {
+        doc.font("Helvetica-Bold").text("Extra scope");
+        for (const extra of approvedExtras) {
+          doc.font("Helvetica").text(`${extra.quantity} × ${extra.description} (${extra.type})`);
+        }
+        doc.moveDown(0.4);
       }
       if (job.signature) {
         doc.moveDown().font("Helvetica-Bold").text(`Customer sign-off: ${job.signature.customerName}`);
-        doc.font("Helvetica").text(`Captured: ${job.signature.capturedAt.toLocaleString()}`);
+        doc.font("Helvetica").text(`Captured: ${fmtDateTime(job.signature.capturedAt)}`);
       }
       kindLabel = "Service Report";
     } else if (kind === "inspection-report") {

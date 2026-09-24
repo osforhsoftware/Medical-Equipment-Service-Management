@@ -74,26 +74,39 @@ function withDefaults(type: ToastType, options?: ToastOptions): ExternalToast {
 }
 
 function show(type: ToastType, message: string, options?: ToastOptions) {
-  const description = typeof options?.description === "string" ? options.description : undefined;
-  if (shouldSkipDuplicate(type, message, description, options?.force)) {
+  const trimmedMessage = message.trim();
+  const description = typeof options?.description === "string" ? options.description.trim() : undefined;
+
+  // Never render an empty toast shell (looks like a blank pink/red bar).
+  if (!trimmedMessage && type !== "loading") {
     return options?.id ?? "skipped";
   }
 
-  const opts = withDefaults(type, options);
+  if (shouldSkipDuplicate(type, trimmedMessage, description, options?.force)) {
+    return options?.id ?? "skipped";
+  }
+
+  // Keep a single active error toast so duplicate API catches don't stack
+  // an empty collapsed bar under the real message (Sonner expand=false).
+  const opts = withDefaults(type, {
+    ...options,
+    description,
+    id: options?.id ?? (type === "error" ? "mesms-active-error" : undefined),
+  });
 
   switch (type) {
     case "success":
-      return sonnerToast.success(message, opts);
+      return sonnerToast.success(trimmedMessage, opts);
     case "error":
-      return sonnerToast.error(message, opts);
+      return sonnerToast.error(trimmedMessage, opts);
     case "warning":
-      return sonnerToast.warning(message, opts);
+      return sonnerToast.warning(trimmedMessage, opts);
     case "info":
-      return sonnerToast.info(message, opts);
+      return sonnerToast.info(trimmedMessage, opts);
     case "loading":
-      return sonnerToast.loading(message, opts);
+      return sonnerToast.loading(trimmedMessage || message, opts);
     default:
-      return sonnerToast(message, opts);
+      return sonnerToast(trimmedMessage, opts);
   }
 }
 

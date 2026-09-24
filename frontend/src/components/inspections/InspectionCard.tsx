@@ -46,9 +46,16 @@ interface InspectionCardProps {
   onInspect: (task: BackendServiceRequest) => void;
   mobile?: boolean;
   mode?: "queue" | "history";
+  canInspect?: boolean;
 }
 
-export function InspectionCard({ task, onInspect, mobile = false, mode = "queue" }: InspectionCardProps) {
+export function InspectionCard({
+  task,
+  onInspect,
+  mobile = false,
+  mode = "queue",
+  canInspect = true,
+}: InspectionCardProps) {
   const navigate = useNavigate();
   const report = task.inspectionReport;
   const title = equipmentLabel(task);
@@ -57,7 +64,8 @@ export function InspectionCard({ task, onInspect, mobile = false, mode = "queue"
   const detailTo = isHistory ? `/app/inspections/${task.id}?from=history` : `/app/inspections/${task.id}`;
   const reportTo = `/app/inspections/${task.id}/report${isHistory ? "?from=history" : ""}`;
   const filedAt = report?.submittedAt ?? report?.reportedAt;
-  const cta = isHistory ? "View report" : report ? "Update" : "Inspect";
+  const showInspectCta = canInspect && !isHistory;
+  const cta = showInspectCta ? (report ? "Update" : "Inspect") : "View report";
 
   const openDetails = () => navigate(detailTo);
 
@@ -132,16 +140,7 @@ export function InspectionCard({ task, onInspect, mobile = false, mode = "queue"
         >
           Details
         </Link>
-        {isHistory ? (
-          <Link
-            to={reportTo}
-            onClick={(event) => event.stopPropagation()}
-            className="inline-flex items-center gap-1 text-xs font-semibold text-primary"
-          >
-            <FileText className="h-3.5 w-3.5" />
-            {cta}
-          </Link>
-        ) : (
+        {showInspectCta ? (
           <button
             type="button"
             onClick={(event) => {
@@ -153,6 +152,15 @@ export function InspectionCard({ task, onInspect, mobile = false, mode = "queue"
             {cta}
             <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
+        ) : (
+          <Link
+            to={reportTo}
+            onClick={(event) => event.stopPropagation()}
+            className="inline-flex items-center gap-1 text-xs font-semibold text-primary"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            {cta}
+          </Link>
         )}
       </div>
     </Card>

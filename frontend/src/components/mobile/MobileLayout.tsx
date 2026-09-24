@@ -43,7 +43,7 @@ export function MobileLayout({ children }: MobileLayoutProps) {
 
   const handleFab = () => {
     if (fab?.action === "scan") return;
-    navigate("/app/service-tickets");
+    navigate("/app/service-tickets?new=1");
   };
 
   // Pull-to-refresh visual cue
@@ -101,9 +101,9 @@ export function MobileLayout({ children }: MobileLayoutProps) {
         {children ?? <Outlet />}
       </main>
 
-      {showFab && <MobileFAB onClick={handleFab} icon={fab!.icon} />}
+      {showFab && fab?.action !== "scan" && <MobileFAB onClick={handleFab} icon={fab!.icon} />}
 
-      <MobileBottomNav />
+      <MobileBottomNav onMore={() => setMoreOpen(true)} />
       <MobileMoreSheet open={moreOpen} onOpenChange={setMoreOpen} />
     </div>
   );

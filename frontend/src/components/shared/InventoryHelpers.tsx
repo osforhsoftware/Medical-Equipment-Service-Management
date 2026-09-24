@@ -10,6 +10,25 @@ interface MarginWarningBadgeProps {
   className?: string;
 }
 
+/** First positive numeric value; treats 0 / NaN as unset (so sellingPrice 0 falls through to unitCost). */
+export function firstPositivePrice(
+  ...values: Array<string | number | null | undefined>
+): number {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+/** Inventory sell price for estimates/billing: prefer selling price, else unit cost. */
+export function inventoryOriginUnitPrice(item: {
+  sellingPrice?: string | number | null;
+  unitCost?: string | number | null;
+}): number {
+  return firstPositivePrice(item.sellingPrice, item.unitCost);
+}
+
 /** Computes margin % = (price - cost) / price * 100 */
 export function computeMarginPct(unitPrice: number, unitCost: number): number | null {
   if (unitCost <= 0 || unitPrice <= 0) return null;

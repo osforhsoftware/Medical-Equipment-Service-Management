@@ -3,7 +3,7 @@ import { serviceRequestsRepository } from "@/repositories/serviceRequests.reposi
 import { customersRepository } from "@/repositories/customers.repository";
 import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
-import { resolveTicketEventStatus } from "@/services/workflow/serviceTicketStateMachine";
+import { normalizeTicketStatus, resolveTicketEventStatus } from "@/services/workflow/serviceTicketStateMachine";
 import { prisma } from "@/db/prisma";
 
 type CreateEstimateData = {
@@ -99,11 +99,8 @@ export class EstimatesService {
           data: { status: next as never },
         });
       }
-    } else if (sr.status === "new") {
-      await prisma.serviceRequest.update({
-        where: { id: sr.id },
-        data: { status: "estimate" as never },
-      });
+    } else if (normalizeTicketStatus(sr.status) === "new") {
+      throw new AppError("Submit an inspection report before creating an estimate", 409);
     }
 
     return estimate;

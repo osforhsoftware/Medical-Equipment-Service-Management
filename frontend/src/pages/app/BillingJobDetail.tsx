@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { SERVICE_BILLING_ROLES } from "@/config/roles";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +37,13 @@ function toDateInput(value: string | null | undefined) {
   return value.slice(0, 10);
 }
 
+function warrantyDisplay(noWarranty: boolean | undefined, start: string | null | undefined, end: string | null | undefined) {
+  if (noWarranty) return "No warranty";
+  if (end) return formatDate(end);
+  if (start) return formatDate(start);
+  return "—";
+}
+
 export default function BillingJobDetail() {
   const { jobId = "" } = useParams();
   const navigate = useNavigate();
@@ -48,8 +56,9 @@ export default function BillingJobDetail() {
   const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
   const [catalog, setCatalog] = useState<BackendCatalogItem[]>([]);
   const [warrantyForm, setWarrantyForm] = useState({
-    warrantyStart: "",
-    warrantyEnd: "",
+    serviceWarrantyStart: "",
+    serviceWarrantyEnd: "",
+    noServiceWarranty: false,
   });
 
   const load = useCallback(async () => {
@@ -60,8 +69,9 @@ export default function BillingJobDetail() {
       setContext(next);
       const equipment = next.job.equipment;
       setWarrantyForm({
-        warrantyStart: toDateInput(equipment?.warrantyStart),
-        warrantyEnd: toDateInput(equipment?.warrantyEnd),
+        serviceWarrantyStart: toDateInput(equipment?.serviceWarrantyStart),
+        serviceWarrantyEnd: toDateInput(equipment?.serviceWarrantyEnd),
+        noServiceWarranty: Boolean(equipment?.noServiceWarranty),
       });
     } catch (error) {
       toast({
@@ -115,10 +125,17 @@ export default function BillingJobDetail() {
   }, [context, additionalLines]);
 
   const equipment = context?.job.equipment ?? null;
-  const equipmentWarrantyPayload = {
-    warrantyStart: warrantyForm.warrantyStart || null,
-    warrantyEnd: warrantyForm.warrantyEnd || null,
-  };
+  const equipmentWarrantyPayload = warrantyForm.noServiceWarranty
+    ? {
+        noServiceWarranty: true,
+        serviceWarrantyStart: null,
+        serviceWarrantyEnd: null,
+      }
+    : {
+        noServiceWarranty: false,
+        serviceWarrantyStart: warrantyForm.serviceWarrantyStart || null,
+        serviceWarrantyEnd: warrantyForm.serviceWarrantyEnd || null,
+      };
 
   const saveWarranty = async () => {
     if (!equipment) {
@@ -139,10 +156,12 @@ export default function BillingJobDetail() {
             }
           : prev,
       );
-      toast.success("Warranty updated on equipment");
+      toast.success(
+        warrantyForm.noServiceWarranty ? "Marked as no service warranty" : "Service warranty updated",
+      );
       await load();
     } catch (error) {
-      toast.apiError(error, { fallback: "Unable to update warranty" });
+      toast.apiError(error, { fallback: "Unable to update service warranty" });
     } finally {
       setWarrantySaving(false);
     }
@@ -181,7 +200,7 @@ export default function BillingJobDetail() {
 
         <PageHeader
           title={context ? `Billing review — ${context.job.reference}` : "Billing review"}
-          description="Review the estimate and engineer extras, update warranty if needed, then generate the final invoice."
+          description="Review the estimate and engineer extras, update service warranty if needed, then generate the final invoice."
           actions={
             invoice ? (
               <Button variant="outline" asChild>
@@ -230,44 +249,73 @@ export default function BillingJobDetail() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <ShieldCheck className="h-4 w-4" />
-                  Warranty on equipment
+                  Service warranty
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 {!equipment ? (
                   <p className="text-sm text-muted-foreground">
-                    No equipment record is linked to this job. Warranty can still be maintained later from Equipment.
+                    No equipment record is linked to this job. Service warranty can still be maintained later from Equipment.
                   </p>
                 ) : (
                   <>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <InfoRow label="Equipment" value={equipment.name} />
-                      <InfoRow label="Warranty start" value={formatDate(equipment.warrantyStart)} />
-                      <InfoRow label="Warranty end" value={formatDate(equipment.warrantyEnd)} />
+                      <InfoRow
+                        label="Machine warranty"
+                        value={warrantyDisplay(equipment.noMachineWarranty, equipment.warrantyStart, equipment.warrantyEnd)}
+                      />
+                      <InfoRow
+                        label="Service warranty"
+                        value={warrantyDisplay(equipment.noServiceWarranty, equipment.serviceWarrantyStart, equipment.serviceWarrantyEnd)}
+                      />
                     </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="grid gap-2">
-                        <Label htmlFor="billing-warranty-start">Warranty start</Label>
-                        <Input
-                          id="billing-warranty-start"
-                          type="date"
-                          value={warrantyForm.warrantyStart}
-                          onChange={(e) => setWarrantyForm((prev) => ({ ...prev, warrantyStart: e.target.value }))}
-                        />
+                    <p className="text-xs text-muted-foreground">
+                      Machine warranty is the manufacturer period. Set service warranty for this job, or choose No warranty.
+                    </p>
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={warrantyForm.noServiceWarranty}
+                        disabled={Boolean(invoice)}
+                        onCheckedChange={(checked) => {
+                          const noServiceWarranty = checked === true;
+                          setWarrantyForm((prev) => ({
+                            ...prev,
+                            noServiceWarranty,
+                            serviceWarrantyStart: noServiceWarranty ? "" : prev.serviceWarrantyStart,
+                            serviceWarrantyEnd: noServiceWarranty ? "" : prev.serviceWarrantyEnd,
+                          }));
+                        }}
+                      />
+                      <span>No service warranty</span>
+                    </label>
+                    {!warrantyForm.noServiceWarranty ? (
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="grid gap-2">
+                          <Label htmlFor="billing-service-warranty-start">Service warranty start</Label>
+                          <Input
+                            id="billing-service-warranty-start"
+                            type="date"
+                            disabled={Boolean(invoice)}
+                            value={warrantyForm.serviceWarrantyStart}
+                            onChange={(e) => setWarrantyForm((prev) => ({ ...prev, serviceWarrantyStart: e.target.value }))}
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="billing-service-warranty-end">Service warranty end</Label>
+                          <Input
+                            id="billing-service-warranty-end"
+                            type="date"
+                            disabled={Boolean(invoice)}
+                            value={warrantyForm.serviceWarrantyEnd}
+                            onChange={(e) => setWarrantyForm((prev) => ({ ...prev, serviceWarrantyEnd: e.target.value }))}
+                          />
+                        </div>
                       </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="billing-warranty-end">Warranty end</Label>
-                        <Input
-                          id="billing-warranty-end"
-                          type="date"
-                          value={warrantyForm.warrantyEnd}
-                          onChange={(e) => setWarrantyForm((prev) => ({ ...prev, warrantyEnd: e.target.value }))}
-                        />
-                      </div>
-                    </div>
+                    ) : null}
                     <Button variant="outline" disabled={warrantySaving || Boolean(invoice)} onClick={() => void saveWarranty()}>
                       {warrantySaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Save warranty
+                      {warrantyForm.noServiceWarranty ? "Save no warranty" : "Save service warranty"}
                     </Button>
                   </>
                 )}

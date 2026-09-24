@@ -17,6 +17,7 @@ export const STAFF_ROLES = [
   "engineer",
   "inventory",
   "billing",
+  "qa",
 ] as const;
 
 export type StaffRole = (typeof STAFF_ROLES)[number];

@@ -7,6 +7,7 @@ export const ROLE_LABELS: Record<string, string> = {
   engineer: "Service Engineer",
   inventory: "Inventory Manager",
   billing: "Billing Staff",
+  qa: "Quality Assurance",
   customer: "Customer Portal",
 };
 

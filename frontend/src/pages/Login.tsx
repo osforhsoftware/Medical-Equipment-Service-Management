@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
 import { useAuth } from "@/context/AuthContext";
 import { useFormValidation } from "@/hooks/useFormValidation";
-import { api, consumeSessionExpiredNotice } from "@/lib/api";
+import { consumeSessionExpiredNotice } from "@/lib/api";
 import { fieldRules } from "@/lib/formValidation";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -25,20 +25,11 @@ function homeForRole(role: string) {
   return "/app";
 }
 
-type Mode = "login" | "forgot" | "reset";
+type Mode = "login" | "forgot";
 
 const loginSchema = z.object({
   username: fieldRules.requiredString("Username"),
   password: fieldRules.requiredString("Password"),
-});
-
-const forgotSchema = z.object({
-  email: fieldRules.email(true),
-});
-
-const resetSchema = z.object({
-  resetToken: fieldRules.requiredString("Reset token"),
-  password: fieldRules.password(8),
 });
 
 export default function Login() {
@@ -47,8 +38,6 @@ export default function Login() {
   const [mode, setMode] = useState<Mode>("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [email, setEmail] = useState("");
-  const [resetToken, setResetToken] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sessionNotice, setSessionNotice] = useState(false);
 
@@ -69,20 +58,10 @@ export default function Login() {
     fieldOrder: ["username", "password"],
     schema: loginSchema,
   });
-  const forgotValidation = useFormValidation({
-    fieldOrder: ["email"],
-    schema: forgotSchema,
-  });
-  const resetValidation = useFormValidation({
-    fieldOrder: ["resetToken", "password"],
-    schema: resetSchema,
-  });
 
   const switchMode = (next: Mode) => {
     setMode(next);
     loginValidation.reset();
-    forgotValidation.reset();
-    resetValidation.reset();
   };
 
   if (loading) {
@@ -123,58 +102,6 @@ export default function Login() {
         force: true,
         authForm: true,
       });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const submitForgot = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const values = { email: email.trim() };
-    if (!forgotValidation.validateAll(values)) return;
-
-    setSubmitting(true);
-    const loadingId = toast.loading("Sending reset link...");
-    try {
-      const result = await api.forgotPassword(values.email);
-      toast.success("Check your email", {
-        id: loadingId,
-        description: "If an account exists for that email, a reset link has been sent.",
-        force: true,
-      });
-      if (result && typeof result === "object" && "resetToken" in result && result.resetToken) {
-        setResetToken(result.resetToken);
-        switchMode("reset");
-        toast.info("Dev reset token ready", {
-          description: "Non-production: paste the token and choose a new password.",
-        });
-      }
-    } catch (err) {
-      toast.apiError(err, { id: loadingId, fallback: "Unable to start password reset.", force: true });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const submitReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const values = { resetToken: resetToken.trim(), password };
-    if (!resetValidation.validateAll(values)) return;
-
-    setSubmitting(true);
-    const loadingId = toast.loading("Updating password...");
-    try {
-      await api.resetPassword(values.resetToken, values.password);
-      toast.success("Password updated", {
-        id: loadingId,
-        description: "You can sign in with your new password.",
-        force: true,
-      });
-      switchMode("login");
-      setPassword("");
-      setResetToken("");
-    } catch (err) {
-      toast.apiError(err, { id: loadingId, fallback: "Invalid or expired token.", force: true });
     } finally {
       setSubmitting(false);
     }
@@ -236,14 +163,12 @@ export default function Login() {
           <div className="mb-6 hidden lg:block">
             <MesmsLogo size="md" variant="horizontal" className="mb-5" />
             <h2 className="text-2xl font-semibold tracking-tight">
-              {mode === "login" ? "Sign in" : mode === "forgot" ? "Forgot password" : "Reset password"}
+              {mode === "login" ? "Sign in" : "Forgot password"}
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {mode === "login"
                 ? "Access your service operations workspace."
-                : mode === "forgot"
-                  ? "Enter the email on your account to receive a reset link."
-                  : "Enter your reset token and choose a new password."}
+                : "Password resets are handled by your administrator."}
             </p>
             {sessionNotice ? (
               <p className="mt-3 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
@@ -325,107 +250,18 @@ export default function Login() {
           ) : null}
 
           {mode === "forgot" ? (
-            <form onSubmit={submitForgot} className="space-y-5" noValidate>
-              <div className="space-y-2" data-field="email">
-                <Label htmlFor="email" className={forgotValidation.shouldShow("email") ? "text-destructive" : undefined}>
-                  Email
-                  <RequiredMark />
-                </Label>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setEmail(value);
-                    forgotValidation.handleChange("email", { email: value });
-                  }}
-                  onBlur={() => forgotValidation.handleBlur("email", { email })}
-                  aria-invalid={forgotValidation.shouldShow("email") || undefined}
-                  aria-describedby={forgotValidation.shouldShow("email") ? "email-error" : undefined}
-                  className={cn(forgotValidation.shouldShow("email") && "border-destructive focus-visible:ring-destructive")}
-                />
-                {forgotValidation.shouldShow("email") && (
-                  <FormFieldError field="email" message={forgotValidation.errors.email} />
-                )}
+            <div className="space-y-5">
+              <div className="rounded-md border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+                Please contact your system administrator to reset your password.
               </div>
-              <Button type="submit" disabled={submitting} variant="brand" className="w-full">
-                {submitting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Sending…
-                  </>
-                ) : (
-                  "Send reset link"
-                )}
-              </Button>
-              <button type="button" className="w-full text-sm text-muted-foreground hover:text-foreground" onClick={() => switchMode("login")}>
+              <button
+                type="button"
+                className="w-full text-sm text-muted-foreground hover:text-foreground"
+                onClick={() => switchMode("login")}
+              >
                 Back to sign in
               </button>
-            </form>
-          ) : null}
-
-          {mode === "reset" ? (
-            <form onSubmit={submitReset} className="space-y-5" noValidate>
-              <div className="space-y-2" data-field="resetToken">
-                <Label htmlFor="resetToken" className={resetValidation.shouldShow("resetToken") ? "text-destructive" : undefined}>
-                  Reset token
-                  <RequiredMark />
-                </Label>
-                <Input
-                  id="resetToken"
-                  value={resetToken}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setResetToken(value);
-                    resetValidation.handleChange("resetToken", { resetToken: value, password });
-                  }}
-                  onBlur={() => resetValidation.handleBlur("resetToken", { resetToken, password })}
-                  aria-invalid={resetValidation.shouldShow("resetToken") || undefined}
-                  aria-describedby={resetValidation.shouldShow("resetToken") ? "resetToken-error" : undefined}
-                  className={cn(resetValidation.shouldShow("resetToken") && "border-destructive focus-visible:ring-destructive")}
-                />
-                {resetValidation.shouldShow("resetToken") && (
-                  <FormFieldError field="resetToken" message={resetValidation.errors.resetToken} />
-                )}
-              </div>
-              <div className="space-y-2" data-field="password">
-                <Label htmlFor="newPassword" className={resetValidation.shouldShow("password") ? "text-destructive" : undefined}>
-                  New password
-                  <RequiredMark />
-                </Label>
-                <Input
-                  id="newPassword"
-                  type="password"
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setPassword(value);
-                    resetValidation.handleChange("password", { resetToken, password: value });
-                  }}
-                  onBlur={() => resetValidation.handleBlur("password", { resetToken, password })}
-                  aria-invalid={resetValidation.shouldShow("password") || undefined}
-                  aria-describedby={resetValidation.shouldShow("password") ? "password-error" : undefined}
-                  className={cn(resetValidation.shouldShow("password") && "border-destructive focus-visible:ring-destructive")}
-                />
-                {resetValidation.shouldShow("password") && (
-                  <FormFieldError field="password" message={resetValidation.errors.password} />
-                )}
-              </div>
-              <Button type="submit" disabled={submitting} variant="brand" className="w-full">
-                {submitting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Updating…
-                  </>
-                ) : (
-                  "Update password"
-                )}
-              </Button>
-              <button type="button" className="w-full text-sm text-muted-foreground hover:text-foreground" onClick={() => switchMode("login")}>
-                Back to sign in
-              </button>
-            </form>
+            </div>
           ) : null}
         </div>
       </div>

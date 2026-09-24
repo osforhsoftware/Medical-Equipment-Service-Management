@@ -443,16 +443,6 @@ export default function Sales() {
                 Sell spare parts, consumables, and equipment directly. Filter reports by date, see complete item breakdowns, and download Excel/PDF reports.
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setPrintDialog(true)} className="gap-1.5">
-                <Printer className="h-3.5 w-3.5" /> Printable Report
-              </Button>
-              {canBuild && (
-                <Button variant="brand" size="sm" onClick={() => setSaleOpen(true)} className="gap-1.5">
-                  <ShoppingBag className="h-3.5 w-3.5" /> Quick Sale
-                </Button>
-              )}
-            </div>
           </div>
         </div>
 

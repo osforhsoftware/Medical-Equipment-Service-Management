@@ -377,6 +377,39 @@ export default function ServiceRequests() {
     schema,
   });
 
+  useEffect(() => {
+    if (searchParams.get("new") !== "1") return;
+    const customerId = searchParams.get("customerId") ?? "";
+    const description = searchParams.get("description") ?? "";
+    const equipmentIds = (searchParams.get("equipmentIds") ?? searchParams.get("equipmentId") ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+
+    if (customerId || description || equipmentIds.length > 0) {
+      setForm({
+        customerId,
+        type: "",
+        typeOther: "",
+        priority: customerId && equipmentIds.length > 0 ? "medium" : "",
+        description,
+        additionalFields: [{ label: "", value: "" }],
+      });
+      setSelectedEquipIds(equipmentIds);
+      setSelectedStaff(null);
+      resetValidation();
+    }
+
+    setOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("new");
+    next.delete("customerId");
+    next.delete("equipmentId");
+    next.delete("equipmentIds");
+    next.delete("description");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, resetValidation]);
+
   const canCreate = hasRole(TICKET_CREATE_ROLES);
 
   const customersQuery = useQuery({
@@ -558,7 +591,7 @@ export default function ServiceRequests() {
 
     setSaving(true);
     try {
-      await api.createServiceRequest({
+      const created = await api.createServiceRequest({
         customerId: parsed.data.customerId,
         type: parsed.data.type || undefined,
         typeOther: parsed.data.type === "Other" ? parsed.data.typeOther?.trim() || null : null,
@@ -575,15 +608,17 @@ export default function ServiceRequests() {
           : {}),
       });
       toast.success("Service request created", {
-        description: selectedStaff
-          ? "Ticket is in New and ready for the Inspection flow."
-          : "Ticket added to New. Assign an inspection technician when ready, or rely on auto-assign.",
+        description:
+          created.status === "inspection"
+            ? "Ticket moved to Inspection and assigned to the technician."
+            : "Ticket added to New. Assign an inspection technician when ready, or rely on auto-assign.",
       });
       resetValidation();
       setOpen(false);
       resetCreateForm();
       await queryClient.invalidateQueries({ queryKey: ["service-requests"] });
       await queryClient.invalidateQueries({ queryKey: ["service-requests-table"] });
+      navigate(`/app/service-tickets/${created.id}`);
     } catch (err) {
       if (!applyApiErrors(err, dialogRef.current)) {
         toast.apiError(err, { fallback: "Unable to create request" });
@@ -960,7 +995,11 @@ export default function ServiceRequests() {
         <DialogContent ref={dialogRef} className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New Service Ticket</DialogTitle>
-            <DialogDescription>Created on behalf of a customer.</DialogDescription>
+            <DialogDescription>
+              {form.customerId && selectedEquipIds.length > 0
+                ? "Customer and equipment are already selected. Add the service type, priority, and any extra notes."
+                : "Created on behalf of a customer."}
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2" data-field="customerId">

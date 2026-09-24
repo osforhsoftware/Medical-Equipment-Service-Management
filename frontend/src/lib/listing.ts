@@ -45,6 +45,8 @@ export interface JobListParams extends BaseListParams {
   scheduledFrom?: string;
   scheduledTo?: string;
   overdue?: boolean;
+  /** pending = awaiting QA; history = jobs with a recorded QA result */
+  qaScope?: "pending" | "history";
   /** recent | archive | all — soft-hide completed older than 7 days */
   completedScope?: "recent" | "archive" | "all";
 }

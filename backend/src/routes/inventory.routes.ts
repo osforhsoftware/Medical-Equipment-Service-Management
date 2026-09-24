@@ -11,7 +11,8 @@ router.use(authenticate, resolveTenant);
 
 const canRead = requireRole("admin", "coordinator", "inventory", "engineer", "inspector", "estimator", "sales", "billing");
 const canManage = requireRole("admin", "inventory");
-const canAdjust = requireRole("admin");
+// Matches the `inventory.adjust` entry in the API write-access matrix.
+const canAdjust = requireRole("admin", "inventory");
 
 router.get("/", canRead, inventoryController.getAll);
 router.get("/low-stock", canRead, inventoryController.getLowStock);

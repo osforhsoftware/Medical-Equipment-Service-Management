@@ -22,9 +22,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ESTIMATE_WRITE_ROLES, TICKET_CREATE_ROLES } from "@/config/roles";
+import { ESTIMATE_WRITE_ROLES, INSPECTION_WRITE_ROLES, SERVICE_BILLING_ROLES, TICKET_CREATE_ROLES } from "@/config/roles";
 import { CustomerAdditionalFieldsEditor } from "@/components/customers/CustomerAdditionalFieldsEditor";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
+import { userCanAccessPath } from "@/lib/userRoles";
 import {
   api,
   ApiError,
@@ -48,14 +50,12 @@ const WORKFLOW_STEPS = [
   { status: "new", statuses: ["new"], label: "New" },
   { status: "inspection", statuses: ["inspection"], label: "Inspection" },
   { status: "estimate", statuses: ["estimate"], label: "Estimate" },
-  { status: "approval", statuses: ["approval", "pending_approval"], label: "Approval" },
-  {
-    status: "inProgress",
-    statuses: ["inProgress", "assigned_engineer", "change_pending_approval", "pending_final_approval"],
-    label: "In Progress",
-  },
-  { status: "invoiced", statuses: ["pending_invoice", "invoiced"], label: "Invoiced" },
-  { status: "completed", statuses: ["completed", "closed", "finished"], label: "Completed" },
+  { status: "pending_approval", statuses: ["pending_approval", "approval"], label: "Approval" },
+  { status: "assigned_engineer", statuses: ["assigned_engineer", "inProgress", "change_pending_approval"], label: "Repair" },
+  { status: "pending_final_approval", statuses: ["pending_final_approval", "completed"], label: "Final approval" },
+  { status: "pending_invoice", statuses: ["pending_invoice"], label: "Invoice" },
+  { status: "invoiced", statuses: ["invoiced"], label: "Invoiced" },
+  { status: "closed", statuses: ["closed", "finished", "cancelled"], label: "Closed" },
 ] as const;
 
 const ASSIGNABLE_ROLES: Role[] = ["coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
@@ -89,7 +89,8 @@ export default function ServiceRequestDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { hasRole } = useAuth();
+  const { hasRole, user } = useAuth();
+  const { rbacMatrix } = useSettings();
   const [request, setRequest] = useState<BackendServiceRequest | null>(null);
   const [customer, setCustomer] = useState<BackendCustomer | null>(null);
   const [timeline, setTimeline] = useState<BackendTimelineEvent[]>([]);
@@ -140,9 +141,13 @@ export default function ServiceRequestDetail() {
   const canCreate = hasRole(["admin", "coordinator"]);
   const canAssign = hasRole(["admin", "coordinator"]);
   const canBuildEstimate = hasRole(ESTIMATE_WRITE_ROLES);
+  const canWriteInspection = hasRole(INSPECTION_WRITE_ROLES);
   const canApproveEstimate = hasRole(["admin", "coordinator"]);
   const canEdit = hasRole(TICKET_CREATE_ROLES);
   const canDelete = hasRole(TICKET_CREATE_ROLES);
+  const canAccessBilling =
+    Boolean(user) &&
+    (hasRole(SERVICE_BILLING_ROLES) || userCanAccessPath(user!, "/app/billing", rbacMatrix));
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -604,14 +609,93 @@ export default function ServiceRequestDetail() {
                   Confirm completed work
                 </Button>
               ) : null}
-              {["pending_invoice", "invoiced", "pending_final_approval"].includes(request.status) ? (
+              {canAccessBilling && ["pending_invoice", "invoiced", "pending_final_approval"].includes(request.status) ? (
                 <Button asChild variant="outline" className="w-full">
-                  <Link to="/app/billing">Open billing queue</Link>
+                  <Link to={`/app/billing?search=${encodeURIComponent(request.reference)}`}>Open billing</Link>
                 </Button>
               ) : null}
               <Button asChild variant="outline" className="w-full">
-                <Link to={`/app/inspections/${request.id}`}>View inspection details</Link>
+                <Link to={`/app/jobs?search=${encodeURIComponent(request.reference)}`}>Open job</Link>
               </Button>
+              <Button asChild variant="outline" className="w-full">
+                <Link
+                  to={
+                    request.inspectionReport && !canWriteInspection
+                      ? `/app/inspections/${request.id}/report`
+                      : `/app/inspections/${request.id}`
+                  }
+                >
+                  {request.inspectionReport && !canWriteInspection
+                    ? "View inspection report"
+                    : "View inspection details"}
+                </Link>
+              </Button>
+              {canApproveEstimate && request.status === "pending_final_approval" ? (
+                <Button
+                  variant="outline"
+                  className="w-full text-destructive"
+                  disabled={workflowSaving}
+                  onClick={() => {
+                    const reason = window.prompt("Reason to send this ticket back to the engineer?");
+                    if (!reason?.trim()) return;
+                    setWorkflowSaving(true);
+                    void api.rejectTicketFinalApproval(request.id, { reason: reason.trim() })
+                      .then(async (updated) => {
+                        setRequest(updated);
+                        setTimeline(await api.getServiceRequestTimeline(request.id));
+                        toast({ title: "Final approval rejected" });
+                      })
+                      .catch((err) => toast.apiError(err, { fallback: "Unable to reject final approval" }))
+                      .finally(() => setWorkflowSaving(false));
+                  }}
+                >
+                  Reject final approval
+                </Button>
+              ) : null}
+              {canCreate && ["new", "inspection", "estimate", "pending_approval", "approval"].includes(request.status) ? (
+                <Button
+                  variant="outline"
+                  className="w-full text-destructive"
+                  disabled={workflowSaving}
+                  onClick={() => {
+                    const reason = window.prompt("Reason for return without repair / cancel?");
+                    if (!reason?.trim()) return;
+                    setWorkflowSaving(true);
+                    void api.cancelServiceTicket(request.id, reason.trim())
+                      .then(async (updated) => {
+                        setRequest(updated);
+                        setTimeline(await api.getServiceRequestTimeline(request.id));
+                        toast({ title: "Ticket cancelled" });
+                      })
+                      .catch((err) => toast.apiError(err, { fallback: "Unable to cancel ticket" }))
+                      .finally(() => setWorkflowSaving(false));
+                  }}
+                >
+                  Cancel / return without repair
+                </Button>
+              ) : null}
+              {canCreate && request.status === "cancelled" ? (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  disabled={workflowSaving}
+                  onClick={() => {
+                    const note = window.prompt("Reopen reason?");
+                    if (!note?.trim()) return;
+                    setWorkflowSaving(true);
+                    void api.reopenServiceTicket(request.id, { status: "estimate", note: note.trim() })
+                      .then(async (updated) => {
+                        setRequest(updated);
+                        setTimeline(await api.getServiceRequestTimeline(request.id));
+                        toast({ title: "Ticket reopened" });
+                      })
+                      .catch((err) => toast.apiError(err, { fallback: "Unable to reopen ticket" }))
+                      .finally(() => setWorkflowSaving(false));
+                  }}
+                >
+                  Reopen ticket
+                </Button>
+              ) : null}
             </CardContent>
           </Card>
         ) : undefined}

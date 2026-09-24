@@ -62,7 +62,7 @@ const multiAssignableRoles: Role[] = [
 
 const roleHints: Partial<Record<Role, string>> = {
   sales: "Record sales, bill and download sale invoices, manage customers, and view service tickets.",
-  estimator: "Build and send service estimates from tickets and the catalog.",
+  estimator: "Build and send service estimates from tickets and the catalog, and review inspection reports.",
   billing: "Service-ticket invoices after jobs complete, plus sale invoice billing.",
   inspector: "Run assigned inspections, update tickets, and scan equipment QR.",
   engineer: "Execute assigned jobs, request parts, and scan equipment.",
@@ -110,20 +110,48 @@ function toggleRoleSelection(current: Role[], role: Role): Role[] {
   return [...withoutCustomer, role];
 }
 
+/** Primary modules that must open when a staff role is selected (never stay Hidden by default). */
+const ROLE_CORE_MODULES: Partial<Record<Role, string[]>> = {
+  estimator: ["Estimates", "Service Catalog", "Service Tickets", "Customers", "Inspections"],
+  qa: ["Service Jobs", "Projects", "Service Tickets", "Inspections", "Equipment"],
+  inspector: ["Inspections", "Service Tickets", "Equipment"],
+  engineer: ["Service Jobs", "Service Tickets", "Equipment"],
+  sales: ["Sales", "Customers", "Sales Enquiries", "Service Tickets"],
+  billing: ["Billing", "Estimates", "Customers"],
+  inventory: ["Inventory Items", "Suppliers", "Purchase Orders", "Stock Purchase Requests"],
+  coordinator: ["Service Tickets", "Projects", "Service Jobs", "Customers"],
+  admin: ["Dashboard", "Users", "Settings"],
+};
+
 function defaultModuleLevels(
   roles: Role[],
   rbacMatrix: Record<string, Role[]>,
   mode: PermissionMode,
   existing?: Record<string, PermissionLevel>,
+  previousRoles?: Role[],
 ): Record<string, PermissionLevel> {
   const next: Record<string, PermissionLevel> = {};
+  const defaultLevel: PermissionLevel = mode === "read" ? "read" : "crud";
+
   for (const module of RBAC_MODULES) {
     const roleAllows = roles.some((role) => (rbacMatrix[module] ?? []).includes(role));
     if (!roleAllows) {
       next[module] = "none";
       continue;
     }
+
     const prev = existing?.[module];
+    const wasAllowed =
+      previousRoles === undefined
+        ? Boolean(prev && prev !== "none")
+        : previousRoles.some((role) => (rbacMatrix[module] ?? []).includes(role));
+
+    // Newly granted by a role change — never keep a stale Hidden/None from a prior role set.
+    if (!wasAllowed) {
+      next[module] = defaultLevel;
+      continue;
+    }
+
     if (prev === "none") {
       next[module] = "none";
       continue;
@@ -133,9 +161,22 @@ function defaultModuleLevels(
     } else if (prev === "read" || prev === "crud") {
       next[module] = prev;
     } else {
-      next[module] = "crud";
+      next[module] = defaultLevel;
     }
   }
+
+  // When a role is newly added, force its core desk modules open.
+  const addedRoles =
+    previousRoles === undefined
+      ? roles
+      : roles.filter((role) => !previousRoles.includes(role));
+  for (const role of addedRoles) {
+    for (const module of ROLE_CORE_MODULES[role] ?? []) {
+      const allowed = roles.some((entry) => (rbacMatrix[module] ?? []).includes(entry));
+      if (allowed) next[module] = defaultLevel;
+    }
+  }
+
   return next;
 }
 
@@ -179,6 +220,15 @@ export default function UserFormPage() {
     },
   });
 
+  // New user: seed module levels from the default role so saves never write Hidden by accident.
+  useEffect(() => {
+    if (isEdit) return;
+    setForm((prev) => ({
+      ...prev,
+      moduleLevels: defaultModuleLevels(prev.selectedRoles, rbacMatrix, prev.accessMode, prev.moduleLevels, prev.selectedRoles),
+    }));
+  }, [isEdit, rbacMatrix]);
+
   useEffect(() => {
     if (!isEdit || !id) return;
     let cancelled = false;
@@ -189,6 +239,7 @@ export default function UserFormPage() {
         if (cancelled) return;
         const selectedRoles = (user.roles?.length ? user.roles : [user.role]) as Role[];
         const parsed = parseUserPermissions(user.permissions);
+        const accessMode = selectedRoles.includes("admin") ? "crud" : parsed.mode;
         setForm({
           name: user.name,
           username: user.username,
@@ -198,8 +249,9 @@ export default function UserFormPage() {
           selectedRoles,
           primaryRole: user.role as Role,
           isActive: user.isActive,
-          accessMode: selectedRoles.includes("admin") ? "crud" : parsed.mode,
-          moduleLevels: defaultModuleLevels(selectedRoles, rbacMatrix, parsed.mode, parsed.modules),
+          accessMode,
+          // Pass same roles as previous so intentional Hidden overrides are preserved on load.
+          moduleLevels: defaultModuleLevels(selectedRoles, rbacMatrix, accessMode, parsed.modules, selectedRoles),
         });
         resetValidation();
       } catch (err) {
@@ -226,10 +278,11 @@ export default function UserFormPage() {
   );
 
   const updateSelectedRoles = (role: Role, checked: boolean) => {
+    const previousRoles = form.selectedRoles;
     const nextRoles = checked
-      ? toggleRoleSelection(form.selectedRoles, role)
-      : form.selectedRoles.filter((entry) => entry !== role);
-    const safeRoles = nextRoles.length ? nextRoles : form.selectedRoles;
+      ? toggleRoleSelection(previousRoles, role)
+      : previousRoles.filter((entry) => entry !== role);
+    const safeRoles = nextRoles.length ? nextRoles : previousRoles;
     const primaryRole = safeRoles.includes(form.primaryRole) ? form.primaryRole : safeRoles[0];
     const accessMode: PermissionMode =
       safeRoles.includes("admin") ? "crud" : form.accessMode;
@@ -238,7 +291,7 @@ export default function UserFormPage() {
       selectedRoles: safeRoles,
       primaryRole,
       accessMode,
-      moduleLevels: defaultModuleLevels(safeRoles, rbacMatrix, accessMode, form.moduleLevels),
+      moduleLevels: defaultModuleLevels(safeRoles, rbacMatrix, accessMode, form.moduleLevels, previousRoles),
     };
     setForm(next);
     clearError("selectedRoles");
@@ -251,7 +304,13 @@ export default function UserFormPage() {
     const next = {
       ...form,
       accessMode: mode,
-      moduleLevels: defaultModuleLevels(form.selectedRoles, rbacMatrix, mode, form.moduleLevels),
+      moduleLevels: defaultModuleLevels(
+        form.selectedRoles,
+        rbacMatrix,
+        mode,
+        form.moduleLevels,
+        form.selectedRoles,
+      ),
     };
     setForm(next);
     clearError("accessMode");
@@ -272,15 +331,16 @@ export default function UserFormPage() {
     setSaving(true);
     try {
       const modules: Record<string, PermissionLevel> = {};
+      const fallbackLevel: PermissionLevel = form.accessMode === "read" ? "read" : "crud";
       for (const module of RBAC_MODULES) {
-        const level = form.moduleLevels[module] ?? "none";
         const roleAllows = form.selectedRoles.some((role) => (rbacMatrix[module] ?? []).includes(role));
         if (!roleAllows) {
           modules[module] = "none";
-        } else {
-          modules[module] =
-            form.accessMode === "read" && level === "crud" ? "read" : level;
+          continue;
         }
+        const level = form.moduleLevels[module] ?? fallbackLevel;
+        modules[module] =
+          form.accessMode === "read" && level === "crud" ? "read" : level;
       }
 
       const payload = {

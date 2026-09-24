@@ -1,67 +1,14 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Bell,
-  Boxes,
-  ChevronRight,
-  ClipboardList,
-  FileText,
-  LogOut,
-  QrCode,
-  Receipt,
-  Search,
-  Settings,
-  User,
-  UserCheck,
-  Wrench,
-  type LucideIcon,
-} from "lucide-react";
+import { ChevronRight, LogOut, User } from "lucide-react";
 import { MobileHeader } from "@/components/mobile/MobileHeader";
 import { useMobileUnreadCount } from "@/hooks/useMobilePullRefresh";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { roleLabels } from "@/data/mock";
-import { userCanAccessPath } from "@/lib/userRoles";
+import { navItems } from "@/config/nav";
+import { userCanAccessModule } from "@/lib/userRoles";
 import { cn } from "@/lib/utils";
-
-interface ProfileMenuItem {
-  label: string;
-  icon: LucideIcon;
-  to: string;
-}
-
-interface ProfileMenuSection {
-  title: string;
-  items: ProfileMenuItem[];
-}
-
-const MENU_SECTIONS: ProfileMenuSection[] = [
-  {
-    title: "Field Service",
-    items: [
-      { label: "Service Jobs", icon: Wrench, to: "/app/jobs" },
-      { label: "Service Tickets", icon: ClipboardList, to: "/app/service-tickets" },
-      { label: "Inspections", icon: Search, to: "/app/inspections" },
-      { label: "Estimates", icon: FileText, to: "/app/estimates" },
-      { label: "QR Scanner", icon: QrCode, to: "/app/qr-tracking" },
-    ],
-  },
-  {
-    title: "Operations",
-    items: [
-      { label: "Customers", icon: UserCheck, to: "/app/customers" },
-      { label: "Inventory", icon: Boxes, to: "/app/inventory" },
-      { label: "Billing", icon: Receipt, to: "/app/billing" },
-      { label: "Notifications", icon: Bell, to: "/app/notifications" },
-    ],
-  },
-  {
-    title: "Account",
-    items: [
-      { label: "Settings", icon: Settings, to: "/app/settings" },
-    ],
-  },
-];
 
 export default function MobileProfile() {
   const { user, logout } = useAuth();
@@ -71,10 +18,17 @@ export default function MobileProfile() {
 
   const visibleSections = useMemo(() => {
     if (!user) return [];
-    return MENU_SECTIONS.map((section) => ({
-      ...section,
-      items: section.items.filter((item) => userCanAccessPath(user, item.to, rbacMatrix)),
-    })).filter((section) => section.items.length > 0);
+    const allowed = navItems.filter(
+      (item) => item.to !== "/app" && userCanAccessModule(user, item.label, rbacMatrix, item.roles),
+    );
+    const groups = new Map<string, typeof navItems>();
+    for (const item of allowed) {
+      const title = item.group ?? "More";
+      const list = groups.get(title) ?? [];
+      list.push(item);
+      groups.set(title, list);
+    }
+    return Array.from(groups.entries()).map(([title, items]) => ({ title, items }));
   }, [user, rbacMatrix]);
 
   if (!user) return null;

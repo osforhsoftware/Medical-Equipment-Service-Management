@@ -93,6 +93,13 @@ export function roleQuickActions(role: Role): MobileQuickAction[] {
         { label: "Alerts", to: "/app/notifications", icon: Bell },
         { label: "Scan", to: "/app/qr-tracking", icon: QrCode },
       ];
+    case "qa":
+      return [
+        { label: "QA Pending", to: "/app/jobs?saved=approval&status=review", icon: ClipboardList, primary: true },
+        { label: "History", to: "/app/jobs?saved=history&qaScope=history", icon: CheckCircle2 },
+        { label: "Jobs", to: "/app/jobs", icon: Wrench },
+        { label: "Alerts", to: "/app/notifications", icon: Bell },
+      ];
     default:
       return [
         { label: "Tickets", to: "/app/service-tickets", icon: ClipboardList, primary: true },
@@ -155,6 +162,13 @@ export function roleStats(role: Role, data: DashboardData): MobileStat[] {
         { label: "Active Jobs", value: String(stats.activeJobs), icon: Wrench, tone: "accent", filter: "in-progress" },
         { label: "Alerts", value: String(stats.unreadNotifications), icon: Bell, tone: "destructive" },
       ];
+    case "qa":
+      return [
+        { label: "Pending", value: String(personal.pendingApprovals || personal.assignedOpen), icon: ClipboardList, tone: "warning", filter: "qa" },
+        { label: "Due Today", value: String(personal.dueToday), icon: Timer, tone: "accent" },
+        { label: "Reviewed", value: String(personal.completedThisMonth), icon: CheckCircle2, tone: "success", filter: "completed" },
+        { label: "Alerts", value: String(stats.unreadNotifications), icon: Bell, tone: "destructive" },
+      ];
     default:
       return [
         { label: "Requests", value: String(stats.openRequests), icon: ClipboardList, tone: "primary" },
@@ -174,6 +188,7 @@ export function queueTitle(role: Role): string {
     case "inventory": return "Supply Chain Queue";
     case "billing": return "Billing Queue";
     case "coordinator": return "Operations Queue";
+    case "qa": return "QA Pending Work";
     default: return "Work Queue";
   }
 }
@@ -182,7 +197,7 @@ export const PIPELINE_STAGES = [
   { key: "assigned", label: "Assigned", queueKey: "newAssigned" as const },
   { key: "inspection", label: "Inspection", queueKey: "inspection" as const },
   { key: "estimate", label: "Estimate", queueKey: "estimatePending" as const },
-  { key: "approval", label: "Approval", queueKey: "waitingApproval" as const },
+  { key: "approval", label: "QA", queueKey: "waitingApproval" as const },
   { key: "in-progress", label: "Service", queueKey: "servicePending" as const },
   { key: "completed", label: "Done", queueKey: "completed" as const },
 ];
@@ -195,6 +210,7 @@ const FILTER_OPTIONS_BY_ROLE: Partial<Record<Role, string[]>> = {
   billing: ["all", "billing", "completed"],
   inventory: ["all", "assigned", "in-progress"],
   coordinator: ["all", "assigned", "inspection", "estimate", "in-progress", "completed"],
+  qa: ["all", "qa", "completed"],
 };
 
 const PIPELINE_BY_ROLE: Partial<Record<Role, string[]>> = {
@@ -204,6 +220,7 @@ const PIPELINE_BY_ROLE: Partial<Record<Role, string[]>> = {
   engineer: ["assigned", "in-progress", "completed"],
   billing: ["completed"],
   inventory: ["assigned", "in-progress"],
+  qa: ["approval", "completed"],
 };
 
 const ALL_FILTER_OPTIONS = [
@@ -212,6 +229,7 @@ const ALL_FILTER_OPTIONS = [
   { value: "inspection", label: "Inspection" },
   { value: "estimate", label: "Estimate" },
   { value: "in-progress", label: "In Progress" },
+  { value: "qa", label: "QA Pending" },
   { value: "completed", label: "Completed" },
   { value: "billing", label: "Billing" },
 ] as const;
@@ -234,6 +252,7 @@ export function rolePrimaryListPath(role: Role): string {
     case "estimator": return "/app/estimates";
     case "sales": return "/app/sales";
     case "engineer": return "/app/jobs";
+    case "qa": return "/app/jobs?saved=approval&status=review";
     case "billing": return "/app/billing";
     case "inventory": return "/app/inventory";
     default: return "/app/service-tickets";

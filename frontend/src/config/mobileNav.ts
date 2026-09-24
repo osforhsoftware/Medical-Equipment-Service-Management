@@ -48,7 +48,7 @@ const MOBILE_NAV_ORDER: Record<Role, string[]> = {
   engineer: ["home", "jobs", "scan", "alerts", "profile"],
   inventory: ["home", "inventory", "scan", "alerts", "profile"],
   billing: ["home", "billing", "sales", "alerts", "profile"],
-  qa: ["home", "jobs", "alerts", "profile"],
+  qa: ["home", "jobs", "tickets", "alerts", "profile"],
   customer: ["home", "profile"],
 };
 

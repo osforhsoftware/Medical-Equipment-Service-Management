@@ -25,14 +25,26 @@ export function RoleGuard({ roles, children }: { roles: readonly Role[]; childre
 }
 
 /** Route-level guard driven by the same tenant RBAC matrix as navigation. */
-export function ModuleGuard({ module, children }: { module: string; children: React.ReactNode }) {
+export function ModuleGuard({
+  module,
+  orModules,
+  children,
+}: {
+  module: string;
+  /** Extra modules that may also unlock this route (e.g. estimate staff viewing an inspection report). */
+  orModules?: string[];
+  children: React.ReactNode;
+}) {
   const { user } = useAuth();
   const { loading, rbacMatrix } = useSettings();
 
   if (!user) return <Navigate to="/login" replace />;
   if (loading) return <div className="py-12 text-center text-sm text-muted-foreground">Loading permissions…</div>;
 
-  const fallbackRoles = navItems.find((item) => item.label === module)?.roles;
-  if (!userCanAccessModule(user, module, rbacMatrix, fallbackRoles)) return <AccessDenied role={user.role} />;
+  const canAccess = [module, ...(orModules ?? [])].some((name) => {
+    const fallbackRoles = navItems.find((item) => item.label === name)?.roles;
+    return userCanAccessModule(user, name, rbacMatrix, fallbackRoles);
+  });
+  if (!canAccess) return <AccessDenied role={user.role} />;
   return <>{children}</>;
 }

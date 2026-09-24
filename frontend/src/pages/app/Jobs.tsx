@@ -141,6 +141,7 @@ function JobColumn({
   assignee,
   overdue,
   completedScope,
+  qaScope,
 }: {
   status: string;
   label: string;
@@ -148,6 +149,7 @@ function JobColumn({
   assignee?: string;
   overdue?: boolean;
   completedScope?: "recent" | "archive" | "all";
+  qaScope?: "pending" | "history";
 }) {
   const apiStatus = toApiJobStatus(status);
   const query = useInfiniteQuery({
@@ -158,6 +160,7 @@ function JobColumn({
       assignee,
       overdue,
       completedScope: completedScope ?? "all",
+      qaScope,
     }],
     queryFn: ({ pageParam }) => api.listJobs({
       status: apiStatus,
@@ -167,6 +170,7 @@ function JobColumn({
       assignee,
       overdue: overdue || undefined,
       completedScope: completedScope ?? "all",
+      qaScope,
     }),
     initialPageParam: 1,
     getNextPageParam: (last) => (last.meta.hasNextPage ? last.meta.page + 1 : undefined),
@@ -232,6 +236,7 @@ export default function Jobs() {
   const savedView = (() => {
     const fromUrl = parseJobsSavedView(searchParams.get("saved"));
     if (fromUrl !== "all") return fromUrl;
+    if (searchParams.get("qaScope") === "history") return "history";
     return viewMode === "calendar" ? "calendar" : "all";
   })();
   const calendarMonth = useMemo(
@@ -262,12 +267,24 @@ export default function Jobs() {
   const statusFilter = filters.status;
   const savedAssignee = savedView === "my" && user?.id ? user.id : undefined;
   const savedOverdue = savedView === "overdue" || undefined;
+  const isEngineer = hasRole(["engineer"]) && !hasRole(["admin", "coordinator"]);
+  const isQaStaff = hasRole(["qa"]) && !hasRole(["admin", "coordinator"]);
+  const canCreate = hasRole(JOB_CREATE_ROLES);
+  const savedQaScope =
+    savedView === "history" || searchParams.get("qaScope") === "history"
+      ? ("history" as const)
+      : undefined;
   const completedScope = "all" as const;
 
   const tableQueryParams = useMemo(() => {
-    const apiStatus = statusFilter && statusFilter !== "all"
-      ? toApiJobStatus(statusFilter)
-      : undefined;
+    const apiStatus =
+      savedQaScope === "history"
+        ? undefined
+        : savedView === "approval"
+          ? "review"
+          : statusFilter && statusFilter !== "all"
+            ? toApiJobStatus(statusFilter)
+            : undefined;
     return {
       page: listParams.page,
       limit: listParams.limit,
@@ -277,6 +294,7 @@ export default function Jobs() {
       status: apiStatus,
       assignee: savedAssignee,
       overdue: savedOverdue,
+      qaScope: savedQaScope,
       completedScope,
     };
   }, [
@@ -286,8 +304,10 @@ export default function Jobs() {
     listParams.sortOrder,
     debouncedSearch,
     statusFilter,
+    savedView,
     savedAssignee,
     savedOverdue,
+    savedQaScope,
     completedScope,
   ]);
 
@@ -295,9 +315,6 @@ export default function Jobs() {
     fieldOrder: ["serviceRequestId", "customerId", "equipmentId", "type", "typeOther", "engineerId", "scheduledFor"],
     schema: scheduleSchema,
   });
-
-  const isEngineer = hasRole(["engineer"]) && !hasRole(["admin", "coordinator"]);
-  const canCreate = hasRole(JOB_CREATE_ROLES);
 
   const requestsQuery = useQuery({
     queryKey: ["service-requests", "job-eligible"],
@@ -336,9 +353,14 @@ export default function Jobs() {
   }, [calendarMonth]);
 
   const calendarQueryParams = useMemo(() => {
-    const apiStatus = statusFilter && statusFilter !== "all"
-      ? toApiJobStatus(statusFilter)
-      : undefined;
+    const apiStatus =
+      savedQaScope === "history"
+        ? undefined
+        : savedView === "approval"
+          ? "review"
+          : statusFilter && statusFilter !== "all"
+            ? toApiJobStatus(statusFilter)
+            : undefined;
     return {
       page: 1,
       limit: CALENDAR_PAGE_SIZE,
@@ -350,9 +372,20 @@ export default function Jobs() {
       scheduledTo: calendarRange.to,
       assignee: savedAssignee,
       overdue: savedOverdue,
+      qaScope: savedQaScope,
       completedScope,
     };
-  }, [calendarRange.from, calendarRange.to, debouncedSearch, statusFilter, savedAssignee, savedOverdue, completedScope]);
+  }, [
+    calendarRange.from,
+    calendarRange.to,
+    debouncedSearch,
+    statusFilter,
+    savedView,
+    savedAssignee,
+    savedOverdue,
+    savedQaScope,
+    completedScope,
+  ]);
 
   const calendarQuery = useQuery({
     queryKey: ["jobs-calendar", calendarQueryParams],
@@ -367,9 +400,17 @@ export default function Jobs() {
   const calendarTruncated = Boolean(calendarQuery.data?.meta.hasNextPage);
 
   const visibleColumns = useMemo(() => {
+    if (savedQaScope === "history") {
+      return columns.filter((col) =>
+        col.status === "in-progress" || col.status === "delivery" || col.status === "completed",
+      );
+    }
+    if (savedView === "approval") {
+      return columns.filter((col) => col.status === "review");
+    }
     if (statusFilter && statusFilter !== "all") return columns.filter((col) => col.status === statusFilter);
     return columns;
-  }, [statusFilter]);
+  }, [statusFilter, savedQaScope, savedView]);
 
   const setViewMode = (next: JobViewMode) => {
     setSearchParams((prev) => {
@@ -401,14 +442,25 @@ export default function Jobs() {
           nextParams.set("month", format(startOfMonth(new Date()), "yyyy-MM"));
         }
         nextParams.delete("status");
+        nextParams.delete("qaScope");
       } else {
         if (nextParams.get("view") === "calendar") {
           nextParams.delete("view");
           nextParams.delete("month");
         }
-        if (next === "approval") nextParams.set("status", "review");
-        else if (next === "billing") nextParams.set("status", "delivery");
-        else nextParams.delete("status");
+        if (next === "history") {
+          nextParams.set("qaScope", "history");
+          nextParams.delete("status");
+        } else if (next === "approval") {
+          nextParams.set("status", "review");
+          nextParams.delete("qaScope");
+        } else if (next === "billing") {
+          nextParams.set("status", "delivery");
+          nextParams.delete("qaScope");
+        } else {
+          nextParams.delete("status");
+          nextParams.delete("qaScope");
+        }
       }
 
       nextParams.delete("page");
@@ -545,11 +597,17 @@ export default function Jobs() {
   const currentSortValue = `${sortBy ?? "scheduledFor"}:${sortOrder ?? "desc"}`;
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "engineer"]}>
+    <RoleGuard roles={["admin", "coordinator", "engineer", "qa"]}>
       <div className="space-y-6">
         <PageHeader
           title="Service Jobs"
-          description={isEngineer ? "Your assigned jobs — open a job to update status and complete field actions." : "Track repair, maintenance and calibration jobs."}
+          description={
+            isQaStaff
+              ? "Review jobs awaiting QA and browse completed QA history."
+              : isEngineer
+                ? "Your assigned jobs — open a job to update status and complete field actions."
+                : "Track repair, maintenance and calibration jobs."
+          }
           actions={
             canCreate ? (
               <Button onClick={openScheduleDialog} variant="brand">
@@ -560,7 +618,7 @@ export default function Jobs() {
         />
 
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-          <JobsSavedViewsSidebar value={savedView} onChange={setSavedView} />
+          <JobsSavedViewsSidebar value={savedView} onChange={setSavedView} qaMode={isQaStaff} />
 
           <div className="min-w-0 flex-1 space-y-4">
             <div className="rounded-lg border border-border bg-card px-3 py-2.5">
@@ -703,11 +761,16 @@ export default function Jobs() {
                   <JobColumn
                     key={col.status}
                     status={col.status}
-                    label={col.label}
+                    label={
+                      savedQaScope === "history" && col.status === "in-progress"
+                        ? "Returned (QA Fail)"
+                        : col.label
+                    }
                     search={debouncedSearch || undefined}
                     assignee={savedAssignee}
                     overdue={savedOverdue}
                     completedScope={completedScope}
+                    qaScope={savedQaScope}
                   />
                 ))}
               </div>

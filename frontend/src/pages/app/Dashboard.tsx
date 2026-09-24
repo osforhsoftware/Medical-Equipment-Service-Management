@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Clock,
+  FileCheck,
   FileText,
   IndianRupee,
   Loader2,
@@ -16,6 +17,8 @@ import {
   QrCode,
   Receipt,
   Search,
+  Settings as Cog,
+  ShieldCheck,
   ShoppingCart,
   Timer,
   UserCheck,
@@ -23,6 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { ImportantNotificationBanner } from "@/components/shared/ImportantNotificationBanner";
 import { StatCard } from "@/components/shared/StatCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DateRangeFilter, type DateRangeValue } from "@/components/shared/DateRangeFilter";
@@ -39,18 +43,57 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
-import { api,
+import {
+  api,
+  type BackendNotification,
   type DashboardData,
   type DashboardQueueItem,
 } from "@/lib/api";
 import { defaultDateRange } from "@/lib/charts";
-import { formatCurrency, formatDate, formatDateTime, formatJobStatus } from "@/lib/format";
+import {
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  formatJobStatus,
+  formatRelativeTime,
+} from "@/lib/format";
+import { getImportantNotifications } from "@/lib/notificationPriority";
+import { emitNotificationsUpdated, NOTIFICATIONS_UPDATED } from "@/lib/notifications-events";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { TICKET_CREATE_ROLES } from "@/config/roles";
 import { userCanAccessPath } from "@/lib/userRoles";
+
+const DISMISSED_IMPORTANT_KEY = "mesms:dashboard-dismissed-important";
+
+const notificationIconMap = {
+  amc: ShieldCheck,
+  stock: AlertTriangle,
+  approval: FileCheck,
+  job: Wrench,
+  system: Cog,
+} as const;
+
+function readDismissedImportantIds(): Set<string> {
+  try {
+    const raw = sessionStorage.getItem(DISMISSED_IMPORTANT_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? new Set(parsed.filter((id): id is string => typeof id === "string")) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function writeDismissedImportantIds(ids: Set<string>) {
+  try {
+    sessionStorage.setItem(DISMISSED_IMPORTANT_KEY, JSON.stringify([...ids]));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 const JOB_STATUS_ACTIONS = [
   { value: "scheduled", label: "Assigned" },
@@ -117,6 +160,14 @@ function roleQuickActions(role: Role): QuickAction[] {
         { label: "Inspections", to: "/app/inspections", icon: Search },
         { label: "Estimates", to: "/app/estimates", icon: FileText },
         { label: "QR Tracking", to: "/app/qr-tracking", icon: QrCode },
+      ];
+    case "qa":
+      return [
+        { label: "QA Pending", to: "/app/jobs?saved=approval&status=review", icon: FileCheck },
+        { label: "QA History", to: "/app/jobs?saved=history&qaScope=history", icon: CheckCircle2 },
+        { label: "Service Jobs", to: "/app/jobs", icon: Wrench },
+        { label: "Service Tickets", to: "/app/service-tickets", icon: ClipboardList },
+        { label: "Notifications", to: "/app/notifications", icon: Bell },
       ];
     case "admin":
     default:
@@ -185,6 +236,13 @@ function overviewCards(role: Role, data: DashboardData) {
         { label: "Active Jobs", value: String(stats.activeJobs), icon: Wrench, accent: "accent" as const, trend: data.trends.activeJobs },
         { label: "Due Today", value: String(personal.dueToday), icon: Timer, accent: "destructive" as const },
       ];
+    case "qa":
+      return [
+        { label: "QA Pending", value: String(personal.pendingApprovals || personal.assignedOpen), icon: FileCheck, accent: "warning" as const },
+        { label: "Overdue Review", value: String(personal.overdue), icon: AlertTriangle, accent: "destructive" as const },
+        { label: "Due Today", value: String(personal.dueToday), icon: Timer, accent: "accent" as const },
+        { label: "Reviewed (MTD)", value: String(personal.completedThisMonth), icon: CheckCircle2, accent: "success" as const },
+      ];
     case "admin":
     default:
       return [
@@ -212,6 +270,8 @@ function queueTitle(role: Role) {
       return "Billing Queue";
     case "coordinator":
       return "Operations Queue";
+    case "qa":
+      return "QA Pending Work";
     default:
       return "Company Workload";
   }
@@ -253,6 +313,8 @@ export default function Dashboard() {
   const { rbacMatrix } = useSettings();
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
+  const [notifications, setNotifications] = useState<BackendNotification[]>([]);
+  const [dismissedImportantIds, setDismissedImportantIds] = useState<Set<string>>(() => readDismissedImportantIds());
   const [loading, setLoading] = useState(true);
   const [updatingJobId, setUpdatingJobId] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRangeValue>(() => defaultDateRange(29));
@@ -262,8 +324,12 @@ export default function Dashboard() {
   const loadDashboard = useCallback(async (range: DateRangeValue) => {
     setLoading(true);
     try {
-      const overview = await api.getDashboard({ from: range.from, to: range.to });
+      const [overview, notifs] = await Promise.all([
+        api.getDashboard({ from: range.from, to: range.to }),
+        api.listNotifications(),
+      ]);
       setData(overview);
+      setNotifications(notifs);
     } catch (err) {
       toast.apiError(err, { fallback: "Failed to load dashboard" });
       setData(null);
@@ -272,9 +338,26 @@ export default function Dashboard() {
     }
   }, []);
 
+  const refreshNotifications = useCallback(async () => {
+    try {
+      const notifs = await api.listNotifications();
+      setNotifications(notifs);
+    } catch {
+      // keep existing list if refresh fails
+    }
+  }, []);
+
   useEffect(() => {
     void loadDashboard(dateRange);
   }, [loadDashboard, dateRange]);
+
+  useEffect(() => {
+    const onUpdated = () => {
+      void refreshNotifications();
+    };
+    window.addEventListener(NOTIFICATIONS_UPDATED, onUpdated);
+    return () => window.removeEventListener(NOTIFICATIONS_UPDATED, onUpdated);
+  }, [refreshNotifications]);
 
   const cards = useMemo(() => (data ? overviewCards(role, data) : []), [data, role]);
   const actions = useMemo(() => {
@@ -282,6 +365,44 @@ export default function Dashboard() {
     return roleQuickActions(role).filter((action) => userCanAccessPath(user, action.to, rbacMatrix));
   }, [role, user, rbacMatrix]);
   const canCreateTicket = hasRole(TICKET_CREATE_ROLES);
+
+  const importantBanner = useMemo(() => {
+    const important = getImportantNotifications(notifications, 5);
+    return important.find((n) => !dismissedImportantIds.has(n.id)) ?? null;
+  }, [notifications, dismissedImportantIds]);
+
+  const recentNotifications = useMemo(
+    () =>
+      [...notifications]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 5),
+    [notifications],
+  );
+
+  const unreadNotificationCount = useMemo(
+    () => notifications.filter((n) => !n.read).length,
+    [notifications],
+  );
+
+  const dismissImportant = (id: string) => {
+    setDismissedImportantIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      writeDismissedImportantIds(next);
+      return next;
+    });
+  };
+
+  const openNotification = async (id: string) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    try {
+      await api.markNotificationRead(id);
+      emitNotificationsUpdated();
+    } catch {
+      void refreshNotifications();
+    }
+    navigate("/app/notifications");
+  };
 
   const activity = data?.activityTrend ?? data?.revenueTrend.map((row) => ({
     label: row.month,
@@ -363,6 +484,14 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {importantBanner ? (
+        <ImportantNotificationBanner
+          notification={importantBanner}
+          onDismiss={dismissImportant}
+          onOpen={(id) => void openNotification(id)}
+        />
+      ) : null}
+
       <PageHeader
         title={`Welcome back, ${user.name.split(" ")[0]}`}
         description={`${roleLabels[role]} · role-based work overview`}
@@ -422,8 +551,45 @@ export default function Dashboard() {
         </Card>
       )}
 
+      {role === "qa" && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle>QA Work Status</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                {
+                  label: "QA Pending",
+                  value: data.roleQueues.waitingApproval,
+                  to: "/app/jobs?saved=approval&status=review",
+                  hint: "Jobs awaiting review",
+                },
+                {
+                  label: "Completed History",
+                  value: data.roleQueues.completed,
+                  to: "/app/jobs?saved=history&qaScope=history",
+                  hint: "Pass / fail reviews (MTD)",
+                },
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => navigate(item.to)}
+                  className="rounded-md border border-border bg-muted/30 px-3 py-2.5 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <p className="text-xs text-muted-foreground">{item.label}</p>
+                  <p className="mt-1 text-xl font-semibold tabular-nums">{item.value}</p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">{item.hint}</p>
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid gap-6 xl:grid-cols-3">
-        <Card className="shadow-card xl:col-span-2">
+        <Card className={cn("shadow-card", role !== "qa" && "xl:col-span-2")}>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <div className="flex items-center gap-2">
               <UserCheck className="h-4 w-4 text-primary" />
@@ -433,7 +599,13 @@ export default function Dashboard() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => navigate(actions[0]?.to ?? data.myQueue[0]?.href ?? "/app")}
+              onClick={() =>
+                navigate(
+                  role === "qa"
+                    ? "/app/jobs?saved=approval&status=review"
+                    : (actions[0]?.to ?? data.myQueue[0]?.href ?? "/app"),
+                )
+              }
             >
               View all <ArrowRight className="ml-1 h-3.5 w-3.5" />
             </Button>
@@ -441,7 +613,9 @@ export default function Dashboard() {
           <CardContent className="space-y-2">
             {data.myQueue.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                No assigned work in your queue right now.
+                {role === "qa"
+                  ? "No jobs waiting for QA review."
+                  : "No assigned work in your queue right now."}
               </p>
             ) : (
               data.myQueue.slice(0, 8).map((item) => (
@@ -482,6 +656,41 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
+        {role === "qa" ? (
+          <Card className="shadow-card">
+            <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-primary" />
+                <CardTitle className="text-base">Completed History</CardTitle>
+                <Badge variant="secondary">{(data.historyQueue ?? []).length}</Badge>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate("/app/jobs?saved=history&qaScope=history")}
+              >
+                View all <ArrowRight className="ml-1 h-3.5 w-3.5" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {(data.historyQueue ?? []).length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No completed QA reviews yet.
+                </p>
+              ) : (
+                (data.historyQueue ?? []).slice(0, 8).map((item) => (
+                  <QueueRow
+                    key={`history-${item.kind}-${item.id}`}
+                    item={item}
+                    onOpen={() => navigate(item.href)}
+                    actions={<ArrowRight className="mt-2 h-4 w-4 shrink-0 text-muted-foreground" />}
+                  />
+                ))
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
+
         <div className="space-y-6">
           {actions.length > 0 ? (
           <Card className="shadow-card">
@@ -510,14 +719,49 @@ export default function Dashboard() {
                 <Bell className="h-4 w-4 text-primary" />
                 <CardTitle className="text-base">Notifications</CardTitle>
               </div>
-              {data.stats.unreadNotifications > 0 ? (
-                <Badge variant="secondary">{data.stats.unreadNotifications} new</Badge>
+              {unreadNotificationCount > 0 ? (
+                <Badge variant="secondary">{unreadNotificationCount} new</Badge>
               ) : null}
             </CardHeader>
             <CardContent className="space-y-2">
-              <p className="text-sm text-muted-foreground">
-                Assignments, approvals, stock alerts, and system updates appear here.
-              </p>
+              {recentNotifications.length === 0 ? (
+                <p className="py-2 text-sm text-muted-foreground">
+                  No notifications yet. Assignments, approvals, and stock alerts will appear here.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {recentNotifications.map((n) => {
+                    const Icon = notificationIconMap[n.type] ?? Bell;
+                    return (
+                      <button
+                        key={n.id}
+                        type="button"
+                        onClick={() => void openNotification(n.id)}
+                        className={cn(
+                          "flex w-full items-start gap-2.5 rounded-md border border-border px-2.5 py-2 text-left transition-colors hover:bg-muted/40",
+                          !n.read && "border-primary/25 bg-primary/[0.03]",
+                        )}
+                      >
+                        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                          <Icon className="h-3.5 w-3.5" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <p className="truncate text-sm font-medium">{n.title}</p>
+                            {!n.read ? (
+                              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden />
+                            ) : null}
+                          </div>
+                          <p className="line-clamp-1 text-xs text-muted-foreground">{n.body}</p>
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">
+                            {formatRelativeTime(n.createdAt)}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               <Button variant="ghost" size="sm" className="px-0" onClick={() => navigate("/app/notifications")}>
                 Open notification center <ArrowRight className="ml-1 h-3.5 w-3.5" />
               </Button>

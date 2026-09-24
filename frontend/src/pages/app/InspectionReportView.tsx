@@ -6,6 +6,7 @@ import { InspectionReportDocument } from "@/components/inspections/InspectionRep
 import { InspectionReportPanel } from "@/components/inspections/InspectionReportPanel";
 import { useInspectionReportEditor } from "@/components/inspections/useInspectionReportEditor";
 import { Button } from "@/components/ui/button";
+import { INSPECTION_READ_ROLES, INSPECTION_WRITE_ROLES } from "@/config/roles";
 import { useAuth } from "@/context/AuthContext";
 import { ApiError } from "@/lib/api";
 import {
@@ -16,7 +17,6 @@ import {
 import { shareInspectionReport, type InspectionShareChannel } from "@/lib/inspectionShare";
 import { toast } from "@/lib/toast";
 
-const EDIT_ROLES = ["admin", "coordinator", "inspector"] as const;
 const SHARE_ROLES = ["admin", "coordinator", "inspector"] as const;
 
 export default function InspectionReportView() {
@@ -65,9 +65,14 @@ export default function InspectionReportView() {
 
   const editor = useInspectionReportEditor(load);
   const request = bundle?.request ?? null;
-  const report = bundle?.report ?? null;
+  const report = bundle?.report ?? request?.inspectionReport ?? null;
+  const from = searchParams.get("from");
+  const backTo =
+    from === "estimate"
+      ? `/app/estimates/${id}/build`
+      : `/app/inspections/${id}${from === "history" ? "?from=history" : ""}`;
   const canEdit =
-    hasRole([...EDIT_ROLES]) &&
+    hasRole(INSPECTION_WRITE_ROLES) &&
     Boolean(request) &&
     ["new", "inspection", "estimate"].includes(request!.status);
   const canShare = hasRole([...SHARE_ROLES]) && Boolean(report);
@@ -111,12 +116,12 @@ export default function InspectionReportView() {
   };
 
   return (
-    <RoleGuard roles={["admin", "coordinator", "inspector", "estimator", "billing"]}>
+    <RoleGuard roles={INSPECTION_READ_ROLES}>
       <div className="print-preview-page min-h-[70vh] space-y-4">
         <div className="no-print flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <Button variant="ghost" size="sm" className="-ml-2 w-fit text-muted-foreground" asChild>
-            <Link to={`/app/inspections/${id}${searchParams.get("from") === "history" ? "?from=history" : ""}`}>
-              <ArrowLeft className="mr-1 h-4 w-4" /> Back to inspection
+            <Link to={backTo}>
+              <ArrowLeft className="mr-1 h-4 w-4" /> {from === "estimate" ? "Back to estimate" : "Back to inspection"}
             </Link>
           </Button>
           {report ? (
@@ -198,8 +203,16 @@ export default function InspectionReportView() {
               </Button>
             ) : (
               <Button className="mt-4" variant="outline" asChild>
-                <Link to={searchParams.get("from") === "history" ? "/app/inspections?view=history" : "/app/inspections"}>
-                  Back to inspections
+                <Link
+                  to={
+                    from === "estimate"
+                      ? `/app/estimates/${id}/build`
+                      : from === "history"
+                        ? "/app/inspections?view=history"
+                        : "/app/inspections"
+                  }
+                >
+                  {from === "estimate" ? "Back to estimate" : "Back to inspections"}
                 </Link>
               </Button>
             )}
@@ -234,6 +247,9 @@ export default function InspectionReportView() {
         setSeverity={editor.setSeverity}
         additionalFields={editor.additionalFields}
         setAdditionalFields={editor.setAdditionalFields}
+        recommendedParts={editor.recommendedParts}
+        setRecommendedParts={editor.setRecommendedParts}
+        inventory={editor.inventory}
         machineImages={editor.machineImages}
         setMachineImages={editor.setMachineImages}
         setMachineImage={editor.setMachineImage}

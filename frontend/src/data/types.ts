@@ -75,6 +75,10 @@ export interface Equipment {
   installDate: string | null;
   warrantyStart?: string | null;
   warrantyEnd: string | null;
+  noMachineWarranty?: boolean;
+  serviceWarrantyStart?: string | null;
+  serviceWarrantyEnd?: string | null;
+  noServiceWarranty?: boolean;
   amcStatus: "active" | "expiring" | "expired" | "none";
   condition: string;
   currentStatus?: "in_service" | "in_repair" | "in_storage" | "decommissioned" | "disposed";
@@ -82,14 +86,24 @@ export interface Equipment {
   lastServiceDate: string;
 }
 
-export type ServiceStatus =
+/** Canonical backend ticket statuses. */
+export type CanonicalServiceStatus =
   | "new"
   | "inspection"
   | "estimate"
-  | "approval"
-  | "in-progress"
-  | "completed"
-  | "invoiced";
+  | "pending_approval"
+  | "assigned_engineer"
+  | "change_pending_approval"
+  | "pending_final_approval"
+  | "pending_invoice"
+  | "invoiced"
+  | "closed"
+  | "cancelled";
+
+/** Legacy aliases still present in older records / UI code. */
+export type LegacyServiceStatus = "approval" | "in-progress" | "completed";
+
+export type ServiceStatus = CanonicalServiceStatus | LegacyServiceStatus;
 
 export interface ServiceRequest {
   id: string;

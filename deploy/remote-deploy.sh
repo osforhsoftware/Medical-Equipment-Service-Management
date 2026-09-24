@@ -142,6 +142,9 @@ cd "$APP_DIR/backend"
 npm ci
 npm run build
 npx prisma generate
+# Recover when a prior migrate failed after columns already existed (P3009 / duplicate column),
+# which otherwise blocks deploy and surfaces as Prisma P2022 on the dashboard.
+node scripts/repair-stuck-migrations.js || true
 npx prisma migrate deploy
 if [ "$FIRST_INSTALL" -eq 1 ]; then
   echo "=== Seed demo data (first install only) ==="

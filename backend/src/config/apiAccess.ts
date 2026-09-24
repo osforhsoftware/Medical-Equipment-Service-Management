@@ -14,15 +14,16 @@ export const API_WRITE_ACCESS = {
   "tickets.create": ["admin", "coordinator"],
   "tickets.update": ["admin", "coordinator"],
   "tickets.assign": ["admin", "coordinator"],
-  "tickets.workflow": ["admin", "coordinator", "inspector", "estimator", "engineer", "billing"],
+  "tickets.workflow": ["admin", "coordinator", "inspector", "estimator", "engineer", "billing", "qa"],
   "tickets.reopen": ["admin", "coordinator"],
+  "tickets.cancel": ["admin", "coordinator"],
   "tickets.delete": ["admin", "coordinator"],
   "inspections.write": ["admin", "coordinator", "inspector"],
   "estimates.write": ["admin", "coordinator", "estimator"],
   "estimates.decide": CUSTOMER_PORTAL_ENABLED
     ? (["admin", "coordinator", "customer"] as const)
     : (["admin", "coordinator"] as const),
-  "jobs.write": ["admin", "coordinator", "engineer"],
+  "jobs.write": ["admin", "coordinator", "engineer", "qa"],
   "inventory.write": ["admin", "inventory"],
   "inventory.adjust": ["admin", "inventory"],
   "suppliers.write": ["admin", "inventory"],
@@ -30,7 +31,7 @@ export const API_WRITE_ACCESS = {
   "purchaseOrders.receive": ["admin", "inventory"],
   "purchaseReturns.write": ["admin", "inventory"],
   "stockTransfers.write": ["admin", "inventory"],
-  "amc.write": ["admin", "coordinator", "billing"],
+  "amc.write": ["admin", "coordinator"],
   "sales.write": ["admin", "sales"],
   "sales.fulfill": ["admin", "inventory"],
   "sales.bill": ["admin", "billing", "sales"],
@@ -38,8 +39,8 @@ export const API_WRITE_ACCESS = {
   "settings.write": ["admin"],
   "taxonomy.write": ["admin", "coordinator", "inventory"],
   "auditLogs.write": ["admin"],
-  "files.upload": ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing"],
-  "notifications.write": ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing"],
+  "files.upload": ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing", "qa"],
+  "notifications.write": ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing", "qa"],
 } as const;
 
 export type ApiWritePermission = keyof typeof API_WRITE_ACCESS;
@@ -53,6 +54,7 @@ export const ALL_ROLES = [
   "engineer",
   "inventory",
   "billing",
+  "qa",
   "customer",
 ] as const;
 
@@ -69,6 +71,9 @@ export const CUSTOMER_WRITE_ROLES = ["admin", "coordinator", "estimator", "sales
 
 /** Staff who can approve/reject estimates and assign an engineer. */
 export const ESTIMATE_STAFF_APPROVER_ROLES = ["admin", "coordinator"] as const;
+
+/** Staff who can pass/fail job QA and confirm delivery. */
+export const QA_APPROVER_ROLES = ["admin", "coordinator", "qa"] as const;
 
 export function rolesFor(permission: ApiWritePermission): readonly string[] {
   return API_WRITE_ACCESS[permission];

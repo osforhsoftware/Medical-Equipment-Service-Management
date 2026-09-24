@@ -1,5 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { domainController as c } from "@/controllers/domain.controller";
+import { QA_APPROVER_ROLES } from "@/config/apiAccess";
 import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
 import { authenticate, requireRole, requireStaff } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
@@ -46,8 +47,8 @@ const documentRole = (req: Request, res: Response, next: NextFunction) => {
   const permissions: Record<string, string[]> = {
     estimate: ["admin", "coordinator", "estimator", "billing"],
     invoice: ["admin", "billing", "sales"],
-    "service-report": ["admin", "coordinator", "engineer"],
-    "inspection-report": ["admin", "coordinator", "inspector", "estimator", "billing"],
+    "service-report": ["admin", "coordinator", "engineer", "qa"],
+    "inspection-report": ["admin", "coordinator", "inspector", "estimator", "billing", "qa"],
   };
   return requireRole(...(permissions[req.params.kind] ?? []))(req, res, next);
 };
@@ -75,7 +76,7 @@ router.post(
 router.post("/jobs/:id/assignments", operations, validate(jobAssignmentSchema), c.jobAssignment);
 router.post("/jobs/:id/work-logs", requireRole("admin", "coordinator", "engineer"), validate(workLogSchema), c.workLog);
 router.post("/jobs/:id/extras", requireRole("admin", "coordinator", "engineer"), validate(jobExtraSchema), c.jobExtra);
-router.post("/job-extras/:id/approve", requireRole("admin", "coordinator"), c.approveJobExtra);
+router.post("/job-extras/:id/approve", requireRole(...QA_APPROVER_ROLES), c.approveJobExtra);
 router.patch("/job-extras/:id", requireRole("admin", "coordinator", "engineer"), validate(jobExtraSchema), c.updateJobExtra);
 router.delete("/job-extras/:id", requireRole("admin", "coordinator", "engineer"), c.deleteJobExtra);
 

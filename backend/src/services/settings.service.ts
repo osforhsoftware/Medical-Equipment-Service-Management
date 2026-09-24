@@ -21,6 +21,7 @@ type UpdateSettingsData = {
   autoAssignCoordinatorAfterInspection?: boolean;
   autoAssignEstimatorAfterInspection?: boolean;
   autoAssignEngineerOnApproval?: boolean;
+  guidedSetupFlow?: boolean;
   defaultCoordinatorUserId?: string | null;
   defaultInspectorUserId?: string | null;
   defaultEstimatorUserId?: string | null;
@@ -45,6 +46,22 @@ function normalizeRbac(raw: unknown): Record<string, string[]> {
   const customers = merged.Customers ?? [];
   if (!customers.includes("estimator") && DEFAULT_RBAC_MATRIX.Customers.includes("estimator")) {
     merged.Customers = [...customers, "estimator"];
+  }
+
+  // Estimate desk: keep Estimates, catalog, and inspection reports for estimate staff on older tenant matrices.
+  for (const module of ["Estimates", "Service Catalog", "Inspections"] as const) {
+    const roles = merged[module] ?? [];
+    if (!roles.includes("estimator") && DEFAULT_RBAC_MATRIX[module]?.includes("estimator")) {
+      merged[module] = [...roles, "estimator"];
+    }
+  }
+
+  // Quality Assurance desk: merge qa onto modules that default-include it.
+  for (const module of Object.keys(DEFAULT_RBAC_MATRIX)) {
+    if (!DEFAULT_RBAC_MATRIX[module]?.includes("qa")) continue;
+    const roles = merged[module] ?? [];
+    if (roles.includes("qa")) continue;
+    merged[module] = [...roles, "qa"];
   }
 
   // Sales desk: product sales, customers, ticket visibility — not ops/admin reports.
@@ -103,6 +120,7 @@ export class SettingsService {
       autoAssignCoordinatorAfterInspection: settings.autoAssignCoordinatorAfterInspection,
       autoAssignEstimatorAfterInspection: settings.autoAssignEstimatorAfterInspection,
       autoAssignEngineerOnApproval: settings.autoAssignEngineerOnApproval,
+      guidedSetupFlow: settings.guidedSetupFlow,
       defaultCoordinatorUserId: settings.defaultCoordinatorUserId,
       defaultInspectorUserId: settings.defaultInspectorUserId,
       defaultEstimatorUserId: settings.defaultEstimatorUserId,
@@ -151,6 +169,9 @@ export class SettingsService {
       updatePayload.autoAssignEstimatorAfterInspection = data.autoAssignEstimatorAfterInspection;
     }
     if (data.autoAssignEngineerOnApproval !== undefined) updatePayload.autoAssignEngineerOnApproval = data.autoAssignEngineerOnApproval;
+    if (data.guidedSetupFlow !== undefined) {
+      updatePayload.guidedSetupFlow = data.guidedSetupFlow;
+    }
 
     const resolveStaffDefault = async (userId: string | null | undefined, role: string, label: string) => {
       if (userId === undefined) return undefined;

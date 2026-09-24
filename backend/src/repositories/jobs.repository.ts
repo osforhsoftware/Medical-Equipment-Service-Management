@@ -14,6 +14,8 @@ const jobIncludes = {
   signature: true,
 } satisfies Prisma.ServiceJobInclude;
 
+export type JobQaScope = "pending" | "history";
+
 export interface JobListFilters {
   status?: string;
   engineer?: string;
@@ -22,6 +24,8 @@ export interface JobListFilters {
   scheduledFrom?: string;
   scheduledTo?: string;
   overdue?: boolean;
+  /** pending = awaiting QA (review); history = jobs with a recorded QA pass/fail */
+  qaScope?: JobQaScope;
   /** recent (default) = hide completed older than 7 days; archive = only those; all = no hide */
   completedScope?: CompletedScope;
   skip: number;
@@ -29,10 +33,24 @@ export interface JobListFilters {
   orderBy: Prisma.ServiceJobOrderByWithRelationInput;
 }
 
+/** Jobs that have a recorded QA result in stageDetails.qa.result (MySQL JSON). */
+export function qaReviewedWhere(): Prisma.ServiceJobWhereInput {
+  return {
+    OR: [
+      { stageDetails: { path: "$.qa.result", equals: "pass" } },
+      { stageDetails: { path: "$.qa.result", equals: "fail" } },
+    ],
+  };
+}
+
 function buildWhere(tenantId: string, filters: Omit<JobListFilters, "skip" | "take" | "orderBy">): Prisma.ServiceJobWhereInput {
   const where: Prisma.ServiceJobWhereInput = { tenantId };
 
-  if (filters.status) {
+  if (filters.qaScope === "pending") {
+    where.status = "review";
+  } else if (filters.qaScope === "history") {
+    Object.assign(where, qaReviewedWhere());
+  } else if (filters.status) {
     where.status = filters.status as ServiceJob["status"];
   } else if (filters.overdue) {
     where.status = { not: "completed" };
@@ -78,7 +96,11 @@ function buildWhere(tenantId: string, filters: Omit<JobListFilters, "skip" | "ta
     }
   }
 
-  const scope = filters.completedScope ?? "recent";
+  // QA history must include older completed jobs; pending QA is never completed.
+  const scope =
+    filters.qaScope === "history" || filters.qaScope === "pending"
+      ? "all"
+      : (filters.completedScope ?? "recent");
   if (scope !== "all") {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - COMPLETED_BOARD_RETENTION_DAYS);
@@ -96,6 +118,11 @@ function buildWhere(tenantId: string, filters: Omit<JobListFilters, "skip" | "ta
     } else {
       where.AND = [archiveClause];
     }
+  }
+
+  // When both qa history + a status column are requested (board columns), AND them.
+  if (filters.qaScope === "history" && filters.status) {
+    where.status = filters.status as ServiceJob["status"];
   }
 
   return where;

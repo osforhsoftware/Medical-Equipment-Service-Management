@@ -12,7 +12,8 @@ import type { BackendCatalogItem, BackendInventoryItem, EstimateLineInput } from
 import { ESTIMATE_LINE_TYPES, formatLineType, lineTotal, newEstimateLine } from "@/lib/estimates";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { MarginWarningBadge } from "@/components/shared/InventoryHelpers";
+import { inventoryOriginUnitPrice, MarginWarningBadge } from "@/components/shared/InventoryHelpers";
+import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 
 const LINE_GRID =
   "grid grid-cols-[minmax(0,1.5fr)_8.5rem_5.5rem_7rem_5.5rem_6.5rem_7.5rem] items-start gap-x-2";
@@ -20,6 +21,7 @@ const LINE_GRID_EDIT =
   "grid grid-cols-[minmax(0,1.5fr)_8.5rem_5.5rem_7rem_5.5rem_6.5rem_7.5rem_2.5rem] items-start gap-x-2";
 const numberInputClass =
   "h-10 min-w-0 w-full px-2 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+const CUSTOM_CATALOG_VALUE = "__custom__";
 
 interface EstimateItemsTableProps {
   lines: EstimateLineInput[];
@@ -48,32 +50,50 @@ export function EstimateItemsTable({
   };
 
   const applyCatalog = (index: number, catalogId: string) => {
+    if (catalogId === CUSTOM_CATALOG_VALUE) {
+      updateLine(index, {
+        catalogItemId: null,
+        inventoryItemId: null,
+        partNumber: null,
+        type: "custom",
+        description: "",
+        unitPrice: 0,
+      });
+      return;
+    }
     const item = catalog.find((c) => c.id === catalogId);
     if (!item) return;
     updateLine(index, {
       catalogItemId: item.id,
+      inventoryItemId: null,
+      partNumber: null,
       type: "service",
       description: item.name,
-      unitPrice: Number(item.unitPrice),
-      taxRate: Number(item.taxRate),
+      unitPrice: Number(item.unitPrice) || 0,
+      taxRate: Number(item.taxRate) || 0,
     });
   };
 
-  const applyInventory = (index: number, inventoryId: string) => {
-    const item = inventory.find((i) => i.id === inventoryId);
-    if (!item) return;
+  const applyInventory = (index: number, item: BackendInventoryItem) => {
     const qty = lines[index]?.quantity || 1;
     const delivery =
       item.deliveryChargeType === "perUnit" ? Number(item.deliveryCharge ?? 0) * qty : Number(item.deliveryCharge ?? 0);
     updateLine(index, {
       inventoryItemId: item.id,
+      catalogItemId: null,
       type: "part",
       description: item.name,
       partNumber: item.sku,
-      unitPrice: Number(item.sellingPrice ?? item.unitCost) + delivery / Math.max(qty, 1),
+      unitPrice: inventoryOriginUnitPrice(item) + delivery / Math.max(qty, 1),
       // Store cost price for margin warnings
-      costPrice: Number(item.unitCost),
+      costPrice: Number(item.unitCost) || 0,
     });
+  };
+
+  const catalogSelectValue = (line: EstimateLineInput) => {
+    if (line.catalogItemId) return line.catalogItemId;
+    if (line.type === "custom" && !line.inventoryItemId) return CUSTOM_CATALOG_VALUE;
+    return "";
   };
 
   return (
@@ -120,16 +140,20 @@ export function EstimateItemsTable({
                         <Input
                           value={line.description}
                           onChange={(e) => updateLine(index, { description: e.target.value })}
-                          placeholder="Description"
+                          placeholder={line.type === "custom" ? "Enter custom description" : "Description"}
                           aria-label={`Line ${index + 1} description`}
                           className="min-w-0"
                         />
                         <div className="grid grid-cols-2 gap-2">
-                          <Select onValueChange={(v) => applyCatalog(index, v)}>
+                          <Select
+                            value={catalogSelectValue(line)}
+                            onValueChange={(v) => applyCatalog(index, v)}
+                          >
                             <SelectTrigger className="h-8 min-w-0 text-xs">
                               <SelectValue placeholder="Catalog item" />
                             </SelectTrigger>
                             <SelectContent>
+                              <SelectItem value={CUSTOM_CATALOG_VALUE}>Custom…</SelectItem>
                               {catalog.map((c) => (
                                 <SelectItem key={c.id} value={c.id}>
                                   {c.name}
@@ -137,18 +161,13 @@ export function EstimateItemsTable({
                               ))}
                             </SelectContent>
                           </Select>
-                          <Select onValueChange={(v) => applyInventory(index, v)}>
-                            <SelectTrigger className="h-8 min-w-0 text-xs">
-                              <SelectValue placeholder="Inventory item" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {inventory.map((i) => (
-                                <SelectItem key={i.id} value={i.id}>
-                                  {i.name} ({i.sku}) · {Math.max(0, i.inStock - i.reserved)} avail
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <InventoryProductSelect
+                            items={inventory}
+                            value={line.inventoryItemId ?? ""}
+                            onValueChange={(_id, item) => applyInventory(index, item)}
+                            placeholder="Inventory item"
+                            triggerClassName="h-8 min-w-0 text-xs"
+                          />
                         </div>
                       </div>
                     ) : (

@@ -7,11 +7,17 @@ import {
   resolveTicketEventStatus,
 } from "@/services/workflow/serviceTicketStateMachine";
 import { generateReference } from "@/utils/reference";
-import { extraChargeType } from "@/utils/invoiceCharges";
+import { extraChargeType, extraLineTotal } from "@/utils/invoiceCharges";
+import { computeVerificationChecklist } from "@/services/billing.service";
 import { ESTIMATE_STAFF_APPROVER_ROLES } from "@/config/apiAccess";
 import { userHasAnyRoleKey } from "@/utils/userRoles";
 import { ticketAssignmentService } from "@/services/ticketAssignment.service";
 import { buildEquipmentWarrantyUpdate } from "@/lib/equipmentWarranty";
+import {
+  notifyStockPurchaseRequest,
+  syncJobExtraStockRequest,
+  upsertOpenStockPurchaseRequest,
+} from "@/lib/stockPurchaseRequest";
 
 type Actor = { userId: string; role: string };
 type JsonObject = Record<string, unknown>;
@@ -23,11 +29,16 @@ const ref = (prefix: string) =>
   `${prefix}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
 async function assertJobAccess(tenantId: string, jobId: string, actor: Actor) {
+  const isOpsLead =
+    actor.role === "admin" ||
+    actor.role === "coordinator" ||
+    actor.role === "qa" ||
+    (await userHasAnyRoleKey(actor.userId, tenantId, actor.role, ["qa"]));
   const job = await prisma.serviceJob.findFirst({
     where: {
       id: jobId,
       tenantId,
-      ...(actor.role === "admin" || actor.role === "coordinator"
+      ...(isOpsLead
         ? {}
         : { OR: [{ engineerId: actor.userId }, { assignments: { some: { userId: actor.userId, endedAt: null } } }] }),
     },
@@ -104,13 +115,35 @@ export class DomainService {
       });
       if (!catalogItem) throw new AppError("Recommended service is unavailable", 404);
     }
+    let inventoryItem = null;
     if (input.inventoryItemId) {
-      const inventoryItem = await prisma.inventoryItem.findFirst({
+      inventoryItem = await prisma.inventoryItem.findFirst({
         where: { id: input.inventoryItemId, tenantId },
       });
       if (!inventoryItem) throw new AppError("Recommended inventory item is unavailable", 404);
     }
-    return prisma.inspectionRecommendation.create({ data: { inspectionReportId: reportId, ...input } });
+    const recommendation = await prisma.inspectionRecommendation.create({
+      data: { inspectionReportId: reportId, ...input },
+    });
+    if (inventoryItem && (input.type === "part" || input.inventoryItemId)) {
+      const quantity = Math.max(1, Math.ceil(Number(input.quantity) || 1));
+      const { created } = await upsertOpenStockPurchaseRequest(prisma, {
+        tenantId,
+        inventoryItemId: inventoryItem.id,
+        quantity,
+        requestedBy: actor.userId,
+        serviceRequestId: report.serviceRequestId,
+        note: `Requested from inspection: ${input.title}`,
+      });
+      if (created) {
+        await notifyStockPurchaseRequest(
+          prisma,
+          tenantId,
+          `${quantity} × ${inventoryItem.name} (${inventoryItem.sku}) requested from inspection`,
+        );
+      }
+    }
+    return recommendation;
   }
 
   async attachInspectionFile(tenantId: string, reportId: string, actor: Actor, input: any) {
@@ -411,34 +444,22 @@ export class DomainService {
               });
             }
             if (shortageQuantity) {
-              await tx.stockPurchaseRequest.create({
-                data: {
-                  tenantId,
-                  inventoryItemId: item.id,
-                  quantity: shortageQuantity,
-                  requestedBy: actor.userId,
-                  serviceRequestId: estimate.serviceRequestId,
-                  note: `Shortage for estimate ${estimate.reference}`,
-                },
+              const { created } = await upsertOpenStockPurchaseRequest(tx, {
+                tenantId,
+                inventoryItemId: item.id,
+                quantity: shortageQuantity,
+                requestedBy: actor.userId,
+                serviceRequestId: estimate.serviceRequestId,
+                note: `Shortage for estimate ${estimate.reference}`,
               });
-              await tx.notification.create({
-                data: {
+              if (created) {
+                await notifyStockPurchaseRequest(
+                  tx,
                   tenantId,
-                  type: "stock",
-                  title: "Stock purchase request",
-                  body: `${shortageQuantity} × ${item.name} (${item.sku}) required for ${estimate.reference}`,
-                  recipientRole: "inventory",
-                },
-              });
-              await tx.notification.create({
-                data: {
-                  tenantId,
-                  type: "stock",
-                  title: "Stock purchase request",
-                  body: `${shortageQuantity} × ${item.name} (${item.sku}) required for ${estimate.reference}`,
-                  recipientRole: "admin",
-                },
-              });
+                  `${shortageQuantity} × ${item.name} (${item.sku}) required for ${estimate.reference}`,
+                  ["inventory", "admin"],
+                );
+              }
             }
           }
         }
@@ -557,7 +578,7 @@ export class DomainService {
   }
 
   async addJobExtra(tenantId: string, jobId: string, actor: Actor, input: any) {
-    await assertJobAccess(tenantId, jobId, actor);
+    const job = await assertJobAccess(tenantId, jobId, actor);
     if (input.inventoryItemId) {
       const item = await prisma.inventoryItem.findFirst({ where: { id: input.inventoryItemId, tenantId } });
       if (!item) throw new AppError("Inventory item not found", 404);
@@ -594,6 +615,15 @@ export class DomainService {
         },
       ],
     });
+    await syncJobExtraStockRequest(prisma, {
+      tenantId,
+      actorId: actor.userId,
+      jobId,
+      serviceRequestId: job.serviceRequestId,
+      jobReference: job.reference,
+      inventoryItemId: extra.inventoryItemId,
+      note: extra.reason,
+    });
     return extra;
   }
 
@@ -610,12 +640,12 @@ export class DomainService {
     const existing = await prisma.jobExtra.findFirst({ where: { id, tenantId } });
     if (!existing) throw new AppError("Job extra not found", 404);
     if (existing.status !== "pending") throw new AppError("Only pending extras can be edited", 422);
-    await assertJobAccess(tenantId, existing.jobId, actor);
+    const job = await assertJobAccess(tenantId, existing.jobId, actor);
     if (input.inventoryItemId) {
       const item = await prisma.inventoryItem.findFirst({ where: { id: input.inventoryItemId, tenantId } });
       if (!item) throw new AppError("Inventory item not found", 404);
     }
-    return prisma.jobExtra.update({
+    const extra = await prisma.jobExtra.update({
       where: { id },
       data: {
         inventoryItemId: input.inventoryItemId ?? null,
@@ -627,14 +657,35 @@ export class DomainService {
         taxRate: input.taxRate ?? 0,
       },
     });
+    await syncJobExtraStockRequest(prisma, {
+      tenantId,
+      actorId: actor.userId,
+      jobId: extra.jobId,
+      serviceRequestId: job.serviceRequestId,
+      jobReference: job.reference,
+      inventoryItemId: extra.inventoryItemId,
+      previousInventoryItemId: existing.inventoryItemId,
+      note: extra.reason,
+    });
+    return extra;
   }
 
   async deleteJobExtra(tenantId: string, id: string, actor: Actor) {
     const existing = await prisma.jobExtra.findFirst({ where: { id, tenantId } });
     if (!existing) throw new AppError("Job extra not found", 404);
     if (existing.status !== "pending") throw new AppError("Only pending extras can be deleted", 422);
-    await assertJobAccess(tenantId, existing.jobId, actor);
+    const job = await assertJobAccess(tenantId, existing.jobId, actor);
     await prisma.jobExtra.delete({ where: { id } });
+    if (existing.inventoryItemId) {
+      await syncJobExtraStockRequest(prisma, {
+        tenantId,
+        actorId: actor.userId,
+        jobId: existing.jobId,
+        serviceRequestId: job.serviceRequestId,
+        jobReference: job.reference,
+        inventoryItemId: existing.inventoryItemId,
+      });
+    }
   }
 
   listReservations(tenantId: string, status?: string) {
@@ -1113,17 +1164,80 @@ export class DomainService {
         include: {
           estimate: { include: { lineItems: true } },
           extras: { where: { status: "approved" } },
+          workLogs: true,
+          stockMovements: true,
+          reservations: true,
+          signature: true,
+          equipment: true,
+          serviceRequest: { include: { inspectionReport: true } },
         },
       });
       if (!job?.estimate || job.estimate.status !== "approved") {
         throw new AppError("Completed job with an approved estimate is required", 409);
       }
-      // Billing verification step removed – coordinator/engineer updates are trusted upstream.
+      if (!input.skipBillingVerification) {
+        const serviceReportDoc = await tx.document.findFirst({
+          where: {
+            tenantId,
+            kind: "service-report",
+            OR: [
+              { entityType: "job", entityId: job.id },
+              ...(job.serviceRequestId
+                ? [{ entityType: "service-request", entityId: job.serviceRequestId }]
+                : []),
+            ],
+          },
+          select: { id: true },
+        });
+        const verification = computeVerificationChecklist({
+          ...job,
+          serviceReportDoc: Boolean(serviceReportDoc),
+        });
+        if (!verification.allPassed) {
+          const missing = verification.items.filter((item) => !item.passed).map((item) => item.label);
+          throw new AppError(`Billing verification incomplete: ${missing.join(", ")}`, 409);
+        }
+      }
       const existing = await tx.invoice.findFirst({ where: { tenantId, jobId: job.id, status: { not: "closed" } } });
       if (existing) throw new AppError("An invoice already exists for this job", 409);
 
+      const now = new Date();
+      const warrantyClaim = await tx.warrantyClaim.findFirst({
+        where: {
+          tenantId,
+          status: { in: ["approved", "accepted"] },
+          OR: [
+            ...(job.serviceRequestId ? [{ serviceRequestId: job.serviceRequestId }] : []),
+            ...(job.equipmentId ? [{ equipmentId: job.equipmentId }] : []),
+          ],
+        },
+      });
+      const amcCovered = await tx.amcContract.findFirst({
+        where: {
+          tenantId,
+          customerName: job.customerName,
+          status: { in: ["active", "expiring"] },
+          startDate: { lte: now },
+          endDate: { gte: now },
+        },
+      });
+
+      const applyCoverage = <T extends { type: string; quantity: Prisma.Decimal; unitPrice: Prisma.Decimal; discount: Prisma.Decimal; lineTotal: Prisma.Decimal }>(
+        line: T,
+      ): T => {
+        const type = (line.type || "").toLowerCase();
+        const isService = ["service", "labor", "labour", "calibration", "testing"].includes(type);
+        const isPart = ["part", "parts", "product"].includes(type);
+        const covered =
+          (Boolean(warrantyClaim) && (isPart || isService)) ||
+          (Boolean(amcCovered) && isService);
+        if (!covered) return line;
+        const discount = money(line.quantity.mul(line.unitPrice));
+        return { ...line, discount, lineTotal: money(0) };
+      };
+
       const sourceLines = [
-        ...job.estimate.lineItems.map((line) => ({
+        ...job.estimate.lineItems.map((line) => applyCoverage({
           estimateLineItemId: line.id,
           type: line.type,
           description: line.description,
@@ -1134,17 +1248,22 @@ export class DomainService {
           lineTotal: line.lineTotal,
         })),
         ...job.extras.map((extra) => {
-          const net = money(extra.quantity).mul(extra.unitPrice);
-          return {
+          const total = extraLineTotal({
+            quantity: extra.quantity,
+            unitPrice: extra.unitPrice,
+            discount: 0,
+            taxRate: extra.taxRate,
+          });
+          return applyCoverage({
             jobExtraId: extra.id,
             type: extraChargeType(extra),
             description: extra.description,
             quantity: extra.quantity,
             unitPrice: extra.unitPrice,
             taxRate: extra.taxRate,
-            discount: new Prisma.Decimal(0),
-            lineTotal: money(net.plus(net.mul(extra.taxRate.div(100)))),
-          };
+            discount: money(0),
+            lineTotal: money(total),
+          });
         }),
         ...(Array.isArray(input.additionalLines) ? input.additionalLines : []).map((line: {
           type?: string;
@@ -1157,10 +1276,11 @@ export class DomainService {
         }) => {
           const qty = money(line.quantity);
           const unitPrice = money(line.unitPrice);
-          const discount = money(line.discount ?? 0);
           const taxRate = money(line.taxRate ?? 0);
-          const net = money(qty.mul(unitPrice).minus(discount));
-          return {
+          const rawDiscount = money(line.discount ?? 0);
+          const net = qty.mul(unitPrice).minus(rawDiscount);
+          const discount = money(net.isNegative() ? qty.mul(unitPrice) : rawDiscount);
+          const covered = applyCoverage({
             catalogItemId: line.catalogItemId ?? null,
             type: line.type || "other",
             description: String(line.description).trim(),
@@ -1168,8 +1288,14 @@ export class DomainService {
             unitPrice,
             taxRate,
             discount,
-            lineTotal: money(net.plus(net.mul(taxRate.div(100)))),
-          };
+            lineTotal: money(Math.max(0, extraLineTotal({
+              quantity: qty,
+              unitPrice,
+              discount,
+              taxRate,
+            }))),
+          });
+          return covered;
         }),
       ];
       const amount = money(sourceLines.reduce((sum, line) =>
@@ -1287,11 +1413,19 @@ export class DomainService {
       }
 
       if (fullyPaid) {
-        if (invoice.serviceRequestId && invoice.serviceRequest?.status === "invoiced") {
-          const next = resolveTicketEventStatus(
-            normalizeTicketStatus(invoice.serviceRequest.status),
-            "ticketClosed",
-          );
+        const srStatus = invoice.serviceRequest
+          ? normalizeTicketStatus(invoice.serviceRequest.status)
+          : null;
+        if (invoice.serviceRequestId && srStatus && ["pending_invoice", "invoiced"].includes(srStatus)) {
+          if (srStatus === "pending_invoice") {
+            await tx.serviceRequest.update({
+              where: { id: invoice.serviceRequestId },
+              data: {
+                status: resolveTicketEventStatus(srStatus, "invoiceGenerated") as never,
+              },
+            });
+          }
+          const next = resolveTicketEventStatus("invoiced", "ticketClosed");
           await tx.serviceRequest.update({
             where: { id: invoice.serviceRequestId },
             data: { status: next as never },
@@ -1712,43 +1846,23 @@ export class DomainService {
     if (available >= input.quantity && !input.force) {
       throw new AppError("Sufficient stock is available; purchase request not required", 409);
     }
-    const request = await prisma.stockPurchaseRequest.create({
-      data: {
+    const { request, created } = await upsertOpenStockPurchaseRequest(prisma, {
+      tenantId,
+      inventoryItemId: input.inventoryItemId,
+      quantity: input.quantity,
+      requestedBy: actor.userId,
+      serviceRequestId: input.serviceRequestId ?? null,
+      jobId: input.jobId ?? null,
+      note: input.note,
+    });
+    if (!request) throw new AppError("Unable to save stock purchase request", 500);
+    if (created) {
+      await notifyStockPurchaseRequest(
+        prisma,
         tenantId,
-        inventoryItemId: input.inventoryItemId,
-        quantity: input.quantity,
-        requestedBy: actor.userId,
-        serviceRequestId: input.serviceRequestId ?? null,
-        jobId: input.jobId ?? null,
-        note: input.note,
-      },
-      include: { inventoryItem: true },
-    });
-    await prisma.notification.createMany({
-      data: [
-        {
-          tenantId,
-          type: "stock",
-          title: "Stock purchase request",
-          body: `${input.quantity} × ${item.name} (${item.sku}) requested`,
-          recipientRole: "inventory",
-        },
-        {
-          tenantId,
-          type: "stock",
-          title: "Stock purchase request",
-          body: `${input.quantity} × ${item.name} (${item.sku}) requested`,
-          recipientRole: "admin",
-        },
-        {
-          tenantId,
-          type: "stock",
-          title: "Stock purchase request",
-          body: `${input.quantity} × ${item.name} (${item.sku}) requested`,
-          recipientRole: "coordinator",
-        },
-      ],
-    });
+        `${input.quantity} × ${item.name} (${item.sku}) requested`,
+      );
+    }
     return request;
   }
 
@@ -1816,7 +1930,19 @@ export class DomainService {
     }
     const sr = await prisma.serviceRequest.findFirst({ where: { id: serviceRequestId, tenantId } });
     if (!sr) throw new AppError("Service ticket not found", 404);
-    if (sr.status !== "invoiced") throw new AppError("Ticket must be invoiced before finishing", 409);
+    if (normalizeTicketStatus(sr.status) !== "invoiced") {
+      throw new AppError("Ticket must be invoiced before finishing", 409);
+    }
+    const invoice = await prisma.invoice.findFirst({
+      where: { tenantId, serviceRequestId },
+      orderBy: { createdAt: "desc" },
+    });
+    const paid =
+      invoice &&
+      (invoice.status === "paid" || invoice.status === "closed" || Number(invoice.balanceDue) <= 0);
+    if (!paid) {
+      throw new AppError("Invoice must be paid before finishing the ticket", 409);
+    }
     const next = resolveTicketEventStatus(normalizeTicketStatus(sr.status), "ticketClosed");
     return prisma.serviceRequest.update({
       where: { id: serviceRequestId },

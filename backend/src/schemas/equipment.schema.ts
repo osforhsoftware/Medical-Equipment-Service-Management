@@ -46,6 +46,10 @@ export const createEquipmentSchema = z.object({
   installDate: optionalNullableDate,
   warrantyStart: optionalNullableDate,
   warrantyEnd: optionalNullableDate,
+  noMachineWarranty: z.boolean().optional(),
+  serviceWarrantyStart: optionalNullableDate,
+  serviceWarrantyEnd: optionalNullableDate,
+  noServiceWarranty: z.boolean().optional(),
   amcStatus: amcStatusSchema.optional().default("none"),
   condition: z.preprocess(
     (v) => (v == null || v === "" ? undefined : v),

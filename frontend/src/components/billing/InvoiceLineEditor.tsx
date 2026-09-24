@@ -10,6 +10,8 @@ import {
 } from "@/components/ui/select";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import type { BackendCatalogItem, BackendInventoryItem, InvoiceLineInput } from "@/lib/api";
+import { inventoryOriginUnitPrice } from "@/components/shared/InventoryHelpers";
+import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 import { BILLING_ADD_LINE_TYPES, billingLineTypeLabel, lineAmount, newBillingLine } from "@/lib/billingCharges";
 import { formatCurrency } from "@/lib/format";
 import { fieldAria, fieldErrorClass } from "@/lib/formValidation";
@@ -19,6 +21,7 @@ const LINE_GRID =
   "grid grid-cols-[minmax(0,1.5fr)_8.5rem_8rem_7rem_5.5rem_6.5rem_7.5rem_2.5rem] items-start gap-x-2";
 const numberInputClass =
   "h-10 min-w-0 w-full px-2 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+const CUSTOM_CATALOG_VALUE = "__custom__";
 
 interface InvoiceLineEditorProps {
   lines: InvoiceLineInput[];
@@ -50,19 +53,25 @@ export function InvoiceLineEditor({
   };
 
   const applyCatalog = (index: number, catalogId: string) => {
+    if (catalogId === CUSTOM_CATALOG_VALUE) {
+      updateLine(index, {
+        type: "custom",
+        description: "",
+        unitPrice: 0,
+      });
+      return;
+    }
     const item = catalog.find((entry) => entry.id === catalogId);
     if (!item) return;
     updateLine(index, {
       type: "service",
       description: item.name,
-      unitPrice: Number(item.unitPrice),
-      taxRate: Number(item.taxRate),
+      unitPrice: Number(item.unitPrice) || 0,
+      taxRate: Number(item.taxRate) || 0,
     });
   };
 
-  const applyInventory = (index: number, inventoryId: string) => {
-    const item = inventory.find((entry) => entry.id === inventoryId);
-    if (!item) return;
+  const applyInventory = (index: number, item: BackendInventoryItem) => {
     const qty = lines[index]?.quantity || 1;
     const delivery =
       item.deliveryChargeType === "perUnit"
@@ -71,7 +80,7 @@ export function InvoiceLineEditor({
     updateLine(index, {
       type: "product",
       description: item.name,
-      unitPrice: Number(item.sellingPrice ?? item.unitCost ?? 0) + delivery / Math.max(qty, 1),
+      unitPrice: inventoryOriginUnitPrice(item) + delivery / Math.max(qty, 1),
     });
   };
 
@@ -144,7 +153,7 @@ export function InvoiceLineEditor({
                         value={line.description}
                         onChange={(e) => updateLine(index, { description: e.target.value })}
                         onBlur={() => onBlurField?.(descKey)}
-                        placeholder="Item or service name"
+                        placeholder={line.type === "custom" ? "Enter custom description" : "Item or service name"}
                         aria-label={`Line ${index + 1} description`}
                         className={cn("min-w-0", fieldErrorClass(shouldShow?.(descKey)))}
                         {...fieldAria(descKey, shouldShow?.(descKey) ? errors?.[descKey] : null)}
@@ -155,6 +164,7 @@ export function InvoiceLineEditor({
                             <SelectValue placeholder="Catalog item" />
                           </SelectTrigger>
                           <SelectContent>
+                            <SelectItem value={CUSTOM_CATALOG_VALUE}>Custom…</SelectItem>
                             {catalog.length === 0 ? (
                               <SelectItem value="__empty_catalog" disabled>
                                 No catalog services
@@ -168,24 +178,14 @@ export function InvoiceLineEditor({
                             )}
                           </SelectContent>
                         </Select>
-                        <Select onValueChange={(value) => applyInventory(index, value)}>
-                          <SelectTrigger id={inventoryId} className="h-8 min-w-0 text-xs">
-                            <SelectValue placeholder="Inventory item" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {inventory.length === 0 ? (
-                              <SelectItem value="__empty_inventory" disabled>
-                                No inventory products
-                              </SelectItem>
-                            ) : (
-                              inventory.map((item) => (
-                                <SelectItem key={item.id} value={item.id}>
-                                  {item.name} ({item.sku}) · {Math.max(0, item.inStock - item.reserved)} avail
-                                </SelectItem>
-                              ))
-                            )}
-                          </SelectContent>
-                        </Select>
+                        <InventoryProductSelect
+                          id={inventoryId}
+                          items={inventory}
+                          onValueChange={(_id, item) => applyInventory(index, item)}
+                          placeholder="Inventory item"
+                          emptyText="No inventory products"
+                          triggerClassName="h-8 min-w-0 text-xs"
+                        />
                       </div>
                       {shouldShow?.(descKey) && errors?.[descKey] ? (
                         <FormFieldError field={descKey} message={errors[descKey]} />

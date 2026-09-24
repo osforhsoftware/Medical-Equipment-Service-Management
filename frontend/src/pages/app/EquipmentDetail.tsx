@@ -127,8 +127,24 @@ export default function EquipmentDetail() {
                     </Link>
                   ) : (equipment.customerName || "—") },
                   { label: "Installed", value: formatDate(equipment.installDate) },
-                  { label: "Warranty start", value: formatDate(equipment.warrantyStart) },
-                  { label: "Warranty ends", value: formatDate(equipment.warrantyEnd) },
+                  {
+                    label: "Machine warranty",
+                    value: equipment.noMachineWarranty
+                      ? "No warranty"
+                      : [
+                          equipment.warrantyStart ? `Start ${formatDate(equipment.warrantyStart)}` : null,
+                          equipment.warrantyEnd ? `Ends ${formatDate(equipment.warrantyEnd)}` : null,
+                        ].filter(Boolean).join(" · ") || "—",
+                  },
+                  {
+                    label: "Service warranty",
+                    value: equipment.noServiceWarranty
+                      ? "No warranty"
+                      : [
+                          equipment.serviceWarrantyStart ? `Start ${formatDate(equipment.serviceWarrantyStart)}` : null,
+                          equipment.serviceWarrantyEnd ? `Ends ${formatDate(equipment.serviceWarrantyEnd)}` : null,
+                        ].filter(Boolean).join(" · ") || "—",
+                  },
                   { label: "Current status", value: formatEquipmentCurrentStatus(equipment.currentStatus) },
                   { label: "Last service", value: formatDate(equipment.lastServiceDate) },
                   { label: "Asset tag", value: equipment.assetTag },

@@ -243,26 +243,27 @@ export class ServiceTicketWorkflowService {
       input?.note ?? "Proceeding to invoice generation",
     );
 
-    // Generate invoice from completed job
     const dueAt = input?.dueAt ? new Date(input.dueAt) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    await domainService.createInvoiceFromJob(tenantId, { userId: actorId, role: actorRole }, {
-      jobId: job.id,
-      currency: input?.currency ?? "USD",
-      dueAt,
-      skipBillingVerification: true,
-    }).catch(async (err) => {
-      // If invoice already exists, ensure ticket is invoiced
+    try {
+      await domainService.createInvoiceFromJob(tenantId, { userId: actorId, role: actorRole }, {
+        jobId: job.id,
+        currency: input?.currency ?? "USD",
+        dueAt,
+      });
+    } catch (err) {
       if (err instanceof AppError && err.statusCode === 409) {
         const invoice = await prisma.invoice.findFirst({ where: { tenantId, serviceRequestId: id } });
         if (invoice) {
           await serviceRequestsRepository.update(id, tenantId, {
             status: resolveTicketEventStatus("pending_invoice", "invoiceGenerated") as never,
           });
-          return;
+        } else {
+          throw err;
         }
+      } else {
+        throw err;
       }
-      throw err;
-    });
+    }
 
     await notificationsService.notifyWorkflowAdvanced(tenantId, sr.reference, "invoiced", actor?.name ?? actorId);
     return serviceRequestsRepository.findById(id, tenantId);
@@ -285,9 +286,19 @@ export class ServiceTicketWorkflowService {
     }
 
     const actor = await usersRepository.findById(actorId, tenantId);
-    await serviceRequestsRepository.update(id, tenantId, {
-      status: "assigned_engineer" as never,
+    const nextStatus = resolveTicketEventStatus(sr.status, "finalApprovalRejected");
+
+    await prisma.$transaction(async (tx) => {
+      await tx.serviceRequest.update({
+        where: { id },
+        data: { status: nextStatus as never },
+      });
+      await tx.serviceJob.updateMany({
+        where: { tenantId, serviceRequestId: id, status: "completed" },
+        data: { status: "review" },
+      });
     });
+
     await serviceRequestsRepository.addTimelineEvent(
       id,
       actor?.name ?? actorId,
@@ -298,12 +309,56 @@ export class ServiceTicketWorkflowService {
     return serviceRequestsRepository.findById(id, tenantId);
   }
 
-  async closeTicket(id: string, tenantId: string, actorId: string, actorRole: string, note?: string) {
+  async cancelTicket(id: string, tenantId: string, actorId: string, actorRole: string, reason: string) {
+    this.assertAdmin(actorRole);
+    if (!reason?.trim()) throw new AppError("A cancellation reason is required", 422);
+
+    const sr = await serviceRequestsRepository.findById(id, tenantId);
+    if (!sr) throw new AppError("Service ticket not found", 404);
+    const current = normalizeTicketStatus(sr.status);
+    if (current === "invoiced" || current === "closed" || current === "cancelled") {
+      throw new AppError("Invoiced, closed, or already cancelled tickets cannot be cancelled this way", 409);
+    }
+
+    const actor = await usersRepository.findById(actorId, tenantId);
+    const nextStatus = resolveTicketEventStatus(sr.status, "ticketCancelled");
+    await serviceRequestsRepository.update(id, tenantId, { status: nextStatus as never });
+    await serviceRequestsRepository.addTimelineEvent(
+      id,
+      actor?.name ?? actorId,
+      "Ticket cancelled — returned without repair",
+      reason.trim(),
+    );
+
+    return serviceRequestsRepository.findById(id, tenantId);
+  }
+
+  async closeTicket(
+    id: string,
+    tenantId: string,
+    actorId: string,
+    actorRole: string,
+    note?: string,
+    waivePayment?: boolean,
+  ) {
     this.assertAdmin(actorRole);
     const sr = await serviceRequestsRepository.findById(id, tenantId);
     if (!sr) throw new AppError("Service ticket not found", 404);
     if (normalizeTicketStatus(sr.status) !== "invoiced") {
       throw new AppError("Ticket must be invoiced before closing", 409);
+    }
+
+    const invoice = await prisma.invoice.findFirst({
+      where: { tenantId, serviceRequestId: id },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!invoice) throw new AppError("An invoice is required before closing", 409);
+    const paid =
+      invoice.status === "paid" ||
+      invoice.status === "closed" ||
+      Number(invoice.balanceDue) <= 0;
+    if (!paid && !waivePayment) {
+      throw new AppError("Invoice must be paid before closing, or waive payment explicitly", 409);
     }
 
     const actor = await usersRepository.findById(actorId, tenantId);
@@ -314,7 +369,7 @@ export class ServiceTicketWorkflowService {
       id,
       actor?.name ?? actorId,
       "Ticket closed",
-      note ?? "Administrative closure",
+      note ?? (waivePayment && !paid ? "Administrative closure — payment waived" : "Administrative closure"),
     );
 
     return serviceRequestsRepository.findById(id, tenantId);

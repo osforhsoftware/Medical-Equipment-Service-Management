@@ -15,8 +15,8 @@ function hashToken(token: string): string {
 }
 
 export class AuthService {
-  async login(username: string, password: string) {
-    const user = await authRepository.findByLogin(username);
+  async login(username: string, password: string, tenantId?: string) {
+    const user = await authRepository.findByLogin(username, tenantId);
     if (!user) throw new AppError("Invalid username or password", 401);
     if (!user.isActive) throw new AppError("This account is inactive", 403);
 
@@ -51,9 +51,14 @@ export class AuthService {
    */
   async requestPasswordReset(email: string): Promise<{ message: string; resetToken?: string }> {
     const normalized = email.toLowerCase().trim();
-    const user = await prisma.user.findFirst({
+    // Emails are only unique per tenant. If the email matches users in more
+    // than one tenant, do not issue a token — respond with the same generic
+    // message so we neither leak the ambiguity nor reset the wrong account.
+    const matches = await prisma.user.findMany({
       where: { email: normalized, isActive: true },
+      take: 2,
     });
+    const user = matches.length === 1 ? matches[0] : null;
 
     const generic = {
       message: "If an account exists for that email, a reset link has been sent.",

@@ -47,6 +47,7 @@ test("assigned_engineer allows change request or completion paths", () => {
   assert.deepEqual(TICKET_TRANSITIONS.assigned_engineer, [
     "change_pending_approval",
     "pending_final_approval",
+    "cancelled",
   ]);
 });
 
@@ -56,6 +57,19 @@ test("reopen moves backward and is role-gated", () => {
   expectAppError(() => assertTicketReopen("assigned_engineer", "estimate", "engineer"), 403);
   expectAppError(() => assertTicketReopen("closed", "invoiced", "coordinator"), 403);
   assert.doesNotThrow(() => assertTicketReopen("closed", "invoiced", "admin"));
+});
+
+test("events cannot skip legal ticket transitions", () => {
+  expectAppError(() => resolveTicketEventStatus("new", "invoiceGenerated"), 409);
+  expectAppError(() => resolveTicketEventStatus("new", "estimateCreated"), 409);
+  assert.equal(resolveTicketEventStatus("inspection", "estimateCreated"), "estimate");
+  assert.equal(resolveTicketEventStatus("pending_invoice", "invoiceGenerated"), "invoiced");
+  assert.equal(resolveTicketEventStatus("estimate", "ticketCancelled"), "cancelled");
+  assert.equal(resolveTicketEventStatus("pending_final_approval", "finalApprovalRejected"), "assigned_engineer");
+});
+
+test("job can return from completed to review after final-approval reject", () => {
+  assert.doesNotThrow(() => assertJobTransition("completed", "review"));
 });
 
 test("revision request returns ticket to estimate stage", () => {

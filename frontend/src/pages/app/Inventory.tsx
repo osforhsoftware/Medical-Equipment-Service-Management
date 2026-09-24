@@ -569,7 +569,7 @@ export default function Inventory() {
   ];
 
   return (
-    <RoleGuard roles={["admin", "inventory", "engineer", "inspector"]}>
+    <RoleGuard roles={["admin", "inventory", "engineer"]}>
       <div className="space-y-6">
         <PageHeader
           title="Inventory Items"

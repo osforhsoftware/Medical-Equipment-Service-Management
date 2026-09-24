@@ -14,6 +14,8 @@ import {
 
   assignServiceRequestSchema,
 
+  cancelTicketSchema,
+
   closeTicketSchema,
 
   createServiceRequestSchema,
@@ -45,23 +47,15 @@ router.use(authenticate, resolveTenant);
 
 
 const canRead = requireRole(
-
   "admin",
-
   "coordinator",
-
   "inspector",
-
   "estimator",
-
   "engineer",
-
   "inventory",
-
   "billing",
-
   "sales",
-
+  "qa",
 );
 
 
@@ -102,6 +96,8 @@ router.post("/:id/final-approval", adminOps, validate(finalApprovalSchema), serv
 router.post("/:id/reject-final-approval", adminOps, validate(rejectFinalApprovalSchema), serviceRequestsController.rejectFinalApproval);
 
 router.post("/:id/close", adminOps, validate(closeTicketSchema), serviceRequestsController.closeTicket);
+
+router.put("/:id/cancel", requirePermission("tickets.cancel"), validate(cancelTicketSchema), serviceRequestsController.cancelTicket);
 
 router.delete("/:id", requirePermission("tickets.delete"), serviceRequestsController.delete);
 

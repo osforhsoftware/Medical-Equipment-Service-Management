@@ -10,6 +10,7 @@ import { validateInspectionSubmission } from "@/utils/inspectionValidation";
 import { ticketAssignmentService } from "@/services/ticketAssignment.service";
 import { normalizeAdditionalFields } from "@/lib/additionalFields";
 import { Prisma } from "@prisma/client";
+import { upsertOpenStockPurchaseRequest } from "@/lib/stockPurchaseRequest";
 
 type RecommendedPartInput = {
   inventoryItemId: string;
@@ -36,7 +37,7 @@ export class InspectionsService {
     actorId: string,
     actorRole: string,
   ) {
-    if (["admin", "coordinator", "estimator", "billing"].includes(actorRole)) return;
+    if (["admin", "coordinator", "estimator", "billing", "qa"].includes(actorRole)) return;
     if (actorRole === "inspector") {
       const lockedTo = request.assignedInspectorId ?? request.assignedTo;
       if (lockedTo && lockedTo !== actorId) {
@@ -250,64 +251,86 @@ export class InspectionsService {
         });
         if (!validation.ok) throw new AppError("Inspection submission is invalid", 422);
 
-        const parts = data.recommendedParts ?? [];
-        for (const part of parts) {
-          if (!part.inventoryItemId || part.quantity <= 0) continue;
-          const item = await tx.inventoryItem.findFirst({
-            where: { id: part.inventoryItemId, tenantId },
-          });
-          if (!item) throw new AppError(`Inventory item ${part.inventoryItemId} not found`, 404);
+        const parts = data.recommendedParts;
+        const keepItemIds = new Set<string>();
 
-          const available = Math.max(0, item.inStock - item.reserved);
-          const shortage = part.quantity > available;
-          const procurementStatus = shortage ? "pending_procurement" : "available";
-
-          const recommendation = await tx.inspectionRecommendation.create({
-            data: {
-              inspectionReportId: report.id,
-              inventoryItemId: part.inventoryItemId,
-              type: "part",
-              title: part.title?.trim() || item.name,
-              description: part.description?.trim() || `Recommended spare part: ${item.name}`,
-              priority: (part.priority ?? "medium") as never,
-              quantity: part.quantity,
-              estimatedCost: Number(item.sellingPrice ?? item.unitCost ?? 0) * part.quantity,
-              procurementStatus,
-            },
+        if (parts) {
+          await tx.inspectionRecommendation.deleteMany({
+            where: { inspectionReportId: report.id, type: "part" },
           });
 
-          let purchaseRequestId: string | undefined;
-          if (shortage) {
-            const shortageQty = part.quantity - available;
-            const purchaseRequest = await tx.stockPurchaseRequest.create({
+          for (const part of parts) {
+            if (!part.inventoryItemId || part.quantity <= 0) continue;
+            const item = await tx.inventoryItem.findFirst({
+              where: { id: part.inventoryItemId, tenantId },
+            });
+            if (!item) throw new AppError(`Inventory item ${part.inventoryItemId} not found`, 404);
+
+            const requestedQuantity = Math.max(1, Math.ceil(Number(part.quantity)));
+            const available = Math.max(0, item.inStock - item.reserved);
+            const shortage = requestedQuantity > available;
+            const procurementStatus = shortage ? "pending_procurement" : "available";
+
+            const recommendation = await tx.inspectionRecommendation.create({
               data: {
-                tenantId,
+                inspectionReportId: report.id,
                 inventoryItemId: part.inventoryItemId,
-                quantity: shortageQty,
-                requestedBy: actorId,
-                serviceRequestId,
-                note: `Shortage from inspection report on ${sr.reference}`,
+                type: "part",
+                title: part.title?.trim() || item.name,
+                description: part.description?.trim() || `Recommended spare part: ${item.name}`,
+                priority: (part.priority ?? "medium") as never,
+                quantity: requestedQuantity,
+                estimatedCost: Number(item.sellingPrice ?? item.unitCost ?? 0) * requestedQuantity,
+                procurementStatus,
               },
             });
-            purchaseRequestId = purchaseRequest.id;
-            await this.notifyProcurementShortage(
-              tx,
+
+            keepItemIds.add(part.inventoryItemId);
+            const { request, created } = await upsertOpenStockPurchaseRequest(tx, {
               tenantId,
-              item.name,
-              item.sku,
-              shortageQty,
-              sr.reference,
-            );
+              inventoryItemId: part.inventoryItemId,
+              quantity: requestedQuantity,
+              requestedBy: actorId,
+              serviceRequestId,
+              note: `Requested from inspection report on ${sr.reference}`,
+            });
+            if (created) {
+              await this.notifyProcurementShortage(
+                tx,
+                tenantId,
+                item.name,
+                item.sku,
+                requestedQuantity,
+                sr.reference,
+              );
+            }
+
+            partResults.push({
+              inventoryItemId: part.inventoryItemId,
+              requestedQuantity,
+              availableQuantity: available,
+              procurementStatus,
+              purchaseRequestId: request?.id,
+              recommendationId: recommendation.id,
+            });
           }
 
-          partResults.push({
-            inventoryItemId: part.inventoryItemId,
-            requestedQuantity: part.quantity,
-            availableQuantity: available,
-            procurementStatus,
-            purchaseRequestId,
-            recommendationId: recommendation.id,
+          const stale = await tx.stockPurchaseRequest.findMany({
+            where: {
+              tenantId,
+              serviceRequestId,
+              jobId: null,
+              status: "open",
+              purchaseOrderId: null,
+              note: { contains: "inspection report" },
+              ...(keepItemIds.size ? { inventoryItemId: { notIn: [...keepItemIds] } } : {}),
+            },
           });
+          if (stale.length && (keepItemIds.size || parts.length === 0)) {
+            await tx.stockPurchaseRequest.deleteMany({
+              where: { id: { in: stale.map((row) => row.id) } },
+            });
+          }
         }
 
         if (srStatus === "new" || srStatus === "inspection") {

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/context/AuthContext";
@@ -85,6 +85,11 @@ const queryClient = new QueryClient({
   },
 });
 
+function LegacyTicketRedirect() {
+  const { id } = useParams();
+  return <Navigate to={id ? `/app/service-tickets/${id}` : "/app/service-tickets"} replace />;
+}
+
 const App = () => (
   <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
     <QueryClientProvider client={queryClient}>
@@ -106,12 +111,12 @@ const App = () => (
               <Route path="sales-enquiries" element={<ModuleGuard module="Sales Enquiries"><SalesEnquiries /></ModuleGuard>} />
               <Route path="equipment" element={<ModuleGuard module="Equipment"><Equipment /></ModuleGuard>} />
               <Route path="equipment/:id" element={<ModuleGuard module="Equipment"><EquipmentDetail /></ModuleGuard>} />
-              <Route path="service-requests" element={<ModuleGuard module="Service Tickets"><ServiceRequests /></ModuleGuard>} />
-              <Route path="service-requests/:id" element={<ModuleGuard module="Service Tickets"><ServiceRequestDetail /></ModuleGuard>} />
+              <Route path="service-requests" element={<Navigate to="/app/service-tickets" replace />} />
+              <Route path="service-requests/:id" element={<LegacyTicketRedirect />} />
               <Route path="service-tickets" element={<ModuleGuard module="Service Tickets"><ServiceRequests /></ModuleGuard>} />
               <Route path="service-tickets/:id" element={<ModuleGuard module="Service Tickets"><ServiceRequestDetail /></ModuleGuard>} />
               <Route path="inspections" element={<ModuleGuard module="Inspections"><Inspections /></ModuleGuard>} />
-              <Route path="inspections/:id/report" element={<ModuleGuard module="Inspections"><InspectionReportView /></ModuleGuard>} />
+              <Route path="inspections/:id/report" element={<ModuleGuard module="Inspections" orModules={["Estimates"]}><InspectionReportView /></ModuleGuard>} />
               <Route path="inspections/:id" element={<ModuleGuard module="Inspections"><InspectionDetail /></ModuleGuard>} />
               <Route path="estimates" element={<ModuleGuard module="Estimates"><Estimates /></ModuleGuard>} />
               <Route path="estimates/new" element={<ModuleGuard module="Estimates"><EstimateBuilder /></ModuleGuard>} />
@@ -120,7 +125,7 @@ const App = () => (
               <Route path="estimates/:id" element={<ModuleGuard module="Estimates"><EstimateDetail /></ModuleGuard>} />
               <Route path="jobs" element={<ModuleGuard module="Service Jobs"><ResponsivePage mobile={<MobileJobs />} desktop={<Jobs />} /></ModuleGuard>} />
               <Route path="jobs/:id" element={<ModuleGuard module="Service Jobs"><ResponsivePage mobile={<MobileJobDetail />} desktop={<JobDetail />} /></ModuleGuard>} />
-              <Route path="profile" element={<ResponsivePage mobile={<MobileProfile />} desktop={<Settings />} />} />
+              <Route path="profile" element={<ResponsivePage mobile={<MobileProfile />} desktop={<MobileProfile />} />} />
               <Route path="projects" element={<ModuleGuard module="Projects"><Projects /></ModuleGuard>} />
               <Route path="projects/:id" element={<ModuleGuard module="Projects"><ProjectDetail /></ModuleGuard>} />
               <Route path="service-catalog" element={<ModuleGuard module="Service Catalog"><ServiceCatalog /></ModuleGuard>} />

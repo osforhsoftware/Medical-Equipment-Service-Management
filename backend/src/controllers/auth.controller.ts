@@ -7,8 +7,8 @@ import { clearAuthCookie, setAuthCookie } from "@/utils/authCookie";
 export class AuthController {
   async login(req: Request, res: Response, next: NextFunction) {
     try {
-      const { username, password } = req.body;
-      const result = await authService.login(username, password);
+      const { username, password, tenantId } = req.body;
+      const result = await authService.login(username, password, tenantId);
       setAuthCookie(req, res, result.token);
       res.json(success("Login successful", { user: result.user }));
     } catch (err) {

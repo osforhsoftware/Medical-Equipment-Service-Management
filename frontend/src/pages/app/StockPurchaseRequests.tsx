@@ -27,6 +27,8 @@ import { ApiError, api, type BackendStockPurchaseRequest } from "@/lib/api";
 import { defaultDatePlusDays, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
+type StockPurchaseRequestRow = BackendStockPurchaseRequest & { itemName: string; sku: string };
+
 const convertSchema = z.object({
   expectedDate: fieldRules.requiredString("Expected date"),
   unitCost: z.string().refine((v) => !v.trim() || (!Number.isNaN(Number(v)) && Number(v) >= 0), "Unit cost cannot be negative."),
@@ -41,7 +43,11 @@ export default function StockPurchaseRequests() {
     queryKey: ["stock-purchase-requests"],
     queryFn: () => api.listStockPurchaseRequests(),
   });
-  const rows = rowsQuery.data ?? [];
+  const rows = (rowsQuery.data ?? []).map((row) => ({
+    ...row,
+    itemName: row.inventoryItem?.name ?? row.inventoryItemId,
+    sku: row.inventoryItem?.sku ?? "",
+  }));
   const [selected, setSelected] = useState<BackendStockPurchaseRequest | null>(null);
   const [expectedDate, setExpectedDate] = useState(defaultDatePlusDays(7));
   const [unitCost, setUnitCost] = useState("");
@@ -88,7 +94,7 @@ export default function StockPurchaseRequests() {
     }
   };
 
-  const columns: Column<BackendStockPurchaseRequest>[] = [
+  const columns: Column<StockPurchaseRequestRow>[] = [
     {
       key: "inventoryItem",
       header: "Item",
@@ -129,7 +135,7 @@ export default function StockPurchaseRequests() {
   ];
 
   return (
-    <RoleGuard roles={["admin", "inventory", "inspector", "engineer"]}>
+    <RoleGuard roles={["admin", "inventory", "engineer"]}>
       <div className="space-y-6">
         <PageHeader
           title="Stock Purchase Requests"
@@ -143,7 +149,7 @@ export default function StockPurchaseRequests() {
           <DataTable
             data={rows}
             columns={columns}
-            searchKeys={["note"]}
+            searchKeys={["note", "itemName", "sku", "status"]}
             emptyMessage="No stock purchase requests."
             onRowClick={(r) => navigate(`/app/stock-purchase-requests/${r.id}`)}
           />

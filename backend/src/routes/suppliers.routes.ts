@@ -6,10 +6,12 @@ import { resolveTenant } from "@/middleware/tenant";
 const router = Router();
 router.use(authenticate, resolveTenant);
 
+/** Coordinators need read access to pick vendors when creating Supplier RFQs. */
+const canRead = requireRole("admin", "inventory", "coordinator");
 const canManage = requireRole("admin", "inventory");
 
-router.get("/", canManage, suppliersController.getAll);
-router.get("/:id", canManage, suppliersController.getById);
+router.get("/", canRead, suppliersController.getAll);
+router.get("/:id", canRead, suppliersController.getById);
 router.post("/", canManage, suppliersController.create);
 router.put("/:id", canManage, suppliersController.update);
 router.delete("/:id", canManage, suppliersController.delete);

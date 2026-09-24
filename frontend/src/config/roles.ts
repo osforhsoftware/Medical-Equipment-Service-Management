@@ -10,5 +10,9 @@ export const CUSTOMER_READ_ROLES: Role[] = ["admin", "coordinator", "estimator",
 export const CUSTOMER_WRITE_ROLES: Role[] = ["admin", "coordinator", "estimator", "sales"];
 export const CATALOG_WRITE_ROLES: Role[] = ["admin", "coordinator"];
 export const TICKET_CREATE_ROLES: Role[] = ["admin", "coordinator"];
+export const INSPECTION_READ_ROLES: Role[] = ["admin", "coordinator", "inspector", "estimator", "billing", "qa"];
+export const INSPECTION_WRITE_ROLES: Role[] = ["admin", "coordinator", "inspector"];
 export const JOB_CREATE_ROLES: Role[] = ["admin", "coordinator"];
+/** Staff who can pass/fail job QA and confirm delivery (matches backend QA_APPROVER_ROLES). */
+export const QA_APPROVER_ROLES: Role[] = ["admin", "coordinator", "qa"];
 export const INVENTORY_WRITE_ROLES: Role[] = ["admin", "inventory"];

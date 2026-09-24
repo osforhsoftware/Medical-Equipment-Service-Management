@@ -60,6 +60,15 @@ export class NotificationsService {
       select: { name: true, inStock: true, reorderLevel: true },
     });
 
+    const recoveredNames = lowStockItems
+      .filter((i) => i.inStock > i.reorderLevel)
+      .map((i) => `Low stock: ${i.name}`);
+    if (recoveredNames.length) {
+      await prisma.notification.deleteMany({
+        where: { tenantId, type: "stock", title: { in: recoveredNames } },
+      });
+    }
+
     for (const item of lowStockItems.filter((i) => i.inStock <= i.reorderLevel)) {
       await this.ensureUnreadNotification(
         tenantId,

@@ -11,7 +11,10 @@ export function sanitizeWhatsAppPhone(phone: string | null | undefined): string 
   return clean;
 }
 
-export function buildWhatsAppShareUrl(phoneDigits: string, text: string) {
+export function buildWhatsAppShareUrl(phoneDigits: string | null | undefined, text: string) {
+  if (!phoneDigits) {
+    return `https://wa.me/?text=${encodeURIComponent(text)}`;
+  }
   return `https://wa.me/${phoneDigits}?text=${encodeURIComponent(text)}`;
 }
 
@@ -71,18 +74,11 @@ export async function shareInspectionReport(input: {
   const customerName = input.customer?.name?.trim() || input.request.customerName;
   const message = shareMessage(input.request, customerName);
   const subject = `Inspection Report ${input.request.reference}`;
-
-  if (input.channel === "whatsapp") {
-    const phone = sanitizeWhatsAppPhone(input.customer?.phone);
-    if (!phone) {
-      throw new Error("Customer phone number is missing or invalid. Update the customer record, then try again.");
-    }
-  } else {
-    const email = input.customer?.email?.trim();
-    if (!email || !email.includes("@")) {
-      throw new Error("Customer email is missing or invalid. Update the customer record, then try again.");
-    }
-  }
+  // Phone/email are optional: if missing, open a generic compose window so the
+  // user can pick any recipient (same behavior as ShareButtons).
+  const phone = sanitizeWhatsAppPhone(input.customer?.phone);
+  const email = input.customer?.email?.trim();
+  const validEmail = email && email.includes("@") ? email : "";
 
   const doc = await api.generateDocument("inspection-report", input.request.id);
   if (!doc.file?.id) {
@@ -115,16 +111,14 @@ export async function shareInspectionReport(input: {
 
   let opened = false;
   if (input.channel === "whatsapp") {
-    const phone = sanitizeWhatsAppPhone(input.customer?.phone)!;
     const popup = window.open(buildWhatsAppShareUrl(phone, message), "_blank", "noopener,noreferrer");
     opened = Boolean(popup);
   } else {
-    const email = input.customer!.email!.trim();
-    const gmailUrl = buildGmailComposeUrl({ to: email, subject, body: message });
+    const gmailUrl = buildGmailComposeUrl({ to: validEmail, subject, body: message });
     const popup = window.open(gmailUrl, "_blank", "noopener,noreferrer");
     opened = Boolean(popup);
     if (!opened) {
-      window.location.href = buildMailtoUrl({ to: email, subject, body: message });
+      window.location.href = buildMailtoUrl({ to: validEmail, subject, body: message });
       opened = true;
     }
   }

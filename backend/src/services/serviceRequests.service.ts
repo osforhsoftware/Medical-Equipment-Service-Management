@@ -169,55 +169,6 @@ export class ServiceRequestsService {
     };
   }
 
-  private async assertActorAccess(
-    request: {
-      id: string;
-      tenantId: string;
-      status: string;
-      assignedTo: string | null;
-      assignedInspectorId?: string | null;
-      assignedEstimatorId?: string | null;
-      assignedEngineerId?: string | null;
-    },
-    actorId?: string,
-    actorRole?: string,
-  ) {
-    if (!actorId || !actorRole) return;
-    if (actorRole === "estimator") {
-      const status = normalizeTicketStatus(request.status);
-      const assignedEstimator = request.assignedEstimatorId;
-      if (assignedEstimator === actorId) return;
-      // Do not treat assignedTo as the estimator — it is usually the inspector/coordinator.
-      if (!assignedEstimator && ["inspection", "estimate", "pending_approval"].includes(status)) {
-        return;
-      }
-      const ownedEstimate = await prisma.estimate.findFirst({
-        where: {
-          tenantId: request.tenantId,
-          serviceRequestId: request.id,
-          OR: [
-            { salespersonId: actorId },
-            { revisions: { some: { createdBy: actorId } } },
-          ],
-        },
-        select: { id: true },
-      });
-      if (!ownedEstimate) {
-        throw new AppError("You can only access service tickets assigned to you for estimate work", 403);
-      }
-      return;
-    }
-    const assigneeId =
-      actorRole === "inspector"
-        ? request.assignedInspectorId ?? request.assignedTo
-        : actorRole === "engineer"
-          ? request.assignedEngineerId ?? request.assignedTo
-          : request.assignedTo;
-    if (ASSIGNMENT_SCOPED_ROLES.includes(actorRole) && assigneeId && assigneeId !== actorId) {
-      throw new AppError("You can only access service tickets assigned to you", 403);
-    }
-  }
-
   private async validateAssignee(assignedTo: string, tenantId: string) {
     const assignee = await usersRepository.findById(assignedTo, tenantId);
     if (!assignee) throw new AppError("Staff user not found", 404);
@@ -331,10 +282,11 @@ export class ServiceRequestsService {
     return this.enrichCreatedByList(tenantId, rows);
   }
 
-  async getById(id: string, tenantId: string, actorId?: string, actorRole?: string) {
+  async getById(id: string, tenantId: string, _actorId?: string, _actorRole?: string) {
     const sr = await serviceRequestsRepository.findById(id, tenantId);
     if (!sr) throw new AppError("Service ticket not found", 404);
-    await this.assertActorAccess(sr, actorId, actorRole);
+    // Staff with ticket API access may read any ticket (QR scan history, field lookup).
+    // Writes still enforce assignment / role in update, advanceWorkflow, and inspections.
     return this.enrichServiceRequest(tenantId, sr);
   }
 
@@ -439,6 +391,9 @@ export class ServiceRequestsService {
           assignedTo: data.assignedTo,
           assignedName: data.assignedName,
           assignedInspectorId,
+          // Assigning an inspection technician starts the Inspection flow immediately
+          // so the ticket appears on their worklist without a separate "Move to Inspection".
+          ...(assignedInspectorId ? { status: "inspection" as const } : {}),
           slaDue,
         });
         break;
@@ -458,9 +413,9 @@ export class ServiceRequestsService {
     await serviceRequestsRepository.addTimelineEvent(
       sr.id,
       createdBy,
-      "Service ticket created",
+      assignedInspectorId ? "Service ticket created — moved to Inspection" : "Service ticket created",
       assignedInspectorId
-        ? `Type: ${typeLabel ?? "unspecified"}, Priority: ${data.priority}. Assigned to inspection — ticket ready for Inspection flow.`
+        ? `Type: ${typeLabel ?? "unspecified"}, Priority: ${data.priority}. Assigned to inspection technician — ticket is in Inspection.`
         : `Type: ${typeLabel ?? "unspecified"}, Priority: ${data.priority}. Awaiting inspection assignment.`,
     );
 
@@ -546,6 +501,10 @@ export class ServiceRequestsService {
     };
     if (assignmentRole === "inspector") {
       updateData.assignedInspectorId = assignee.id;
+      // Assigning an inspector on a New ticket starts Inspection so it hits their worklist.
+      if (normalizeTicketStatus(existing.status) === "new") {
+        updateData.status = "inspection";
+      }
     }
     if (assignmentRole === "estimator") {
       updateData.assignedEstimatorId = assignee.id;
@@ -584,7 +543,12 @@ export class ServiceRequestsService {
       id,
       actor?.name ?? actorId,
       `Assigned to ${assignee.name}`,
-      note ?? (updateData.status === "estimate" ? "Estimate staff assigned; ticket moved to Estimate." : undefined),
+      note ??
+        (updateData.status === "estimate"
+          ? "Estimate staff assigned; ticket moved to Estimate."
+          : updateData.status === "inspection"
+            ? "Inspection technician assigned; ticket moved to Inspection."
+            : undefined),
     );
 
     await notificationsService.notifyAssignment(
@@ -666,7 +630,7 @@ export class ServiceRequestsService {
     const updated = await this.enrichServiceRequest(
       tenantId,
       await serviceRequestsRepository.update(id, tenantId, {
-        status: targetStatus as never,
+        status: normalizeTicketStatus(targetStatus) as never,
       }),
     );
 
@@ -697,7 +661,7 @@ export class ServiceRequestsService {
     const updated = await this.enrichServiceRequest(
       tenantId,
       await serviceRequestsRepository.update(id, tenantId, {
-        status: targetStatus as never,
+        status: normalizeTicketStatus(targetStatus) as never,
       }),
     );
 

@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { AlertCircle, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, Receipt, type LucideIcon } from "lucide-react";
+import { AlertCircle, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, History, Receipt, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type SavedViewKey = "all" | "my" | "overdue" | "approval" | "billing" | "calendar";
+export type SavedViewKey = "all" | "my" | "overdue" | "approval" | "billing" | "calendar" | "history";
 
 type SavedViewItem = {
   key: SavedViewKey;
@@ -26,6 +26,7 @@ export function parseSavedView(value: string | null): SavedViewKey {
     || value === "approval"
     || value === "billing"
     || value === "calendar"
+    || value === "history"
   ) {
     return value;
   }
@@ -137,6 +138,14 @@ export const JOBS_SAVED_VIEWS: SavedViewItem[] = [
   { key: "overdue", label: "Overdue", hint: "Past scheduled date", icon: AlertCircle },
   { key: "approval", label: "Approval", hint: "Waiting QA review", icon: ClipboardCheck },
   { key: "billing", label: "Billing", hint: "Ready for delivery / billing", icon: Receipt },
+  { key: "calendar", label: "Calendar", hint: "Month by schedule date", icon: CalendarDays },
+];
+
+/** Side panel views for QA staff — pending work vs completed history. */
+export const JOBS_QA_SAVED_VIEWS: SavedViewItem[] = [
+  { key: "approval", label: "QA Pending", hint: "Jobs awaiting QA review", icon: ClipboardCheck },
+  { key: "history", label: "Completed History", hint: "Passed and failed QA checks", icon: History },
+  { key: "all", label: "All jobs", hint: "Full job board", icon: CheckCircle2 },
   { key: "calendar", label: "Calendar", hint: "Month by schedule date", icon: CalendarDays },
 ];
 

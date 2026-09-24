@@ -22,7 +22,6 @@ import {
   BadgeIndianRupee,
   Tags,
   Store,
-  ArrowLeftRight,
   History,
   Undo2,
   ClipboardPen,
@@ -45,16 +44,16 @@ export interface NavItem {
   children?: NavChild[];
 }
 
-const ALL: Role[] = ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing"];
+const ALL: Role[] = ["admin", "coordinator", "inspector", "estimator", "sales", "engineer", "inventory", "billing", "qa"];
 
 const SERVICE_TICKET_STAGES: NavChild[] = [
   { label: "All active", to: "/app/service-tickets" },
   { label: "Pending", to: "/app/service-tickets?status=new&view=table" },
   { label: "Inspection", to: "/app/service-tickets?status=inspection&view=table" },
   { label: "Estimate", to: "/app/service-tickets?status=estimate&view=table" },
-  { label: "Approval", to: "/app/service-tickets?status=approval&view=table" },
-  { label: "In Progress", to: "/app/service-tickets?status=in-progress&view=table" },
-  { label: "Completed", to: "/app/service-tickets?status=completed&view=table" },
+  { label: "Approval", to: "/app/service-tickets?status=pending_approval&view=table" },
+  { label: "In Progress", to: "/app/service-tickets?status=assigned_engineer&view=table" },
+  { label: "Completed", to: "/app/service-tickets?status=closed&view=table" },
 ];
 
 const PROJECT_STAGES: NavChild[] = [
@@ -83,29 +82,29 @@ export const navItems: NavItem[] = [
   { label: "Sales Enquiries", to: "/app/sales-enquiries", icon: ClipboardPen, roles: ["admin", "sales", "coordinator", "billing"], group: "Sales" },
   { label: "Customers", to: "/app/customers", icon: Users, roles: ["admin", "coordinator", "estimator", "sales", "billing"], group: "Sales" },
 
-  { label: "Equipment", to: "/app/equipment", icon: HardDrive, roles: ["admin", "coordinator", "inspector", "engineer", "inventory"], group: "Operations" },
+  { label: "Equipment", to: "/app/equipment", icon: HardDrive, roles: ["admin", "coordinator", "inspector", "engineer", "inventory", "qa"], group: "Operations" },
   {
     label: "Service Tickets",
     to: "/app/service-tickets",
     icon: ClipboardList,
-    roles: ["admin", "coordinator", "inspector", "engineer", "estimator", "sales"],
+    roles: ["admin", "coordinator", "inspector", "engineer", "estimator", "sales", "qa"],
     group: "Operations",
     children: SERVICE_TICKET_STAGES,
   },
-  { label: "Inspections", to: "/app/inspections", icon: Search, roles: ["admin", "coordinator", "inspector"], group: "Operations" },
+  { label: "Inspections", to: "/app/inspections", icon: Search, roles: ["admin", "coordinator", "inspector", "estimator", "qa"], group: "Operations" },
   { label: "Estimates", to: "/app/estimates", icon: FileText, roles: ["admin", "coordinator", "estimator", "billing"], group: "Operations" },
-  { label: "Service Jobs", to: "/app/jobs", icon: Wrench, roles: ["admin", "coordinator", "engineer"], group: "Operations" },
+  { label: "Service Jobs", to: "/app/jobs", icon: Wrench, roles: ["admin", "coordinator", "engineer", "qa"], group: "Operations" },
   {
     label: "Projects",
     to: "/app/projects",
     icon: FolderKanban,
     // Same data as Service Jobs (jobs API) — only roles that can read jobs.
-    roles: ["admin", "coordinator"],
+    roles: ["admin", "coordinator", "qa"],
     group: "Operations",
     children: PROJECT_STAGES,
   },
   { label: "Service Catalog", to: "/app/service-catalog", icon: BookOpen, roles: ["admin", "coordinator", "estimator"], group: "Operations" },
-  { label: "Warranty Claims", to: "/app/warranty-claims", icon: ShieldAlert, roles: ["admin", "coordinator", "inspector", "estimator", "engineer", "sales"], group: "Operations" },
+  { label: "Warranty Claims", to: "/app/warranty-claims", icon: ShieldAlert, roles: ["admin", "coordinator", "inspector", "estimator", "engineer", "sales", "billing", "qa"], group: "Operations" },
 
   { label: "Inventory Items", to: "/app/inventory", icon: Boxes, roles: ["admin", "inventory", "engineer"], group: "Supply Chain" },
   { label: "Stock Purchase Requests", to: "/app/stock-purchase-requests", icon: ShoppingCart, roles: ["admin", "inventory", "engineer"], group: "Supply Chain" },
@@ -121,7 +120,7 @@ export const navItems: NavItem[] = [
 
   { label: "Reports", to: "/app/reports", icon: BarChart3, roles: ["admin", "billing", "coordinator"], group: "Insights" },
   { label: "Notifications", to: "/app/notifications", icon: Bell, roles: ALL, group: "Insights" },
-  { label: "QR Tracking", to: "/app/qr-tracking", icon: QrCode, roles: ["admin", "coordinator", "inspector", "engineer", "inventory"], group: "Insights" },
+  { label: "QR Tracking", to: "/app/qr-tracking", icon: QrCode, roles: ["admin", "coordinator", "inspector", "engineer", "inventory", "qa"], group: "Insights" },
   { label: "Audit Logs", to: "/app/audit-logs", icon: ScrollText, roles: ["admin"], group: "Insights" },
 
   { label: "Users", to: "/app/users", icon: UserCog, roles: ["admin"], group: "Administration" },

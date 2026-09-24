@@ -9,6 +9,7 @@ const SERVICE_STATUS_LABELS: Record<string, string> = {
   pending_invoice: "Pending invoice",
   invoiced: "Invoiced",
   closed: "Closed",
+  cancelled: "Cancelled",
   approval: "Pending approval",
   inProgress: "In progress",
   completed: "Completed",

@@ -14,6 +14,16 @@ const withEquipmentItems = {
   inspectionReport: true,
 };
 
+const withInspectionDetails = {
+  equipmentItems: { orderBy: { createdAt: "asc" as const } },
+  inspectionReport: {
+    include: {
+      recommendations: { include: { catalogItem: true, inventoryItem: true } },
+      attachments: { include: { file: true } },
+    },
+  },
+};
+
 export interface ServiceRequestListFilters {
   status?: string;
   assignedTo?: string;
@@ -230,21 +240,21 @@ export class ServiceRequestsRepository {
   async findById(id: string, tenantId: string) {
     return prisma.serviceRequest.findFirst({
       where: { id, tenantId },
-      include: withEquipmentItems,
+      include: withInspectionDetails,
     });
   }
 
   async findWithTimeline(id: string, tenantId: string) {
     return prisma.serviceRequest.findFirst({
       where: { id, tenantId },
-      include: { ...withEquipmentItems, timelineEvents: { orderBy: { at: "asc" } } },
+      include: { ...withInspectionDetails, timelineEvents: { orderBy: { at: "asc" } } },
     });
   }
 
   async create(tenantId: string, data: Omit<Prisma.ServiceRequestUncheckedCreateInput, "tenantId">) {
     return prisma.serviceRequest.create({
       data: { ...data, tenantId },
-      include: withEquipmentItems,
+      include: withInspectionDetails,
     });
   }
 
@@ -277,7 +287,7 @@ export class ServiceRequestsRepository {
     return prisma.serviceRequest.update({
       where: { id },
       data: patch,
-      include: withEquipmentItems,
+      include: withInspectionDetails,
     });
   }
 

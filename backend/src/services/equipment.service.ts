@@ -21,6 +21,10 @@ type CreateEquipmentData = {
   installDate?: string | null;
   warrantyStart?: string | null;
   warrantyEnd?: string | null;
+  noMachineWarranty?: boolean;
+  serviceWarrantyStart?: string | null;
+  serviceWarrantyEnd?: string | null;
+  noServiceWarranty?: boolean;
   amcStatus?: string;
   condition?: string;
   currentStatus?: string;
@@ -91,8 +95,12 @@ export class EquipmentService {
       branchId,
       location: data.location?.trim() || "",
       installDate: parseOptionalDate(data.installDate),
-      warrantyStart: parseOptionalDate(data.warrantyStart),
-      warrantyEnd: parseOptionalDate(data.warrantyEnd),
+      warrantyStart: data.noMachineWarranty ? null : parseOptionalDate(data.warrantyStart),
+      warrantyEnd: data.noMachineWarranty ? null : parseOptionalDate(data.warrantyEnd),
+      noMachineWarranty: Boolean(data.noMachineWarranty),
+      serviceWarrantyStart: data.noServiceWarranty ? null : parseOptionalDate(data.serviceWarrantyStart),
+      serviceWarrantyEnd: data.noServiceWarranty ? null : parseOptionalDate(data.serviceWarrantyEnd),
+      noServiceWarranty: Boolean(data.noServiceWarranty),
       amcStatus: (data.amcStatus ?? "none") as never,
       condition,
       currentStatus: (data.currentStatus ?? "in_service") as never,
@@ -145,6 +153,30 @@ export class EquipmentService {
       next.warrantyEnd = parseOptionalDate(next.warrantyEnd);
     } else if (next.warrantyEnd === "") {
       next.warrantyEnd = null;
+    }
+    if (typeof next.serviceWarrantyStart === "string") {
+      next.serviceWarrantyStart = parseOptionalDate(next.serviceWarrantyStart);
+    } else if (next.serviceWarrantyStart === "") {
+      next.serviceWarrantyStart = null;
+    }
+    if (typeof next.serviceWarrantyEnd === "string") {
+      next.serviceWarrantyEnd = parseOptionalDate(next.serviceWarrantyEnd);
+    } else if (next.serviceWarrantyEnd === "") {
+      next.serviceWarrantyEnd = null;
+    }
+    if (next.noMachineWarranty === true) {
+      next.noMachineWarranty = true;
+      next.warrantyStart = null;
+      next.warrantyEnd = null;
+    } else if (next.noMachineWarranty === false) {
+      next.noMachineWarranty = false;
+    }
+    if (next.noServiceWarranty === true) {
+      next.noServiceWarranty = true;
+      next.serviceWarrantyStart = null;
+      next.serviceWarrantyEnd = null;
+    } else if (next.noServiceWarranty === false) {
+      next.noServiceWarranty = false;
     }
     if (next.lastServiceDate === "" || next.lastServiceDate == null) {
       next.lastServiceDate = null;

@@ -18,11 +18,13 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import type { Dispatch, SetStateAction } from "react";
 import type {
   BackendInspectionReport,
+  BackendInventoryItem,
   BackendServiceRequest,
 } from "@/lib/api";
 import type { CustomerAdditionalField } from "@/lib/customerFields";
 import { formatServiceStatus } from "@/lib/format";
 import { InspectionReportForm } from "./InspectionReportForm";
+import type { RecommendedPartDraft } from "./useInspectionReportEditor";
 
 interface InspectionReportPanelProps {
   open: boolean;
@@ -42,6 +44,9 @@ interface InspectionReportPanelProps {
   setSeverity: (v: string) => void;
   additionalFields: CustomerAdditionalField[];
   setAdditionalFields: Dispatch<SetStateAction<CustomerAdditionalField[]>>;
+  recommendedParts: RecommendedPartDraft[];
+  setRecommendedParts: Dispatch<SetStateAction<RecommendedPartDraft[]>>;
+  inventory: BackendInventoryItem[];
   machineImages: File[];
   setMachineImages: Dispatch<SetStateAction<File[]>>;
   setMachineImage: (file: File | null) => void;

@@ -3,7 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { Building2, Loader2, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { EquipmentFormDialog } from "@/components/equipment/EquipmentFormDialog";
 import { FormFieldError } from "@/components/shared/FormFieldError";
+import { GuidedNextStepDialog } from "@/components/shared/GuidedNextStepDialog";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { CustomerAdditionalFieldsEditor } from "@/components/customers/CustomerAdditionalFieldsEditor";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -34,13 +36,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, type BackendCustomer } from "@/lib/api";
+import { api, type BackendCustomer, type BackendEquipment } from "@/lib/api";
+import {
+  customerSiteLocation,
+  isGuidedSetupEnabled,
+  serviceTicketPrefillPath,
+  ticketDescriptionFromEquipment,
+} from "@/lib/guidedSetup";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
-import { CUSTOMER_WRITE_ROLES } from "@/config/roles";
+import { CUSTOMER_WRITE_ROLES, TICKET_CREATE_ROLES } from "@/config/roles";
 import { userCanAccessModule } from "@/lib/userRoles";
 import { navItems } from "@/config/nav";
 import { activeTerms, termLabel } from "@/lib/taxonomy";
@@ -110,8 +118,11 @@ export default function Customers() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, hasRole } = useAuth();
-  const { rbacMatrix } = useSettings();
+  const { rbacMatrix, settings } = useSettings();
   const canCreate = hasRole(CUSTOMER_WRITE_ROLES);
+  const canRegisterEquipment = hasRole(["admin", "coordinator", "inventory"]);
+  const canCreateTicket = hasRole(TICKET_CREATE_ROLES);
+  const guidedSetup = isGuidedSetupEnabled(settings);
   const canManageMasterData = Boolean(
     user && userCanAccessModule(
       user,
@@ -161,6 +172,14 @@ export default function Customers() {
   const [deleteTarget, setDeleteTarget] = useState<BackendCustomer | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [equipmentPrompt, setEquipmentPrompt] = useState<BackendCustomer | null>(null);
+  const [equipmentDialogOpen, setEquipmentDialogOpen] = useState(false);
+  const [equipmentPrefill, setEquipmentPrefill] = useState<{
+    customerId: string;
+    customerName: string;
+    location: string;
+  } | null>(null);
+  const [ticketPrompt, setTicketPrompt] = useState<BackendEquipment | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -240,6 +259,10 @@ export default function Customers() {
       setDialogOpen(false);
       resetValidation();
       await queryClient.invalidateQueries({ queryKey: ["customers"] });
+      await queryClient.invalidateQueries({ queryKey: ["customers", "options"] });
+      if (guidedSetup && canRegisterEquipment) {
+        setEquipmentPrompt(created);
+      }
     } catch (err) {
       if (!applyApiErrors(err, dialogRef.current)) {
         toast.apiError(err, { fallback: "Unable to save customer" });
@@ -767,6 +790,61 @@ export default function Customers() {
         confirmLabel="Remove customer"
         loading={deleting}
         onConfirm={() => void confirmDelete()}
+      />
+
+      <GuidedNextStepDialog
+        open={Boolean(equipmentPrompt)}
+        step="equipment"
+        subjectName={equipmentPrompt?.name ?? "this customer"}
+        onConfirm={() => {
+          if (!equipmentPrompt) return;
+          setEquipmentPrefill({
+            customerId: equipmentPrompt.id,
+            customerName: equipmentPrompt.name,
+            location: customerSiteLocation(equipmentPrompt),
+          });
+          setEquipmentPrompt(null);
+          setEquipmentDialogOpen(true);
+        }}
+        onSkip={() => setEquipmentPrompt(null)}
+      />
+
+      <EquipmentFormDialog
+        open={equipmentDialogOpen}
+        onOpenChange={(open) => {
+          setEquipmentDialogOpen(open);
+          if (!open) setEquipmentPrefill(null);
+        }}
+        defaultCustomerId={equipmentPrefill?.customerId}
+        defaultCustomerName={equipmentPrefill?.customerName}
+        defaultLocation={equipmentPrefill?.location}
+        onSaved={(saved) => {
+          void queryClient.invalidateQueries({ queryKey: ["equipment"] });
+          void queryClient.invalidateQueries({ queryKey: ["customers"] });
+          void queryClient.invalidateQueries({ queryKey: ["customers", "options"] });
+          if (guidedSetup && canCreateTicket && saved.customerId) {
+            setTicketPrompt(saved);
+          }
+        }}
+      />
+
+      <GuidedNextStepDialog
+        open={Boolean(ticketPrompt)}
+        step="ticket"
+        subjectName={ticketPrompt?.name ?? "this equipment"}
+        onConfirm={() => {
+          if (!ticketPrompt?.customerId) {
+            setTicketPrompt(null);
+            return;
+          }
+          navigate(serviceTicketPrefillPath({
+            customerId: ticketPrompt.customerId,
+            equipmentIds: [ticketPrompt.id],
+            description: ticketDescriptionFromEquipment(ticketPrompt),
+          }));
+          setTicketPrompt(null);
+        }}
+        onSkip={() => setTicketPrompt(null)}
       />
     </div>
   );

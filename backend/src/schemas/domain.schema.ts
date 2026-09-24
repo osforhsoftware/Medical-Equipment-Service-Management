@@ -208,6 +208,10 @@ export const invoiceFromJobSchema = z.object({
       .object({
         warrantyStart: z.coerce.date().nullable().optional(),
         warrantyEnd: z.coerce.date().nullable().optional(),
+        noMachineWarranty: z.boolean().optional(),
+        serviceWarrantyStart: z.coerce.date().nullable().optional(),
+        serviceWarrantyEnd: z.coerce.date().nullable().optional(),
+        noServiceWarranty: z.boolean().optional(),
         amcStatus: z.enum(["active", "expiring", "expired", "none"]).optional(),
       })
       .optional(),

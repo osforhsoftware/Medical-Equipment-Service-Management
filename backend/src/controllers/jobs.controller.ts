@@ -19,6 +19,7 @@ export class JobsController {
           scheduledTo: query.scheduledTo,
           overdue: query.overdue || undefined,
           engineerId: query.assignee || undefined,
+          qaScope: query.qaScope,
           completedScope: parseCompletedScope(query.completedScope),
           skip: query.skip,
           take: query.take,

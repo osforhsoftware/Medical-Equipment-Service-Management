@@ -1,3 +1,4 @@
+import { LayoutGrid } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
@@ -6,7 +7,7 @@ import { useMobileUnreadCount } from "@/hooks/useMobilePullRefresh";
 import { getUserRoles } from "@/lib/userRoles";
 import { cn } from "@/lib/utils";
 
-export function MobileBottomNav() {
+export function MobileBottomNav({ onMore }: { onMore?: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -15,7 +16,7 @@ export function MobileBottomNav() {
 
   if (!user) return null;
 
-  const tabs = getMobileNavTabs(getUserRoles(user), rbacMatrix, user);
+  const tabs = getMobileNavTabs(getUserRoles(user), rbacMatrix, user).slice(0, 4);
 
   return (
     <nav className="mobile-bottom-nav" aria-label="Main navigation">
@@ -62,6 +63,17 @@ export function MobileBottomNav() {
             </button>
           );
         })}
+        <button
+          type="button"
+          onClick={() => onMore?.()}
+          className="mobile-nav-item py-1"
+          aria-label="More modules"
+        >
+          <span className="relative flex h-10 w-12 items-center justify-center rounded-2xl text-muted-foreground transition-all duration-200 hover:bg-muted/50">
+            <LayoutGrid className="h-5 w-5" strokeWidth={1.8} />
+          </span>
+          <span className="text-[10px] font-semibold tracking-tight text-muted-foreground">More</span>
+        </button>
       </div>
     </nav>
   );

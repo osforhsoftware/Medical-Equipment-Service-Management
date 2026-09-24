@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { Eye, FilePenLine, MoreHorizontal, PackageX, ShoppingCart } from "lucide-react";
@@ -41,6 +42,7 @@ const decisionSchema = z.object({
 export default function EstimateDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasRole } = useAuth();
   const [estimate, setEstimate] = useState<BackendEstimate | null>(null);
@@ -108,9 +110,18 @@ export default function EstimateDetail() {
 
     setSaving(true);
     try {
-      await api.decideEstimate(estimate.id, action, decisionNote || undefined, {
-        engineerId: action === "approved" ? engineerId : undefined,
-      });
+      if (action === "rejected" && estimate.serviceRequestId) {
+        // Service-ticket estimates go through the ticket workflow reject action.
+        await api.rejectTicketEstimate(estimate.serviceRequestId, {
+          estimateId: estimate.id,
+          reason: decisionNote.trim() || "Estimate rejected",
+          target: "estimate",
+        });
+      } else {
+        await api.decideEstimate(estimate.id, action, decisionNote || undefined, {
+          engineerId: action === "approved" ? engineerId : undefined,
+        });
+      }
       setDecisionNote("");
       setEngineerId("");
       resetValidation();
@@ -144,9 +155,10 @@ export default function EstimateDetail() {
     setReturnSaving(true);
     try {
       // Record return details as a decision note on the estimate
-      await api.decideEstimate(estimate.id, "rejected", `RETURN WITHOUT REPAIR: ${data.returnReason} | Handed by: ${data.handedBy} on ${data.returnDate} | Customer acknowledged: ${data.customerAcknowledged ? "Yes" : "No"}`);
+      const note = `RETURN WITHOUT REPAIR: ${data.returnReason} | Handed by: ${data.handedBy} on ${data.returnDate} | Customer acknowledged: ${data.customerAcknowledged ? "Yes" : "No"}`;
+      await api.decideEstimate(estimate.id, "rejected", note);
       if (estimate.serviceRequestId) {
-        await api.updateServiceRequest(estimate.serviceRequestId, { status: "closed" }).catch(() => null);
+        await api.cancelServiceTicket(estimate.serviceRequestId, note);
       }
       toast.success("Return without repair recorded", { description: `Handed back by ${data.handedBy} on ${data.returnDate}` });
       setReturnOpen(false);

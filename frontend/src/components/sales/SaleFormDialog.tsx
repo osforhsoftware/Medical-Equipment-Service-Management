@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { QuickAddCustomerDialog } from "@/components/sales/QuickAddCustomerDialog";
 import { CreditExposureBanner } from "@/components/shared/CreditExposureBanner";
+import { inventoryOriginUnitPrice } from "@/components/shared/InventoryHelpers";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -92,7 +93,7 @@ function newKey() {
 }
 
 function sellingPrice(item: BackendInventoryItem) {
-  return Number(item.sellingPrice ?? item.unitCost ?? 0);
+  return inventoryOriginUnitPrice(item);
 }
 
 function availableStock(item: BackendInventoryItem) {

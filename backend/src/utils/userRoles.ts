@@ -30,6 +30,10 @@ export async function ensureSystemRoles(tenantId: string): Promise<void> {
     where: { tenantId, key: "estimator", isSystem: true },
     data: { name: getRoleLabel("estimator") },
   });
+  await prisma.role.updateMany({
+    where: { tenantId, key: "qa", isSystem: true },
+    data: { name: getRoleLabel("qa") },
+  });
 }
 
 export async function collectUserRoleKeys(

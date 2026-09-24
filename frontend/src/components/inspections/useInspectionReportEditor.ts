@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type BackendInspectionReport, type BackendServiceRequest } from "@/lib/api";
+import { api, type BackendInspectionReport, type BackendInventoryItem, type BackendServiceRequest } from "@/lib/api";
 import {
   parseCustomerAdditionalFields,
   sanitizeCustomerAdditionalFields,
@@ -9,6 +9,11 @@ import { formatServiceStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 const WORK_DETAILS_MARKER = "\n\nWork details:\n";
+
+export type RecommendedPartDraft = {
+  inventoryItemId: string;
+  quantity: number;
+};
 
 export function splitInspectionFindings(raw: string) {
   const idx = raw.indexOf(WORK_DETAILS_MARKER);
@@ -34,6 +39,8 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
   const [additionalFields, setAdditionalFields] = useState<CustomerAdditionalField[]>([
     { label: "", value: "" },
   ]);
+  const [recommendedParts, setRecommendedParts] = useState<RecommendedPartDraft[]>([]);
+  const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
 
@@ -58,6 +65,7 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
     setImageCaptions([]);
     setSeverity("medium");
     setAdditionalFields([{ label: "", value: "" }]);
+    setRecommendedParts([]);
     setExistingReport(null);
   };
 
@@ -81,6 +89,9 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
 
     setLoadingReport(true);
     try {
+      setInventory(
+        await api.listInventory({ limit: 100, page: 1 }).then((r) => r.data).catch(() => [] as BackendInventoryItem[]),
+      );
       const report = await api.getInspectionReport(task.id);
       if (report) {
         const split = splitInspectionFindings(report.findings ?? "");
@@ -91,6 +102,14 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
         setRecommendation(report.recommendation);
         setSeverity(report.severity);
         setAdditionalFields(fields.length ? fields : [{ label: "", value: "" }]);
+        setRecommendedParts(
+          (report.recommendations ?? [])
+            .filter((item) => item.inventoryItemId && item.type !== "service")
+            .map((item) => ({
+              inventoryItemId: item.inventoryItemId as string,
+              quantity: Math.max(1, Math.ceil(Number(item.quantity) || 1)),
+            })),
+        );
       }
     } catch {
       /* no report yet */
@@ -126,6 +145,12 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
         attachments,
         attachmentFileIds: attachments.map((item) => item.fileId),
         additionalFields: sanitizeCustomerAdditionalFields(additionalFields),
+        recommendedParts: recommendedParts
+          .filter((part) => part.inventoryItemId && part.quantity > 0)
+          .map((part) => ({
+            inventoryItemId: part.inventoryItemId,
+            quantity: Math.max(1, Math.ceil(Number(part.quantity) || 1)),
+          })),
         submit: true,
       });
 
@@ -156,6 +181,9 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
     setSeverity,
     additionalFields,
     setAdditionalFields,
+    recommendedParts,
+    setRecommendedParts,
+    inventory,
     machineImages,
     setMachineImages,
     setMachineImage,

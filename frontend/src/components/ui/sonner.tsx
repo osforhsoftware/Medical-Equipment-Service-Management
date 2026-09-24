@@ -28,10 +28,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
       className="toaster group"
       position="top-right"
       gap={12}
-      visibleToasts={5}
+      visibleToasts={3}
       closeButton
       richColors={false}
-      expand={false}
+      expand={true}
       offset={{
         top: "max(1rem, env(safe-area-inset-top))",
         right: "max(1rem, env(safe-area-inset-right))",

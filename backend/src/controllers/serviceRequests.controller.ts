@@ -235,8 +235,22 @@ export class ServiceRequestsController {
         req.user!.userId,
         req.user!.role,
         req.body?.note,
+        req.body?.force,
       );
       res.json(success("Ticket closed", data));
+    } catch (err) { next(err); }
+  }
+
+  async cancelTicket(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await serviceTicketWorkflowService.cancelTicket(
+        req.params.id,
+        req.tenantId!,
+        req.user!.userId,
+        req.user!.role,
+        req.body?.reason,
+      );
+      res.json(success("Ticket cancelled", data));
     } catch (err) { next(err); }
   }
 }
