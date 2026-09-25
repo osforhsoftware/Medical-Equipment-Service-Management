@@ -106,6 +106,8 @@ const ALREADY_APPLIED_CHECKS = {
     columnExists("equipment", "service_warranty_start"),
   "20260924110000_no_warranty_flags": () =>
     columnExists("equipment", "no_machine_warranty"),
+  "20260925143000_purchase_order_landed_costs": () =>
+    columnExists("purchase_orders", "freight_cost"),
 };
 
 async function pendingMigrations() {
