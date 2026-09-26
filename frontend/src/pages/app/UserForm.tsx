@@ -25,7 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { useSettings } from "@/context/SettingsContext";
 import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
 import { RBAC_MODULES } from "@/config/defaultRbac";
-import { api } from "@/lib/api";
+import { api, type BackendCustomer } from "@/lib/api";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
 import {
@@ -83,6 +83,7 @@ type FormState = {
   isActive: boolean;
   accessMode: PermissionMode;
   moduleLevels: Record<string, PermissionLevel>;
+  customerId: string;
 };
 
 const emptyForm: FormState = {
@@ -96,6 +97,7 @@ const emptyForm: FormState = {
   isActive: true,
   accessMode: "crud",
   moduleLevels: {},
+  customerId: "",
 };
 
 function toggleRoleSelection(current: Role[], role: Role): Role[] {
@@ -115,11 +117,11 @@ const ROLE_CORE_MODULES: Partial<Record<Role, string[]>> = {
   estimator: ["Estimates", "Service Catalog", "Service Tickets", "Customers", "Inspections"],
   qa: ["Service Jobs", "Projects", "Service Tickets", "Inspections", "Equipment"],
   inspector: ["Inspections", "Service Tickets", "Equipment"],
-  engineer: ["Service Jobs", "Service Tickets", "Equipment"],
-  sales: ["Sales", "Customers", "Sales Enquiries", "Service Tickets"],
-  billing: ["Billing", "Estimates", "Customers"],
-  inventory: ["Inventory Items", "Suppliers", "Purchase Orders", "Stock Purchase Requests"],
-  coordinator: ["Service Tickets", "Projects", "Service Jobs", "Customers"],
+  engineer: ["Service Jobs", "Service Tickets", "Equipment", "Inventory"],
+  sales: ["Sales", "Customers", "Service Tickets"],
+  billing: ["Billing", "Finance", "Estimates", "Customers", "Purchase"],
+  inventory: ["Inventory", "Suppliers", "Purchase"],
+  coordinator: ["Service Tickets", "Projects", "Service Jobs", "Customers", "Purchase"],
   admin: ["Dashboard", "Users", "Settings"],
 };
 
@@ -190,6 +192,7 @@ export default function UserFormPage() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
+  const [customers, setCustomers] = useState<BackendCustomer[]>([]);
 
   const {
     errors,
@@ -201,7 +204,7 @@ export default function UserFormPage() {
     applyApiErrors,
     clearError,
   } = useFormValidation({
-    fieldOrder: ["name", "username", "email", "phone", "password", "selectedRoles", "accessMode"],
+    fieldOrder: ["name", "username", "email", "phone", "password", "selectedRoles", "customerId", "accessMode"],
     schema: userSchema,
     validate: (values) => {
       const fieldErrors: Record<string, string> = {};
@@ -216,9 +219,19 @@ export default function UserFormPage() {
       if (values.selectedRoles.includes("admin") && values.accessMode === "read") {
         fieldErrors.accessMode = "Administrator accounts cannot be read-only.";
       }
+      if (values.selectedRoles.includes("customer") && !values.customerId.trim()) {
+        fieldErrors.customerId = "Link this portal user to a customer record.";
+      }
       return fieldErrors;
     },
   });
+
+  useEffect(() => {
+    if (!CUSTOMER_PORTAL_ENABLED) return;
+    void api.listCustomers({ page: 1, limit: 200 })
+      .then((result) => setCustomers(result.data))
+      .catch(() => setCustomers([]));
+  }, []);
 
   // New user: seed module levels from the default role so saves never write Hidden by accident.
   useEffect(() => {
@@ -247,6 +260,7 @@ export default function UserFormPage() {
           phone: user.phone ?? "",
           password: "",
           selectedRoles,
+          customerId: user.customerId ?? "",
           primaryRole: user.role as Role,
           isActive: user.isActive,
           accessMode,
@@ -352,6 +366,7 @@ export default function UserFormPage() {
         roles: form.selectedRoles,
         primaryRole: form.primaryRole,
         isActive: form.isActive,
+        customerId: isCustomerOnly ? form.customerId || undefined : null,
         permissions: {
           mode: form.accessMode,
           modules,
@@ -569,6 +584,34 @@ export default function UserFormPage() {
                       />
                       <span>{roleLabels.customer} (portal only — cannot combine with staff roles)</span>
                     </label>
+                  ) : null}
+                  {CUSTOMER_PORTAL_ENABLED && isCustomerOnly ? (
+                    <div className="grid gap-2" data-field="customerId">
+                      <Label className={shouldShow("customerId") ? "text-destructive" : undefined}>
+                        Linked customer <RequiredMark />
+                      </Label>
+                      <Select
+                        value={form.customerId || undefined}
+                        onValueChange={(value) => {
+                          const next = { ...form, customerId: value };
+                          setForm(next);
+                          clearError("customerId");
+                          handleChange("customerId", next);
+                        }}
+                      >
+                        <SelectTrigger id="customerId">
+                          <SelectValue placeholder="Select customer record" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {customers.map((customer) => (
+                            <SelectItem key={customer.id} value={customer.id}>
+                              {customer.name} · {customer.reference}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {shouldShow("customerId") && <FormFieldError field="customerId" message={errors.customerId} />}
+                    </div>
                   ) : null}
                   {shouldShow("selectedRoles") && (
                     <FormFieldError field="selectedRoles" message={errors.selectedRoles} />

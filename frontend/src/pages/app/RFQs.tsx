@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Truck,
   Plus,
   Search,
+  ShoppingCart,
   Clock,
   CheckCircle2,
   FileText,
@@ -13,15 +14,22 @@ import {
   ChevronDown,
   ChevronUp,
   Trash2,
+  PackageCheck,
+  Landmark,
+  Receipt,
+  Undo2,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { PurchaseStageNav, purchaseStageFromLocation } from "@/components/purchase/PurchaseStageNav";
+import { ModuleQuickAction } from "@/components/shared/ModuleFlowStrip";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { StatCard } from "@/components/shared/StatCard";
 import {
   Dialog,
   DialogContent,
@@ -62,12 +70,21 @@ export interface SupplierQuoteLine {
   description?: string;
   quantity: number;
   unitPrice: number;
-  deliveryDays?: number;
+  /** Minimum order quantity */
+  moq: number;
+  /** Lead time in days */
+  deliveryDays: number;
   notes?: string;
 }
 
 export interface SupplierQuoteData {
   id: string;
+  currency?: string | null;
+  warranty?: string | null;
+  incoterm?: string | null;
+  shippingTerms?: string | null;
+  paymentTerms?: string | null;
+  countryOfOrigin?: string | null;
   validUntil?: string | null;
   notes?: string | null;
   lines: SupplierQuoteLine[];
@@ -90,11 +107,16 @@ export interface SupplierRFQData {
 
 export default function RFQs() {
   const { hasRole } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  const stage = purchaseStageFromLocation("/app/rfqs", searchParams.get("stage"));
   const canManage = hasRole(["admin", "inventory", "coordinator"]);
+  const canConvertToPo = hasRole(["admin", "inventory"]);
   const canManageSuppliers = hasRole(["admin", "inventory"]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [convertingQuoteId, setConvertingQuoteId] = useState<string | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
@@ -112,10 +134,22 @@ export default function RFQs() {
 
   // Quote form state
   const [quoteForm, setQuoteForm] = useState<{
+    currency: string;
+    warranty: string;
+    incoterm: string;
+    shippingTerms: string;
+    paymentTerms: string;
+    countryOfOrigin: string;
     validUntil: string;
     notes: string;
     lines: SupplierQuoteLine[];
   }>({
+    currency: "INR",
+    warranty: "",
+    incoterm: "",
+    shippingTerms: "",
+    paymentTerms: "",
+    countryOfOrigin: "",
     validUntil: "",
     notes: "",
     lines: [],
@@ -129,6 +163,13 @@ export default function RFQs() {
     },
   });
 
+  const openPoQuery = useQuery({
+    queryKey: ["purchase-orders", "overview-open"],
+    queryFn: () => api.listPurchaseOrders({ page: 1, limit: 100, status: "open" }),
+    enabled: stage === "overview",
+    staleTime: 60_000,
+  });
+
   const suppliersQuery = useQuery({
     queryKey: ["suppliers", "options"],
     queryFn: () => api.listSuppliers({ limit: 100, page: 1 }).then((r) => r.data),
@@ -139,7 +180,7 @@ export default function RFQs() {
 
   const inventoryQuery = useQuery({
     queryKey: ["inventory", "options"],
-    queryFn: () => api.listInventory({ limit: 100, page: 1 }).then((r) => r.data),
+    queryFn: () => api.listInventory({ limit: 100, page: 1, status: "active" }).then((r) => r.data),
     staleTime: 60_000,
     enabled: createOpen,
   });
@@ -204,10 +245,11 @@ export default function RFQs() {
         supplierName: rfqForm.supplierName,
         dueDate: rfqForm.dueDate || null,
         notes: rfqForm.notes || null,
-        lines: rfqForm.lines.map(({ description, quantity, unitCostEstimate }) => ({
+        lines: rfqForm.lines.map(({ description, quantity, unitCostEstimate, inventoryItemId }) => ({
           description: description.trim(),
           quantity: Number(quantity) || 1,
           unitCostEstimate: Number(unitCostEstimate) || 0,
+          inventoryItemId: inventoryItemId || undefined,
         })),
       });
       toast.success("RFQ created successfully");
@@ -226,10 +268,17 @@ export default function RFQs() {
       description: l.description,
       quantity: l.quantity,
       unitPrice: l.unitCostEstimate || 0,
-      deliveryDays: 3,
+      moq: l.quantity || 1,
+      deliveryDays: 0,
       notes: "",
     }));
     setQuoteForm({
+      currency: "INR",
+      warranty: "",
+      incoterm: "",
+      shippingTerms: "",
+      paymentTerms: "",
+      countryOfOrigin: "",
       validUntil: "",
       notes: "",
       lines: initialLines,
@@ -239,10 +288,62 @@ export default function RFQs() {
 
   const handleSubmitQuote = async () => {
     if (!selectedRfq) return;
+    if (!quoteForm.currency.trim()) {
+      toast.error("Currency is required");
+      return;
+    }
+    if (!quoteForm.validUntil) {
+      toast.error("Validity of quotation is required");
+      return;
+    }
+    if (!quoteForm.warranty.trim()) {
+      toast.error("Warranty is required");
+      return;
+    }
+    if (!quoteForm.incoterm.trim()) {
+      toast.error("Incoterm is required");
+      return;
+    }
+    if (!quoteForm.shippingTerms.trim()) {
+      toast.error("Shipping terms are required");
+      return;
+    }
+    if (!quoteForm.paymentTerms.trim()) {
+      toast.error("Payment terms are required");
+      return;
+    }
+    if (!quoteForm.countryOfOrigin.trim()) {
+      toast.error("Country of origin is required");
+      return;
+    }
+    if (quoteForm.lines.some((l) => !(Number(l.moq) > 0))) {
+      toast.error("MOQ must be at least 1 on every line");
+      return;
+    }
+    if (quoteForm.lines.some((l) => Number.isNaN(Number(l.deliveryDays)) || Number(l.deliveryDays) < 0)) {
+      toast.error("Lead time is required on every line");
+      return;
+    }
     try {
       await api.post(`/rfqs/${selectedRfq.id}/quotes`, {
         rfqId: selectedRfq.id,
-        ...quoteForm,
+        currency: quoteForm.currency.trim(),
+        warranty: quoteForm.warranty.trim(),
+        incoterm: quoteForm.incoterm.trim(),
+        shippingTerms: quoteForm.shippingTerms.trim(),
+        paymentTerms: quoteForm.paymentTerms.trim(),
+        countryOfOrigin: quoteForm.countryOfOrigin.trim(),
+        validUntil: quoteForm.validUntil,
+        notes: quoteForm.notes || null,
+        lines: quoteForm.lines.map((l) => ({
+          rfqLineIndex: l.rfqLineIndex,
+          description: l.description,
+          quantity: Number(l.quantity) || 1,
+          unitPrice: Number(l.unitPrice) || 0,
+          moq: Number(l.moq) || 1,
+          deliveryDays: Number(l.deliveryDays) || 0,
+          notes: l.notes,
+        })),
       });
       toast.success("Supplier quote recorded");
       setQuoteDialogOpen(false);
@@ -252,31 +353,72 @@ export default function RFQs() {
     }
   };
 
+  const handleConvertQuote = async (rfq: SupplierRFQData, quote: SupplierQuoteData) => {
+    setConvertingQuoteId(quote.id);
+    try {
+      const res = await api.convertSupplierQuoteToPo(rfq.id, quote.id);
+      toast.success(`Purchase order ${res.purchaseOrder.reference} created`);
+      refetch();
+      void queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      navigate(`/app/purchase-orders/${res.purchaseOrder.id}`);
+    } catch (err) {
+      toast.apiError(err, { fallback: "Failed to convert quote to purchase order" });
+    } finally {
+      setConvertingQuoteId(null);
+    }
+  };
+
   const filtered = rfqs.filter((r) => {
     const matchSearch =
       !search ||
       r.reference.toLowerCase().includes(search.toLowerCase()) ||
       r.supplierName.toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === "all" || r.status === statusFilter;
-    return matchSearch && matchStatus;
+    const matchQuotes = stage !== "quotes" || (r.quotes?.length ?? 0) > 0;
+    return matchSearch && matchStatus && matchQuotes;
   });
+
+  useEffect(() => {
+    if (stage !== "quotes") return;
+    setExpandedRfqs((current) => {
+      const next = { ...current };
+      for (const rfq of rfqs) {
+        if ((rfq.quotes?.length ?? 0) > 0) next[rfq.id] = true;
+      }
+      return next;
+    });
+  }, [stage, rfqs]);
 
   const stats = {
     total: rfqs.length,
     draft: rfqs.filter((r) => r.status === "draft").length,
     quoted: rfqs.filter((r) => r.status === "quoted").length,
     closed: rfqs.filter((r) => r.status === "closed").length,
+    withQuotes: rfqs.filter((r) => (r.quotes?.length ?? 0) > 0).length,
   };
+  const openPoCount = openPoQuery.data?.meta?.total ?? openPoQuery.data?.data?.length ?? 0;
 
   return (
     <RoleGuard roles={["admin", "inventory", "coordinator", "billing"]}>
       <div className="space-y-5">
         <PageHeader
-          title="Supplier RFQs & Quotes"
-          subtitle="Request quotations from suppliers and compare pricing"
+          title={
+            stage === "overview"
+              ? "Purchase Overview"
+              : stage === "quotes"
+                ? "Supplier quote"
+                : "RFQ"
+          }
+          subtitle={
+            stage === "overview"
+              ? "Buy desk at a glance — Purchase request → RFQ → quote → PO → shipment → customs → GRN → stock."
+              : stage === "quotes"
+                ? "Record supplier offers, then convert an accepted quote to a PO."
+                : "Request quotes from suppliers for stock and parts."
+          }
           icon={<Truck className="h-6 w-6" />}
           actions={
-            canManage ? (
+            canManage && (stage === "rfq" || stage === "overview") ? (
               <Button onClick={() => setCreateOpen(true)}>
                 <Plus className="mr-1.5 h-4 w-4" />
                 New RFQ
@@ -285,6 +427,74 @@ export default function RFQs() {
           }
         />
 
+        <PurchaseStageNav stage={stage} />
+
+        {stage === "overview" ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="Total RFQs" value={String(stats.total)} icon={FileText} />
+              <StatCard label="Draft" value={String(stats.draft)} icon={Clock} accent="warning" />
+              <StatCard label="With quotes" value={String(stats.withQuotes)} icon={Truck} accent="accent" />
+              <StatCard label="Open POs" value={String(openPoCount)} icon={Receipt} />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {canManage ? (
+                <ModuleQuickAction title="New RFQ" hint="Request supplier pricing" icon={Plus} onClick={() => setCreateOpen(true)} />
+              ) : null}
+              <ModuleQuickAction title="Purchase requests" hint="Reorder / parts need" icon={PackageCheck} to="/app/stock-purchase-requests?desk=purchase" />
+              <ModuleQuickAction title="RFQ list" hint={`${stats.total} request(s)`} icon={FileText} to="/app/rfqs?stage=rfq" />
+              <ModuleQuickAction title="Supplier quotes" hint="Compare offers" icon={Truck} to="/app/rfqs?stage=quotes" />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <ModuleQuickAction title="Purchase orders" hint="Ordered qty · price · ETA" icon={ShoppingCart} to="/app/purchase-orders" />
+              <ModuleQuickAction title="Shipment" hint="Freight · courier · tracking" icon={Truck} to="/app/purchase-orders?stage=shipment" />
+              <ModuleQuickAction title="Customs" hint="Duty & import costs" icon={Landmark} to="/app/purchase-orders?stage=customs" />
+              <ModuleQuickAction title="GRN → Stock" hint="Receive & value inventory" icon={PackageCheck} to="/app/purchase-orders?stage=grn" />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <ModuleQuickAction title="Stock (received)" hint="Landed-cost valued POs" icon={PackageCheck} to="/app/purchase-orders?stage=stock" />
+              <ModuleQuickAction title="Purchase returns" hint="Return to supplier" icon={Undo2} to="/app/purchase-returns" />
+            </div>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <div>
+                  <CardTitle className="text-base">Recent RFQs</CardTitle>
+                  <CardDescription className="text-xs">Latest supplier requests</CardDescription>
+                </div>
+                <Button variant="ghost" size="sm" asChild className="h-8 text-xs text-primary">
+                  <Link to="/app/rfqs?stage=rfq">View all →</Link>
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {isLoading ? (
+                  <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+                  </div>
+                ) : rfqs.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">No RFQs yet. Create your first request.</p>
+                ) : (
+                  rfqs.slice(0, 6).map((rfq) => (
+                    <div
+                      key={rfq.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-mono font-semibold text-primary">{rfq.reference}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {rfq.supplierName} · {formatDate(rfq.createdAt)}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="capitalize">
+                        {rfq.status}
+                      </Badge>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </>
+        ) : (
+          <>
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Card className="border-border">
@@ -345,7 +555,9 @@ export default function RFQs() {
           <Card>
             <CardContent className="py-16 text-center">
               <Truck className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
-              <p className="font-medium text-muted-foreground">No RFQs found</p>
+              <p className="font-medium text-muted-foreground">
+                {stage === "quotes" ? "No supplier quotes recorded yet." : "No RFQs found"}
+              </p>
             </CardContent>
           </Card>
         ) : (
@@ -425,22 +637,54 @@ export default function RFQs() {
                           <div className="space-y-2">
                             {rfq.quotes.map((q) => {
                               const total = (q.lines || []).reduce((acc, curr) => acc + (curr.quantity * curr.unitPrice), 0);
+                              const currency = q.currency || "INR";
                               return (
                                 <div key={q.id} className="p-3 rounded-md border bg-background text-sm flex flex-col gap-2">
-                                  <div className="flex justify-between items-center text-xs text-muted-foreground">
+                                  <div className="flex flex-wrap justify-between items-center gap-2 text-xs text-muted-foreground">
                                     <span>Submitted: {formatDate(q.createdAt)}</span>
                                     {q.validUntil && <span>Valid until: {formatDate(q.validUntil)}</span>}
-                                    <span className="font-bold text-foreground text-sm">Total Quote: {formatCurrency(total)}</span>
+                                    <span className="font-bold text-foreground text-sm">
+                                      Total Quote: {formatCurrency(total)} ({currency})
+                                    </span>
+                                  </div>
+                                  <div className="grid gap-1 text-xs sm:grid-cols-2">
+                                    {q.currency && <span><span className="text-muted-foreground">Currency:</span> {q.currency}</span>}
+                                    {q.incoterm && <span><span className="text-muted-foreground">Incoterm:</span> {q.incoterm}</span>}
+                                    {q.shippingTerms && <span><span className="text-muted-foreground">Shipping:</span> {q.shippingTerms}</span>}
+                                    {q.paymentTerms && <span><span className="text-muted-foreground">Payment:</span> {q.paymentTerms}</span>}
+                                    {q.warranty && <span><span className="text-muted-foreground">Warranty:</span> {q.warranty}</span>}
+                                    {q.countryOfOrigin && <span><span className="text-muted-foreground">Origin:</span> {q.countryOfOrigin}</span>}
                                   </div>
                                   <div className="text-xs space-y-1">
                                     {(q.lines || []).map((ql, idx) => (
-                                      <div key={idx} className="flex justify-between border-b border-muted py-1">
+                                      <div key={idx} className="flex flex-wrap justify-between gap-2 border-b border-muted py-1">
                                         <span>Item #{ql.rfqLineIndex + 1} ({ql.quantity} pcs)</span>
-                                        <span className="tabular-nums font-mono">{formatCurrency(ql.unitPrice)} / unit</span>
+                                        <span className="tabular-nums font-mono">
+                                          {formatCurrency(ql.unitPrice)} / unit
+                                          {ql.moq != null ? ` · MOQ ${ql.moq}` : ""}
+                                          {ql.deliveryDays != null ? ` · Lead ${ql.deliveryDays}d` : ""}
+                                        </span>
                                       </div>
                                     ))}
                                   </div>
                                   {q.notes && <p className="text-xs text-muted-foreground italic">Notes: {q.notes}</p>}
+                                  {canConvertToPo && rfq.status !== "cancelled" ? (
+                                    <div className="pt-1">
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={convertingQuoteId === q.id}
+                                        onClick={() => void handleConvertQuote(rfq, q)}
+                                      >
+                                        {convertingQuoteId === q.id ? (
+                                          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                                        ) : (
+                                          <ShoppingCart className="mr-1 h-3.5 w-3.5" />
+                                        )}
+                                        Convert to PO
+                                      </Button>
+                                    </div>
+                                  ) : null}
                                 </div>
                               );
                             })}
@@ -453,6 +697,8 @@ export default function RFQs() {
               );
             })}
           </div>
+        )}
+          </>
         )}
 
         {/* Create RFQ Dialog */}
@@ -677,58 +923,173 @@ export default function RFQs() {
 
         {/* Record Quote Dialog */}
         <Dialog open={quoteDialogOpen} onOpenChange={setQuoteDialogOpen}>
-          <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <DollarSign className="h-5 w-5 text-primary" />
                 Record Supplier Quotation for {selectedRfq?.reference}
               </DialogTitle>
               <DialogDescription>
-                Enter prices received from {selectedRfq?.supplierName}.
+                Enter commercial terms and prices received from {selectedRfq?.supplierName}.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
-              <div className="space-y-1">
-                <Label>Quote Validity Date</Label>
-                <Input
-                  type="date"
-                  value={quoteForm.validUntil}
-                  onChange={(e) => setQuoteForm((p) => ({ ...p, validUntil: e.target.value }))}
-                />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>
+                    Currency <RequiredMark />
+                  </Label>
+                  <Select
+                    value={quoteForm.currency}
+                    onValueChange={(value) => setQuoteForm((p) => ({ ...p, currency: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select currency" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="INR">INR</SelectItem>
+                      <SelectItem value="USD">USD</SelectItem>
+                      <SelectItem value="EUR">EUR</SelectItem>
+                      <SelectItem value="GBP">GBP</SelectItem>
+                      <SelectItem value="AED">AED</SelectItem>
+                      <SelectItem value="CNY">CNY</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>
+                    Validity of quotation <RequiredMark />
+                  </Label>
+                  <Input
+                    type="date"
+                    value={quoteForm.validUntil}
+                    onChange={(e) => setQuoteForm((p) => ({ ...p, validUntil: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>
+                    Incoterm <RequiredMark />
+                  </Label>
+                  <Select
+                    value={quoteForm.incoterm || undefined}
+                    onValueChange={(value) => setQuoteForm((p) => ({ ...p, incoterm: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Incoterm" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="EXW">EXW</SelectItem>
+                      <SelectItem value="FCA">FCA</SelectItem>
+                      <SelectItem value="FOB">FOB</SelectItem>
+                      <SelectItem value="CFR">CFR</SelectItem>
+                      <SelectItem value="CIF">CIF</SelectItem>
+                      <SelectItem value="CPT">CPT</SelectItem>
+                      <SelectItem value="CIP">CIP</SelectItem>
+                      <SelectItem value="DAP">DAP</SelectItem>
+                      <SelectItem value="DPU">DPU</SelectItem>
+                      <SelectItem value="DDP">DDP</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>
+                    Country of origin <RequiredMark />
+                  </Label>
+                  <Input
+                    placeholder="e.g. India, China, Germany"
+                    value={quoteForm.countryOfOrigin}
+                    onChange={(e) => setQuoteForm((p) => ({ ...p, countryOfOrigin: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>
+                    Warranty <RequiredMark />
+                  </Label>
+                  <Input
+                    placeholder="e.g. 12 months from delivery"
+                    value={quoteForm.warranty}
+                    onChange={(e) => setQuoteForm((p) => ({ ...p, warranty: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>
+                    Payment terms <RequiredMark />
+                  </Label>
+                  <Input
+                    placeholder="e.g. Net 30, 50% advance"
+                    value={quoteForm.paymentTerms}
+                    onChange={(e) => setQuoteForm((p) => ({ ...p, paymentTerms: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label>
+                    Shipping terms <RequiredMark />
+                  </Label>
+                  <Input
+                    placeholder="e.g. Door delivery, freight collect"
+                    value={quoteForm.shippingTerms}
+                    onChange={(e) => setQuoteForm((p) => ({ ...p, shippingTerms: e.target.value }))}
+                  />
+                </div>
               </div>
 
               <div className="space-y-2">
-                <Label>Quoted Unit Prices</Label>
+                <Label>Line items (unit price, MOQ, lead time)</Label>
                 {quoteForm.lines.map((ql, idx) => (
-                  <div key={idx} className="p-2 border rounded-md space-y-1 text-sm bg-muted/20">
+                  <div key={idx} className="p-3 border rounded-md space-y-2 text-sm bg-muted/20">
                     <p className="font-semibold">{ql.description || `Item #${idx + 1}`}</p>
-                    <div className="flex gap-2">
-                      <div className="flex-1">
-                        <Label className="text-xs text-muted-foreground">Unit Price (₹)</Label>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <div>
+                        <Label className="text-xs text-muted-foreground">
+                          Unit price <RequiredMark />
+                        </Label>
                         <Input
                           type="number"
+                          min={0}
+                          step="0.01"
                           value={ql.unitPrice}
                           onChange={(e) => {
                             const val = Number(e.target.value) || 0;
                             setQuoteForm((p) => {
                               const updated = [...p.lines];
-                              updated[idx].unitPrice = val;
+                              updated[idx] = { ...updated[idx], unitPrice: val };
                               return { ...p, lines: updated };
                             });
                           }}
                         />
                       </div>
-                      <div className="w-28">
-                        <Label className="text-xs text-muted-foreground">Delivery (Days)</Label>
+                      <div>
+                        <Label className="text-xs text-muted-foreground">
+                          MOQ <RequiredMark />
+                        </Label>
                         <Input
                           type="number"
-                          value={ql.deliveryDays || 0}
+                          min={1}
+                          value={ql.moq}
                           onChange={(e) => {
                             const val = Number(e.target.value) || 0;
                             setQuoteForm((p) => {
                               const updated = [...p.lines];
-                              updated[idx].deliveryDays = val;
+                              updated[idx] = { ...updated[idx], moq: val };
+                              return { ...p, lines: updated };
+                            });
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground">
+                          Lead time (days) <RequiredMark />
+                        </Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={ql.deliveryDays}
+                          onChange={(e) => {
+                            const val = Number(e.target.value) || 0;
+                            setQuoteForm((p) => {
+                              const updated = [...p.lines];
+                              updated[idx] = { ...updated[idx], deliveryDays: val };
                               return { ...p, lines: updated };
                             });
                           }}
@@ -742,7 +1103,7 @@ export default function RFQs() {
               <div className="space-y-1">
                 <Label>Quote Notes</Label>
                 <Textarea
-                  placeholder="Warranty terms, tax inclusion..."
+                  placeholder="Additional remarks..."
                   value={quoteForm.notes}
                   onChange={(e) => setQuoteForm((p) => ({ ...p, notes: e.target.value }))}
                 />

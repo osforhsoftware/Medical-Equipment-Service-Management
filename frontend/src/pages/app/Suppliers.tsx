@@ -33,6 +33,13 @@ const supplierSchema = z.object({
   email: fieldRules.email(false),
   phone: fieldRules.phone(false),
   category: fieldRules.optionalString(),
+  currency: fieldRules.optionalString(),
+  paymentTerms: fieldRules.optionalString(),
+  deliveryLeadDays: z.string().refine((v) => {
+    if (!v.trim()) return true;
+    const n = parseInt(v, 10);
+    return !Number.isNaN(n) && n >= 0 && n <= 3650;
+  }, "Lead time must be between 0 and 3650 days."),
   rating: z.string().refine((v) => {
     if (!v.trim()) return true;
     const n = parseFloat(v);
@@ -40,8 +47,28 @@ const supplierSchema = z.object({
   }, "Rating must be between 0 and 5."),
 });
 
-type FormState = { name: string; contact: string; email: string; phone: string; category: string; rating: string };
-const emptyForm: FormState = { name: "", contact: "", email: "", phone: "", category: "", rating: "0" };
+type FormState = {
+  name: string;
+  contact: string;
+  email: string;
+  phone: string;
+  category: string;
+  currency: string;
+  paymentTerms: string;
+  deliveryLeadDays: string;
+  rating: string;
+};
+const emptyForm: FormState = {
+  name: "",
+  contact: "",
+  email: "",
+  phone: "",
+  category: "",
+  currency: "INR",
+  paymentTerms: "",
+  deliveryLeadDays: "",
+  rating: "0",
+};
 
 export default function Suppliers() {
   const queryClient = useQueryClient();
@@ -107,6 +134,9 @@ export default function Suppliers() {
         email: form.email.trim(),
         phone: form.phone.trim(),
         category: form.category.trim(),
+        currency: form.currency.trim().toUpperCase() || "INR",
+        paymentTerms: form.paymentTerms.trim() || null,
+        deliveryLeadDays: form.deliveryLeadDays.trim() ? parseInt(form.deliveryLeadDays, 10) : null,
         rating: parseFloat(form.rating) || 0,
       });
       toast({ title: "Supplier added", description: `${form.name.trim()} has been added.` });
@@ -166,6 +196,19 @@ export default function Suppliers() {
     },
     { key: "phone", header: "Phone", render: (s) => <span className="text-sm text-muted-foreground">{s.phone}</span> },
     {
+      key: "currency",
+      header: "Terms",
+      render: (s) => (
+        <div className="text-sm">
+          <p>{s.currency || "INR"}</p>
+          <p className="text-xs text-muted-foreground">
+            {s.paymentTerms?.trim() || "—"}
+            {s.deliveryLeadDays != null ? ` · ${s.deliveryLeadDays}d lead` : ""}
+          </p>
+        </div>
+      ),
+    },
+    {
       key: "rating",
       header: "Rating",
       render: (s) => (
@@ -196,7 +239,7 @@ export default function Suppliers() {
       <div className="space-y-6">
         <PageHeader
           title="Suppliers"
-          description="Parts vendors and OEM suppliers."
+          description="Supplier master — legal name, contacts, currency, payment terms, and delivery lead time."
           actions={
             <Button onClick={openCreate} variant="brand">
               <Plus className="mr-1 h-4 w-4" /> Add Supplier
@@ -328,6 +371,45 @@ export default function Suppliers() {
                 />
                 {shouldShow("rating") && <FormFieldError field="rating" message={errors.rating} />}
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="supplier-currency">Currency</Label>
+                <Input
+                  id="supplier-currency"
+                  value={form.currency}
+                  onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })}
+                  maxLength={10}
+                  placeholder="INR"
+                />
+              </div>
+              <div className="grid gap-2" data-field="deliveryLeadDays">
+                <Label htmlFor="supplier-lead">Delivery lead time (days)</Label>
+                <Input
+                  id="supplier-lead"
+                  type="number"
+                  min="0"
+                  value={form.deliveryLeadDays}
+                  onChange={(e) => {
+                    const next = { ...form, deliveryLeadDays: e.target.value };
+                    setForm(next);
+                    handleChange("deliveryLeadDays", next);
+                  }}
+                  onBlur={() => handleBlur("deliveryLeadDays", form)}
+                  className={fieldErrorClass(shouldShow("deliveryLeadDays"))}
+                  {...fieldAria("deliveryLeadDays", shouldShow("deliveryLeadDays") ? errors.deliveryLeadDays : null)}
+                />
+                {shouldShow("deliveryLeadDays") && <FormFieldError field="deliveryLeadDays" message={errors.deliveryLeadDays} />}
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="supplier-payment-terms">Payment terms</Label>
+              <Input
+                id="supplier-payment-terms"
+                value={form.paymentTerms}
+                onChange={(e) => setForm({ ...form, paymentTerms: e.target.value })}
+                placeholder="Net 30 / LC / …"
+              />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>

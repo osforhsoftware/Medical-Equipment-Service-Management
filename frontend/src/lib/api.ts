@@ -207,6 +207,7 @@ export interface CreateUserInput {
   phone?: string;
   isActive?: boolean;
   branchId?: string;
+  customerId?: string;
   permissions?: {
     mode: "crud" | "read";
     modules?: Record<string, "none" | "read" | "crud">;
@@ -223,6 +224,7 @@ export interface UpdateUserInput {
   phone?: string | null;
   isActive?: boolean;
   branchId?: string | null;
+  customerId?: string | null;
   password?: string;
   permissions?: {
     mode: "crud" | "read";
@@ -255,6 +257,7 @@ export interface BackendCustomer {
   country: string;
   licenseGst?: string | null;
   note?: string | null;
+  restrictions?: string | null;
   paymentTerms?: string | null;
   creditLimit?: number | null;
   outstandingBalance?: number | null;
@@ -269,6 +272,16 @@ export interface BackendCustomer {
   updatedAt: string;
 }
 
+export interface BackendCustomerContact {
+  id: string;
+  customerId: string;
+  name: string;
+  role: string;
+  email: string;
+  phone: string;
+  isPrimary: boolean;
+}
+
 export interface CreateCustomerInput {
   name: string;
   type?: string;
@@ -281,6 +294,7 @@ export interface CreateCustomerInput {
   country: string;
   licenseGst?: string | null;
   note?: string | null;
+  restrictions?: string | null;
   paymentTerms?: string | null;
   creditLimit?: number | null;
   priceCategory?: string | null;
@@ -363,6 +377,17 @@ export interface UpdateTaxonomyInput {
   parentId?: string | null;
   sortOrder?: number;
   isActive?: boolean;
+}
+
+export interface PortalDocument {
+  id: string;
+  fileId: string;
+  entityType: string;
+  entityId: string;
+  originalName?: string | null;
+  downloadUrl: string;
+  kind: string;
+  reference?: string | null;
 }
 
 export interface CreateEquipmentInput {
@@ -548,6 +573,9 @@ export interface BackendSupplier {
   email: string;
   phone: string;
   category: string;
+  currency?: string;
+  paymentTerms?: string | null;
+  deliveryLeadDays?: number | null;
   rating: string | number;
   openOrders: number;
   createdAt: string;
@@ -560,6 +588,9 @@ export interface CreateSupplierInput {
   email: string;
   phone: string;
   category: string;
+  currency?: string;
+  paymentTerms?: string | null;
+  deliveryLeadDays?: number | null;
   rating?: number;
 }
 
@@ -757,6 +788,11 @@ export interface BackendEstimate {
   revision: number;
   terms?: string | null;
   notes?: string | null;
+  currency?: string | null;
+  warranty?: string | null;
+  estimatedCompletion?: string | null;
+  salespersonId?: string | null;
+  preparedBy?: string | null;
   sentAt?: string | null;
   approvedAt?: string | null;
   lineItems?: BackendEstimateLine[];
@@ -850,6 +886,8 @@ export interface BackendServiceJob {
   scheduledFor: string;
   progress: number;
   additionalFields?: { label: string; value: string }[] | null;
+  originalJobId?: string | null;
+  isRework?: boolean;
   stageDetails?: {
     qa?: {
       result?: "pass" | "fail";
@@ -869,8 +907,73 @@ export interface BackendServiceJob {
   workLogs?: BackendJobWorkLog[];
   extras?: BackendJobExtra[];
   photos?: BackendJobPhoto[];
+  stockDeductions?: BackendJobStockDeduction[];
+  partsRequests?: BackendJobPartsRequest[];
+  workbench?: BackendJobWorkbench | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BackendJobWorkbench {
+  complaint: string | null;
+  inspectionDiagnosis: string | null;
+  approvedRepairScope: { description: string; quantity: number; type: string }[];
+  priority: string | null;
+  targetDate: string | null;
+  customerRestrictions: string | null;
+  equipment: {
+    assetTag: string | null;
+    model: string | null;
+    serialNumber: string | null;
+    location: string | null;
+  } | null;
+}
+
+export interface BackendJobPartsRequestLine {
+  id: string;
+  requestId: string;
+  inventoryItemId: string;
+  itemName: string;
+  sku: string;
+  qtyRequested: number;
+  qtyApproved: number;
+  qtyIssued: number;
+  qtyConsumed: number;
+  qtyReturned: number;
+  qtyScrapped: number;
+  unitCost?: string | number;
+  sellingPrice?: string | number;
+  batchNumber?: string | null;
+  serialNumbers?: string | null;
+  issuedRemaining?: number;
+  unusedIssued?: number;
+  inventoryItem?: BackendInventoryItem;
+}
+
+export interface BackendJobPartsRequest {
+  id: string;
+  jobId: string;
+  notes: string;
+  status: string;
+  requestedBy: string;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+  rejectedReason?: string | null;
+  createdAt: string;
+  lines?: BackendJobPartsRequestLine[];
+  job?: { id: string; reference: string; customerName: string; engineer: string; status: string };
+}
+
+export interface BackendJobStockDeduction {
+  id: string;
+  inventoryItemId: string;
+  itemName: string;
+  sku: string;
+  quantity: number;
+  deductedBy: string;
+  createdAt: string;
+  returnedQuantity?: number;
+  returnableQuantity?: number;
 }
 
 export interface BackendJobAssignment {
@@ -986,6 +1089,8 @@ export interface BackendInventoryItem {
   branchId: string;
   inStock: number;
   reserved: number;
+  issued?: number;
+  damaged?: number;
   /** Computed: inStock − reserved. Added in Phase 1; additive, non-breaking. */
   available?: number;
   reorderLevel: number;
@@ -1002,6 +1107,7 @@ export interface BackendInventoryItem {
   supplierId?: string | null;
   images?: { id: string; fileId: string; file?: { id: string; originalName: string; mimeType: string } }[];
   additionalFields?: { label: string; value: string }[] | null;
+  status?: "active" | "inactive" | string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1009,7 +1115,7 @@ export interface BackendInventoryItem {
 export interface CreateInventoryInput {
   sku?: string;
   name: string;
-  itemClass?: "spare_part" | "consumable";
+  itemClass?: "spare_part" | "consumable" | "equipment";
   category?: string;
   subcategory?: string | null;
   description?: string | null;
@@ -1049,6 +1155,18 @@ export interface BackendStockPurchaseRequest {
   updatedAt: string;
 }
 
+export interface BackendPurchaseShipment {
+  id: string;
+  purchaseOrderId: string;
+  courier?: string | null;
+  trackingNumber?: string | null;
+  freightCost?: string | number | null;
+  customsInfo?: string | null;
+  etd?: string | null;
+  eta?: string | null;
+  notes?: string | null;
+}
+
 export interface BackendPurchaseOrder {
   id: string;
   tenantId: string;
@@ -1056,13 +1174,20 @@ export interface BackendPurchaseOrder {
   branchId?: string | null;
   reference: string;
   supplier: string;
+  supplierReference?: string | null;
+  currency?: string;
   items: number;
   total: string | number;
+  freightCost?: string | number | null;
+  customsCost?: string | number | null;
+  insuranceCost?: string | number | null;
+  landedCostTotal?: string | number | null;
   status: string;
   expectedDate: string;
   lineItems?: BackendPurchaseOrderLine[];
   receipts?: BackendPurchaseReceipt[];
   purchaseReturns?: BackendPurchaseReturn[];
+  shipment?: BackendPurchaseShipment | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1748,6 +1873,31 @@ export const api = {
       method: "POST",
     }),
 
+  listCustomerContacts: (customerId: string) =>
+    request<BackendCustomerContact[]>(`/api/customers/${customerId}/contacts`),
+
+  createCustomerContact: (
+    customerId: string,
+    data: { name: string; role?: string; email?: string; phone?: string; isPrimary?: boolean },
+  ) =>
+    request<BackendCustomerContact>(`/api/customers/${customerId}/contacts`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateCustomerContact: (
+    customerId: string,
+    contactId: string,
+    data: { name?: string; role?: string; email?: string; phone?: string; isPrimary?: boolean },
+  ) =>
+    request<BackendCustomerContact>(`/api/customers/${customerId}/contacts/${contactId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteCustomerContact: (customerId: string, contactId: string) =>
+    request<void>(`/api/customers/${customerId}/contacts/${contactId}`, { method: "DELETE" }),
+
   listEquipment: (params?: EquipmentListParams) =>
     requestPaginated<BackendEquipment>(`/api/equipment${buildListQuery(params)}`),
 
@@ -1975,6 +2125,12 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  createJobRework: (id: string, note?: string) =>
+    request<BackendServiceJob>(`/api/jobs/${id}/rework`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+
   updateJob: (id: string, data: UpdateJobInput) =>
     request<BackendServiceJob>(`/api/jobs/${id}`, {
       method: "PUT",
@@ -2004,10 +2160,13 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  requestJobParts: (id: string, notes: string) =>
+  requestJobParts: (
+    id: string,
+    notes: string | { notes: string; lines?: { inventoryItemId: string; quantity: number; batchNumber?: string; serialNumbers?: string }[] },
+  ) =>
     request<{ job: BackendServiceJob }>(`/api/jobs/${id}/parts-requests`, {
       method: "POST",
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify(typeof notes === "string" ? { notes } : notes),
     }),
 
   captureJobSignature: (id: string, data: { customerName: string; signatureData?: string }) =>
@@ -2016,10 +2175,37 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  deductJobStock: (id: string, data: { inventoryItemId: string; quantity: number }) =>
+  deductJobStock: (id: string, data: { inventoryItemId: string; quantity: number; lineId?: string; batchNumber?: string; serialNumbers?: string }) =>
     request<{ job: BackendServiceJob }>(`/api/jobs/${id}/deduct-stock`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  returnJobStock: (id: string, data: { inventoryItemId: string; quantity: number; disposition?: "return" | "scrap"; lineId?: string; batchNumber?: string; serialNumbers?: string }) =>
+    request<{ job: BackendServiceJob }>(`/api/jobs/${id}/return-stock`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listPartsRequests: (status?: string) =>
+    request<BackendJobPartsRequest[]>(`/api/inventory/parts-requests${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+
+  approvePartsRequest: (requestId: string, data?: { lines?: { lineId: string; qtyApproved: number }[] }) =>
+    request<BackendJobPartsRequest>(`/api/inventory/parts-requests/${requestId}/approve`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    }),
+
+  rejectPartsRequest: (requestId: string, reason?: string) =>
+    request<BackendJobPartsRequest>(`/api/inventory/parts-requests/${requestId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+
+  issuePartsRequest: (requestId: string, data?: { lines?: { lineId: string; quantity: number; batchNumber?: string; serialNumbers?: string }[] }) =>
+    request<BackendJobPartsRequest>(`/api/inventory/parts-requests/${requestId}/issue`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
     }),
 
   getJobActivities: (id: string) =>
@@ -2047,6 +2233,15 @@ export const api = {
     request<BackendInventoryItem>("/api/inventory", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  /** Soft-delete inventory product (status → inactive / trash). */
+  deleteInventoryItem: (id: string) =>
+    request<BackendInventoryItem>(`/api/inventory/${id}`, { method: "DELETE" }),
+
+  restoreInventoryItem: (id: string) =>
+    request<BackendInventoryItem>(`/api/inventory/${id}/restore`, {
+      method: "POST",
     }),
 
   adjustInventoryStock: (id: string, quantityDelta: number, reason: string) =>
@@ -2103,6 +2298,58 @@ export const api = {
 
   getPurchaseOrder: (id: string) =>
     request<BackendPurchaseOrder>(`/api/purchase-orders/${id}`),
+
+  updatePurchaseOrder: (
+    id: string,
+    data: Partial<{
+      supplier: string;
+      supplierReference: string | null;
+      currency: string;
+      items: number;
+      total: number;
+      expectedDate: string;
+      status: string;
+      freightCost: number | null;
+      customsCost: number | null;
+      insuranceCost: number | null;
+    }>,
+  ) =>
+    request<BackendPurchaseOrder>(`/api/purchase-orders/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  upsertPurchaseShipment: (
+    id: string,
+    data: {
+      courier?: string | null;
+      trackingNumber?: string | null;
+      freightCost?: number | null;
+      customsInfo?: string | null;
+      etd?: string | null;
+      eta?: string | null;
+      notes?: string | null;
+    },
+  ) =>
+    request<BackendPurchaseOrder>(`/api/domain/purchase-orders/${id}/shipment`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  updatePurchaseLandedCosts: (
+    id: string,
+    data: {
+      freightCost?: number | null;
+      customsCost?: number | null;
+      insuranceCost?: number | null;
+      supplierReference?: string | null;
+      currency?: string;
+    },
+  ) =>
+    request<BackendPurchaseOrder>(`/api/domain/purchase-orders/${id}/landed-costs`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
 
   listStockTransfers: () => request<BackendStockTransfer[]>("/api/stock-transfers"),
 
@@ -2361,6 +2608,9 @@ export const api = {
       discount: number;
       terms?: string | null;
       notes?: string | null;
+      currency?: string | null;
+      warranty?: string | null;
+      estimatedCompletion?: string | null;
       sendForApproval?: boolean;
       status?: "draft" | "pendingAdminApproval";
     },
@@ -2381,16 +2631,28 @@ export const api = {
       body: JSON.stringify({ decision, note, ...options }),
     }),
 
-  /** Customer-scoped portal aggregate (equipment, tickets, estimates, invoices). */
+  /** Customer-scoped portal aggregate (this customer's service equipment only). */
   getCustomerPortal: () =>
     request<{
-      customer: { id: string; name: string };
+      customer: { id: string; name: string; reference?: string };
       equipment: BackendEquipment[];
-      requests: BackendServiceRequest[];
+      requests: Array<BackendServiceRequest & { jobStatus?: string | null }>;
       estimates: BackendEstimate[];
       invoices: BackendInvoice[];
-      documents: unknown[];
+      documents: PortalDocument[];
     }>("/api/domain/portal"),
+
+  createPortalServiceRequest: (data: {
+    equipmentId: string;
+    type?: string;
+    typeOther?: string | null;
+    priority: string;
+    description: string;
+  }) =>
+    request<BackendServiceRequest>("/api/domain/portal/requests", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   assignJobStaff: (id: string, data: { userId: string; role: string; isLead: boolean }) =>
     request<BackendJobAssignment>(`/api/domain/jobs/${id}/assignments`, {
@@ -2450,14 +2712,31 @@ export const api = {
   createItemizedPurchaseOrder: (data: {
     supplierId?: string | null;
     supplier: string;
+    supplierReference?: string | null;
+    currency?: string;
     branchId?: string | null;
     expectedDate: string;
+    freightCost?: number | null;
+    customsCost?: number | null;
+    insuranceCost?: number | null;
     lines: { inventoryItemId?: string | null; sku: string; description: string; quantityOrdered: number; unitCost: number; taxRate: number }[];
   }) =>
     request<BackendPurchaseOrder>("/api/domain/purchase-orders", {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  convertSalesEnquiryToQuotation: (enquiryId: string) =>
+    request<{ id: string; reference: string }>(`/api/sales-enquiries/${enquiryId}/convert-to-quotation`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  convertSupplierQuoteToPo: (rfqId: string, quoteId: string) =>
+    request<{ purchaseOrder: BackendPurchaseOrder; rfqId: string; quoteId: string }>(
+      `/api/rfqs/${rfqId}/quotes/${quoteId}/convert-to-po`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
 
   receivePurchaseOrder: (
     id: string,

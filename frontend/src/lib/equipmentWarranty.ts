@@ -50,6 +50,31 @@ export function hasEquipmentWarrantyCoverage(equipment: EquipmentWarrantyLike | 
   return machine || service;
 }
 
+function isWarrantyEndActive(
+  end: string | null | undefined,
+  disabled: boolean | null | undefined,
+): boolean {
+  if (disabled) return false;
+  if (!end?.trim()) return false;
+  const endDate = new Date(end);
+  if (Number.isNaN(endDate.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  endDate.setHours(23, 59, 59, 999);
+  return endDate.getTime() >= today.getTime();
+}
+
+/** True when machine or service warranty end date is today or in the future. */
+export function isEquipmentUnderActiveWarranty(
+  equipment: EquipmentWarrantyLike | null | undefined,
+): boolean {
+  if (!equipment) return false;
+  return (
+    isWarrantyEndActive(equipment.warrantyEnd, equipment.noMachineWarranty) ||
+    isWarrantyEndActive(equipment.serviceWarrantyEnd, equipment.noServiceWarranty)
+  );
+}
+
 function toneForEndDate(endValue: string | null | undefined): "ok" | "warn" | "danger" | "muted" {
   if (!endValue) return "muted";
   const end = new Date(endValue);

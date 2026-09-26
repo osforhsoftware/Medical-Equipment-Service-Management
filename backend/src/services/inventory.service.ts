@@ -2,6 +2,8 @@ import { inventoryRepository } from "@/repositories/inventory.repository";
 import { taxonomyService } from "@/services/taxonomy.service";
 import { AppError } from "@/middleware/errorHandler";
 import { prisma } from "@/db/prisma";
+import { Prisma } from "@prisma/client";
+import { normalizeAdditionalFields } from "@/lib/additionalFields";
 import { getDefaultBranchId } from "@/utils/defaultBranch";
 import {
   inferItemClassFromCategory,
@@ -33,6 +35,7 @@ type CreateInventoryData = {
   supplier?: string;
   supplierId?: string | null;
   imageFileIds?: string[];
+  additionalFields?: { label: string; value: string }[] | null;
 };
 
 function resolveItemClass(value: unknown, category?: string | null): InventoryItemClass {
@@ -41,10 +44,13 @@ function resolveItemClass(value: unknown, category?: string | null): InventoryIt
 }
 
 export class InventoryService {
-  private withAvailability<T extends { inStock: number; reserved: number }>(item: T) {
+  private withAvailability<T extends { inStock: number; reserved: number; issued?: number; damaged?: number; additionalFields?: unknown }>(item: T) {
     return {
       ...item,
+      issued: item.issued ?? 0,
+      damaged: item.damaged ?? 0,
       available: Math.max(0, item.inStock - item.reserved),
+      additionalFields: normalizeAdditionalFields(item.additionalFields) ?? [],
     };
   }
 
@@ -58,7 +64,7 @@ export class InventoryService {
 
   async getAll(tenantId: string) {
     const items = await prisma.inventoryItem.findMany({
-      where: { tenantId },
+      where: { tenantId, status: "active" },
       include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
       orderBy: { name: "asc" },
       take: 100,
@@ -145,6 +151,7 @@ export class InventoryService {
           unitOfMeasure: rest.unitOfMeasure ?? "pcs",
           supplier: rest.supplier?.trim() || "",
           supplierId: rest.supplierId ?? null,
+          additionalFields: normalizeAdditionalFields(rest.additionalFields) ?? Prisma.JsonNull,
         },
       });
       if (imageFileIds?.length) {
@@ -222,6 +229,9 @@ export class InventoryService {
           ...(safe.unitOfMeasure != null ? { unitOfMeasure: safe.unitOfMeasure } : {}),
           ...(safe.supplier != null ? { supplier: safe.supplier } : {}),
           ...(safe.supplierId !== undefined ? { supplierId: safe.supplierId } : {}),
+          ...(safe.additionalFields !== undefined
+            ? { additionalFields: normalizeAdditionalFields(safe.additionalFields) ?? Prisma.JsonNull }
+            : {}),
         },
       });
       if (Array.isArray(imageFileIds)) {
@@ -284,9 +294,25 @@ export class InventoryService {
     });
   }
 
+  /**
+   * Soft-delete an inventory product (status → inactive / trash).
+   * Related reservations, movements, PO lines, and sales lines stay linked.
+   */
   async delete(id: string, tenantId: string) {
-    await this.getById(id, tenantId);
-    return inventoryRepository.delete(id, tenantId);
+    const existing = await this.getById(id, tenantId);
+    if (existing.status === "inactive") {
+      throw new AppError("Inventory item is already in trash", 400);
+    }
+    const removed = await inventoryRepository.softDelete(id, tenantId);
+    return this.withAvailability(removed);
+  }
+
+  async restore(id: string, tenantId: string) {
+    const existing = await this.getById(id, tenantId);
+    if (existing.status === "active") {
+      throw new AppError("Inventory item is already active", 400);
+    }
+    return this.withAvailability(await inventoryRepository.restore(id, tenantId));
   }
 }
 

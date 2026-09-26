@@ -67,6 +67,8 @@ model Tenant {
   supplierRFQs           SupplierRFQ[]
   supplierQuotes         SupplierQuote[]
   warrantyClaims         WarrantyClaim[]
+  customerContacts       CustomerContact[]
+  purchaseShipments      PurchaseShipment[]
 
   @@map("tenants")
 }
@@ -243,6 +245,7 @@ model Customer {
   country        String       @default("")
   licenseGst       String?      @map("license_gst")
   note             String?      @map("note")
+  restrictions     String?      @db.Text
   paymentTerms     String?      @map("payment_terms")
   creditLimit      Decimal?     @map("credit_limit") @db.Decimal(12, 2)
   priceCategory    String?      @map("price_category")
@@ -263,6 +266,7 @@ model Customer {
   invoices        Invoice[]
   salesOrders     SalesOrder[]
   referrals       Referral[]
+  contacts        CustomerContact[]
 
   @@unique([tenantId, reference])
   @@index([tenantId])
@@ -275,6 +279,25 @@ model Customer {
 enum EntityStatus {
   active
   inactive
+}
+
+model CustomerContact {
+  id         String   @id @default(cuid())
+  tenantId   String   @map("tenant_id")
+  customerId String   @map("customer_id")
+  name       String
+  role       String   @default("")
+  email      String   @default("")
+  phone      String   @default("")
+  isPrimary  Boolean  @default(false) @map("is_primary")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, customerId])
+  @@map("customer_contacts")
 }
 
 // ── Equipment ─────────────────────────────────────────────────────────────────
@@ -634,6 +657,9 @@ model Estimate {
   revision         Int            @default(1)
   terms            String?        @db.Text
   notes            String?        @db.Text
+  currency         String         @default("INR")
+  warranty         String?        @db.Text
+  estimatedCompletion DateTime?   @map("estimated_completion")
   salespersonId    String?        @map("salesperson_id")
   sentAt           DateTime?      @map("sent_at")
   approvedAt       DateTime?      @map("approved_at")
@@ -825,10 +851,14 @@ model ServiceJob {
   billingVerifiedAt  DateTime?   @map("billing_verified_at")
   billingVerifiedBy  String?     @map("billing_verified_by")
   completedAt        DateTime?   @map("completed_at")
+  originalJobId      String?     @map("original_job_id")
+  isRework           Boolean     @default(false) @map("is_rework")
   createdAt          DateTime    @default(now()) @map("created_at")
   updatedAt          DateTime    @updatedAt @map("updated_at")
 
   tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  originalJob     ServiceJob?         @relation("JobRework", fields: [originalJobId], references: [id], onDelete: SetNull)
+  reworkJobs      ServiceJob[]        @relation("JobRework")
   serviceRequest  ServiceRequest?     @relation(fields: [serviceRequestId], references: [id], onDelete: SetNull)
   estimate        Estimate?           @relation(fields: [estimateId], references: [id], onDelete: SetNull)
   customer        Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
@@ -947,17 +977,50 @@ model JobPhoto {
 }
 
 model JobPartsRequest {
-  id          String   @id @default(cuid())
-  jobId       String   @map("job_id")
-  notes       String
-  status      String   @default("pending")
-  requestedBy String   @map("requested_by")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id             String    @id @default(cuid())
+  jobId          String    @map("job_id")
+  notes          String
+  status         String    @default("pending")
+  requestedBy    String    @map("requested_by")
+  approvedBy     String?   @map("approved_by")
+  approvedAt     DateTime? @map("approved_at")
+  rejectedReason String?   @map("rejected_reason") @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  job ServiceJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job   ServiceJob            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  lines JobPartsRequestLine[]
 
   @@index([jobId])
+  @@index([status])
   @@map("job_parts_requests")
+}
+
+model JobPartsRequestLine {
+  id              String   @id @default(cuid())
+  requestId       String   @map("request_id")
+  inventoryItemId String   @map("inventory_item_id")
+  itemName        String   @map("item_name")
+  sku             String
+  qtyRequested    Int      @map("qty_requested")
+  qtyApproved     Int      @default(0) @map("qty_approved")
+  qtyIssued       Int      @default(0) @map("qty_issued")
+  qtyConsumed     Int      @default(0) @map("qty_consumed")
+  qtyReturned     Int      @default(0) @map("qty_returned")
+  qtyScrapped     Int      @default(0) @map("qty_scrapped")
+  unitCost        Decimal  @default(0) @map("unit_cost") @db.Decimal(12, 2)
+  sellingPrice    Decimal  @default(0) @map("selling_price") @db.Decimal(12, 2)
+  batchNumber     String?  @map("batch_number")
+  serialNumbers   String?  @map("serial_numbers")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  request       JobPartsRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem   @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@index([requestId])
+  @@index([inventoryItemId])
+  @@map("job_parts_request_lines")
 }
 
 model JobSignature {
@@ -1029,6 +1092,8 @@ model InventoryItem {
   branchId           String   @map("branch_id")
   inStock            Int      @default(0) @map("in_stock")
   reserved           Int      @default(0)
+  issued             Int      @default(0)
+  damaged            Int      @default(0)
   reorderLevel       Int      @default(0) @map("reorder_level")
   maxLevel           Int      @default(0) @map("max_level")
   binLocation        String   @default("") @map("bin_location")
@@ -1041,6 +1106,8 @@ model InventoryItem {
   unitOfMeasure      String   @default("pcs") @map("unit_of_measure")
   supplier           String
   supplierId         String?  @map("supplier_id")
+  additionalFields   Json?    @map("additional_fields")
+  status             EntityStatus @default(active)
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
@@ -1050,6 +1117,7 @@ model InventoryItem {
   jobExtras                 JobExtra[]
   reservations              StockReservation[]
   movements                 StockMovement[]
+  partsRequestLines         JobPartsRequestLine[]
   purchaseOrderLines        PurchaseOrderLine[]
   receiptLines              PurchaseReceiptLine[]
   purchaseReturnLines       PurchaseReturnLine[]
@@ -1065,6 +1133,7 @@ model InventoryItem {
   @@index([branchId])
   @@index([supplierId])
   @@index([tenantId, itemClass])
+  @@index([tenantId, status])
   @@map("inventory_items")
 }
 
@@ -1155,6 +1224,8 @@ model StockMovement {
   referenceType   String?  @map("reference_type")
   referenceId     String?  @map("reference_id")
   reason          String?
+  batchNumber     String?  @map("batch_number")
+  serialNumber    String?  @map("serial_number")
   actorId         String   @map("actor_id")
   createdAt       DateTime @default(now()) @map("created_at")
 
@@ -1170,19 +1241,22 @@ model StockMovement {
 
 // ── Supplier ──────────────────────────────────────────────────────────────────
 model Supplier {
-  id         String   @id @default(cuid())
-  tenantId   String   @map("tenant_id")
-  name       String
-  contact    String
-  email      String
-  phone      String
-  category   String
-  rating     Decimal  @default(0) @db.Decimal(3, 1)
-  openOrders Int      @default(0) @map("open_orders")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id               String   @id @default(cuid())
+  tenantId         String   @map("tenant_id")
+  name             String
+  contact          String
+  email            String
+  phone            String
+  category         String
+  currency         String   @default("INR")
+  paymentTerms     String?  @map("payment_terms")
+  deliveryLeadDays Int?     @map("delivery_lead_days")
+  rating           Decimal  @default(0) @db.Decimal(3, 1)
+  openOrders       Int      @default(0) @map("open_orders")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   purchaseOrders  PurchaseOrder[]
   purchaseReturns PurchaseReturn[]
   inventoryItems  InventoryItem[]
@@ -1194,22 +1268,24 @@ model Supplier {
 
 // ── PurchaseOrder ─────────────────────────────────────────────────────────────
 model PurchaseOrder {
-  id           String              @id @default(cuid())
-  tenantId     String              @map("tenant_id")
-  supplierId   String?             @map("supplier_id")
-  branchId     String?             @map("branch_id")
-  reference    String
-  supplier     String
-  items        Int                 @default(0)
-  total        Decimal             @default(0) @db.Decimal(12, 2)
-  freightCost  Decimal?            @map("freight_cost") @db.Decimal(12, 2)
-  customsCost  Decimal?            @map("customs_cost") @db.Decimal(12, 2)
-  insuranceCost Decimal?           @map("insurance_cost") @db.Decimal(12, 2)
-  landedCostTotal Decimal?         @map("landed_cost_total") @db.Decimal(12, 2)
-  status       PurchaseOrderStatus @default(draft)
-  expectedDate DateTime            @map("expected_date")
-  createdAt    DateTime            @default(now()) @map("created_at")
-  updatedAt    DateTime            @updatedAt @map("updated_at")
+  id                String              @id @default(cuid())
+  tenantId          String              @map("tenant_id")
+  supplierId        String?             @map("supplier_id")
+  branchId          String?             @map("branch_id")
+  reference         String
+  supplier          String
+  supplierReference String?             @map("supplier_reference")
+  currency          String              @default("INR")
+  items             Int                 @default(0)
+  total             Decimal             @default(0) @db.Decimal(12, 2)
+  freightCost       Decimal?            @map("freight_cost") @db.Decimal(12, 2)
+  customsCost       Decimal?            @map("customs_cost") @db.Decimal(12, 2)
+  insuranceCost     Decimal?            @map("insurance_cost") @db.Decimal(12, 2)
+  landedCostTotal   Decimal?            @map("landed_cost_total") @db.Decimal(12, 2)
+  status            PurchaseOrderStatus @default(draft)
+  expectedDate      DateTime            @map("expected_date")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
 
   tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   supplierRecord        Supplier?              @relation(fields: [supplierId], references: [id], onDelete: SetNull)
@@ -1217,12 +1293,35 @@ model PurchaseOrder {
   receipts              PurchaseReceipt[]
   purchaseReturns       PurchaseReturn[]
   stockPurchaseRequests StockPurchaseRequest[]
+  shipment              PurchaseShipment?
 
   @@unique([tenantId, reference])
   @@index([tenantId])
   @@index([supplierId])
   @@index([tenantId, status])
   @@map("purchase_orders")
+}
+
+/// Logistics leg after PO: freight, courier, tracking, ETD/ETA (PDF Purchasing & Landed Cost).
+model PurchaseShipment {
+  id              String    @id @default(cuid())
+  tenantId        String    @map("tenant_id")
+  purchaseOrderId String    @unique @map("purchase_order_id")
+  courier         String?
+  trackingNumber  String?   @map("tracking_number")
+  freightCost     Decimal?  @map("freight_cost") @db.Decimal(12, 2)
+  customsInfo     String?   @map("customs_info") @db.Text
+  etd             DateTime? @map("etd")
+  eta             DateTime? @map("eta")
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("purchase_shipments")
 }
 
 model PurchaseOrderLine {
@@ -1788,6 +1887,7 @@ model SalesEnquiry {
   status              String    @default("open")
   notes               String?   @db.Text
   assignedTo          String?   @map("assigned_to")
+  createdBy           String?   @map("created_by")
   followUpDate        DateTime? @map("follow_up_date")
   convertedEstimateId String?   @map("converted_estimate_id")
   createdAt           DateTime  @default(now()) @map("created_at")
@@ -1797,6 +1897,7 @@ model SalesEnquiry {
 
   @@unique([tenantId, reference])
   @@index([tenantId, status])
+  @@index([createdBy])
   @@map("sales_enquiries")
 }
 
@@ -1826,14 +1927,20 @@ model SupplierRFQ {
 }
 
 model SupplierQuote {
-  id         String    @id @default(cuid())
-  tenantId   String    @map("tenant_id")
-  rfqId      String    @map("rfq_id")
-  lines      Json      @default("[]")
-  validUntil DateTime? @map("valid_until")
-  notes      String?   @db.Text
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  id              String    @id @default(cuid())
+  tenantId        String    @map("tenant_id")
+  rfqId           String    @map("rfq_id")
+  lines           Json      @default("[]")
+  currency        String    @default("INR")
+  warranty        String?
+  incoterm        String?
+  shippingTerms   String?   @map("shipping_terms")
+  paymentTerms    String?   @map("payment_terms")
+  countryOfOrigin String?   @map("country_of_origin")
+  validUntil      DateTime? @map("valid_until")
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rfq    SupplierRFQ @relation(fields: [rfqId], references: [id], onDelete: Cascade)
@@ -1852,6 +1959,7 @@ model WarrantyClaim {
   customerId       String?  @map("customer_id")
   customerName     String   @map("customer_name")
   serviceRequestId String?  @map("service_request_id")
+  originalJobId    String?  @map("original_job_id")
   underWarranty    Boolean  @default(false) @map("under_warranty")
   isPhysicalDamage Boolean  @default(false) @map("is_physical_damage")
   componentCovered Boolean  @default(false) @map("component_covered")

@@ -11,8 +11,10 @@ import {
   MapPin,
   PackageMinus,
   PlusCircle,
+  Undo2,
   User,
   Wrench,
+  AlertTriangle,
 } from "lucide-react";
 import { CollapsibleSection } from "@/components/mobile/CollapsibleSection";
 import { WorkflowTimeline } from "@/components/mobile/WorkflowTimeline";
@@ -23,6 +25,7 @@ import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PhotoCaptionTile } from "@/components/shared/PhotoCaptionTile";
 import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 import { JobWorkReportPanel } from "@/components/jobs/JobWorkReportPanel";
+import { JobWorkbenchContext } from "@/components/jobs/JobWorkbenchContext";
 import { pickWorkReportLog, useJobWorkReportEditor } from "@/components/jobs/useJobWorkReportEditor";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { QA_APPROVER_ROLES, SERVICE_BILLING_ROLES } from "@/config/roles";
@@ -122,6 +125,10 @@ export default function MobileJobDetail() {
   const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
   const [stockItemId, setStockItemId] = useState("");
   const [stockQty, setStockQty] = useState(1);
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [returnItemId, setReturnItemId] = useState("");
+  const [returnQty, setReturnQty] = useState(1);
+  const [escalating, setEscalating] = useState(false);
   const [actionSaving, setActionSaving] = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
   const photosDrawerRef = useRef<HTMLDivElement>(null);
@@ -170,6 +177,7 @@ export default function MobileJobDetail() {
   const hasWorkReport = Boolean(job && pickWorkReportLog(job.workLogs));
   const canDownloadServiceReport =
     hasRole(["engineer", "admin", "coordinator", "qa"]) && Boolean(job) && hasWorkReport;
+  const canLogEscalation = hasRole(["admin", "coordinator", "engineer"]) && canMutate;
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -353,7 +361,10 @@ export default function MobileJobDetail() {
         taxRate: 0,
       });
       try {
-        await api.requestJobParts(job.id, partsNote.trim());
+        await api.requestJobParts(job.id, {
+          notes: partsNote.trim(),
+          lines: selectedItem ? [{ inventoryItemId: selectedItem.id, quantity: partsQty }] : [],
+        });
       } catch {
         /* job may already be partsPending */
       }
@@ -378,7 +389,7 @@ export default function MobileJobDetail() {
     setStockQty(1);
     stockValidation.reset();
     try {
-      setInventory((await api.listInventory({ limit: 100, page: 1 })).data);
+      setInventory((await api.listInventory({ limit: 100, page: 1, status: "active" })).data);
     } catch {
       setInventory([]);
     }
@@ -438,6 +449,53 @@ export default function MobileJobDetail() {
     }
   };
 
+  const overdueDays = useMemo(() => {
+    if (!job || !job.scheduledFor || job.status === "completed" || job.status === "delivery") return 0;
+    const scheduledTime = new Date(job.scheduledFor).getTime();
+    if (Date.now() <= scheduledTime) return 0;
+    return Math.max(0, Math.floor((Date.now() - scheduledTime) / (1000 * 60 * 60 * 24)));
+  }, [job]);
+
+  const handleLogEscalation = async () => {
+    if (!job || overdueDays < 1) return;
+    setEscalating(true);
+    try {
+      await api.addJobActivity(job.id, {
+        actor: "System",
+        action: "Escalation Logged",
+        note: `Job overdue by ${overdueDays} day(s) — escalation logged.`,
+      });
+      toast.success("Escalation logged", { description: `Logged for job ${job.reference}` });
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Failed to log escalation" });
+    } finally {
+      setEscalating(false);
+    }
+  };
+
+  const handleReturnStock = async () => {
+    if (!job || !returnItemId) return;
+    const deduction = (job.stockDeductions ?? []).find((row) => row.inventoryItemId === returnItemId);
+    const maxQty = deduction?.returnableQuantity ?? 0;
+    if (returnQty < 1 || returnQty > maxQty) {
+      toast.error("Invalid quantity", { description: `Enter between 1 and ${maxQty}.` });
+      return;
+    }
+    setActionSaving(true);
+    try {
+      const result = await api.returnJobStock(job.id, { inventoryItemId: returnItemId, quantity: returnQty });
+      setJob(result.job);
+      setReturnOpen(false);
+      toast({ title: "Unused parts returned", description: `${returnQty} × ${deduction?.itemName ?? "item"} returned.` });
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to return unused parts" });
+    } finally {
+      setActionSaving(false);
+    }
+  };
+
   if (loading || !job) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center gap-2 text-muted-foreground">
@@ -473,6 +531,7 @@ export default function MobileJobDetail() {
               <h1 className="font-display text-xl font-bold text-foreground">{job.equipmentName}</h1>
               <div className="mt-2 flex flex-wrap gap-2">
                 <WorkflowStatusChip status={displayStatus} />
+                {job.isRework ? <WorkflowStatusChip status="review" label="Rework" /> : null}
               </div>
             </div>
           </div>
@@ -491,6 +550,35 @@ export default function MobileJobDetail() {
         </div>
 
         <div className="mt-4 space-y-3">
+          {overdueDays > 0 ? (
+            <div className="rounded-[16px] border border-destructive/30 bg-destructive/10 px-3.5 py-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-destructive">Overdue by {overdueDays} day(s)</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Scheduled {formatDate(job.scheduledFor)}. Log an escalation if work is delayed.
+                  </p>
+                </div>
+              </div>
+              {canLogEscalation ? (
+                <button
+                  type="button"
+                  className="mobile-btn-secondary mt-3 w-full"
+                  disabled={escalating}
+                  onClick={() => void handleLogEscalation()}
+                >
+                  {escalating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Log Escalation
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          <CollapsibleSection title="Job context" icon={<ClipboardList className="h-4 w-4" />} defaultOpen>
+            <JobWorkbenchContext workbench={job.workbench} compact />
+          </CollapsibleSection>
+
           <CollapsibleSection title="Customer" icon={<MapPin className="h-4 w-4" />} defaultOpen>
             <dl className="space-y-3 text-sm">
               <div>
@@ -594,14 +682,45 @@ export default function MobileJobDetail() {
                     setPartsItemId("");
                     setPartsQty(1);
                     setPartsOpen(true);
-                    void api.listInventory({ limit: 100, page: 1 }).then((r) => setInventory(r.data)).catch(() => setInventory([]));
+                    void api.listInventory({ limit: 100, page: 1, status: "active" }).then((r) => setInventory(r.data)).catch(() => setInventory([]));
                   }} />
                   <FieldAction icon={PackageMinus} label="Deduct Stock" onClick={() => void openStockDialog()} />
+                  <FieldAction icon={Undo2} label="Return unused" onClick={() => setReturnOpen(true)} />
                   <FieldAction icon={Camera} label="Quick photos" onClick={() => { photosValidation.reset(); resetPhotoDraft(); setPhotosOpen(true); }} />
                 </div>
               ) : null}
             </CollapsibleSection>
           )}
+
+          {(job.stockDeductions ?? []).length > 0 ? (
+            <CollapsibleSection title="Parts used" icon={<PackageMinus className="h-4 w-4" />}>
+              <div className="space-y-2">
+                {(job.stockDeductions ?? []).map((row) => (
+                  <div key={row.id} className="rounded-[14px] border px-3 py-2 text-sm">
+                    <p className="font-medium">{row.itemName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Used {row.quantity}
+                      {row.returnedQuantity ? ` · Returned ${row.returnedQuantity}` : ""}
+                      {typeof row.returnableQuantity === "number" ? ` · Unused ${row.returnableQuantity}` : ""}
+                    </p>
+                    {canUpdateJob && job.status !== "completed" && (row.returnableQuantity ?? 0) > 0 ? (
+                      <button
+                        type="button"
+                        className="mt-2 text-xs font-medium text-primary"
+                        onClick={() => {
+                          setReturnItemId(row.inventoryItemId);
+                          setReturnQty(row.returnableQuantity ?? 1);
+                          setReturnOpen(true);
+                        }}
+                      >
+                        Return unused
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </CollapsibleSection>
+          ) : null}
 
           <CollapsibleSection title="Activity" icon={<Wrench className="h-4 w-4" />}>
             {activities.length === 0 ? (
@@ -886,6 +1005,63 @@ export default function MobileJobDetail() {
             </button>
           </DrawerFooter>
         </form>
+      </ActionDrawer>
+
+      <ActionDrawer open={returnOpen} onOpenChange={setReturnOpen} title="Return unused parts">
+        {(job.stockDeductions ?? []).filter((row) => (row.returnableQuantity ?? 0) > 0).length === 0 ? (
+          <p className="text-sm text-muted-foreground">No unused deducted parts to return.</p>
+        ) : (
+          <form
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleReturnStock();
+            }}
+          >
+            <div className="space-y-3">
+              <div>
+                <Label>Part</Label>
+                <Select
+                  value={returnItemId}
+                  onValueChange={(value) => {
+                    setReturnItemId(value);
+                    const row = (job.stockDeductions ?? []).find((item) => item.inventoryItemId === value);
+                    setReturnQty(row?.returnableQuantity ?? 1);
+                  }}
+                >
+                  <SelectTrigger className="mt-1.5 h-12 rounded-[14px]">
+                    <SelectValue placeholder="Select deducted part" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(job.stockDeductions ?? [])
+                      .filter((row) => (row.returnableQuantity ?? 0) > 0)
+                      .map((row) => (
+                        <SelectItem key={row.id} value={row.inventoryItemId}>
+                          {row.itemName} — unused {row.returnableQuantity}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="mobile-return-qty">Quantity</Label>
+                <Input
+                  id="mobile-return-qty"
+                  type="number"
+                  min={1}
+                  className="mt-1.5 h-12 rounded-[14px]"
+                  value={returnQty}
+                  onChange={(e) => setReturnQty(Number(e.target.value) || 1)}
+                />
+              </div>
+            </div>
+            <DrawerFooter className="px-0">
+              <button type="submit" className="mobile-btn-primary w-full" disabled={actionSaving || !returnItemId}>
+                {actionSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Return to stock"}
+              </button>
+            </DrawerFooter>
+          </form>
+        )}
       </ActionDrawer>
 
       <JobWorkReportPanel

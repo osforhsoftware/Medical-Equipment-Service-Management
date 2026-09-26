@@ -5,6 +5,7 @@ import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
 import { normalizeTicketStatus, resolveTicketEventStatus } from "@/services/workflow/serviceTicketStateMachine";
 import { prisma } from "@/db/prisma";
+import { assertOwnSalesRecord, isSalesSelfScoped } from "@/lib/salesScope";
 
 type CreateEstimateData = {
   serviceRequestId?: string;
@@ -25,10 +26,19 @@ export class EstimatesService {
     return estimatesRepository.findAll(tenantId);
   }
 
-  async getById(id: string, tenantId: string) {
+  async getById(id: string, tenantId: string, actorId?: string, actorRole?: string) {
     const item = await estimatesRepository.findById(id, tenantId);
     if (!item) throw new AppError("Estimate not found", 404);
-    return item;
+    if (isSalesSelfScoped(actorRole) && !item.serviceRequestId) {
+      assertOwnSalesRecord(actorRole, actorId ?? "", item.salespersonId, "Estimate not found");
+    }
+    const preparedBy = item.salespersonId
+      ? (await prisma.user.findFirst({
+          where: { id: item.salespersonId, tenantId },
+          select: { name: true },
+        }))?.name ?? null
+      : null;
+    return { ...item, preparedBy };
   }
 
   async create(tenantId: string, actorId: string, actorRole: string, data: CreateEstimateData) {
@@ -106,8 +116,14 @@ export class EstimatesService {
     return estimate;
   }
 
-  async update(id: string, tenantId: string, data: Record<string, unknown>) {
-    const existing = await this.getById(id, tenantId);
+  async update(
+    id: string,
+    tenantId: string,
+    data: Record<string, unknown>,
+    actorId?: string,
+    actorRole?: string,
+  ) {
+    const existing = await this.getById(id, tenantId, actorId, actorRole);
     if (data.status && data.status !== existing.status) {
       const maySend =
         ["draft", "revision"].includes(existing.status) &&
@@ -145,8 +161,8 @@ export class EstimatesService {
     return updated;
   }
 
-  async delete(id: string, tenantId: string) {
-    await this.getById(id, tenantId);
+  async delete(id: string, tenantId: string, actorId?: string, actorRole?: string) {
+    await this.getById(id, tenantId, actorId, actorRole);
     return estimatesRepository.delete(id, tenantId);
   }
 }

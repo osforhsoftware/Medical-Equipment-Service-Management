@@ -24,6 +24,8 @@ import { QA_APPROVER_ROLES } from "@/config/apiAccess";
 import { normalizeAdditionalFields } from "@/lib/additionalFields";
 import { mergeJobStageDetails } from "@/lib/jobStageDetails";
 import { upsertOpenStockPurchaseRequest } from "@/lib/stockPurchaseRequest";
+import { loadJobWorkbenchContext, summarizeStockDeductions } from "@/lib/jobWorkbench";
+import { issuedRemaining, rollupPartsRequestStatus, trackingValue } from "@/lib/jobPartsRequest";
 
 const ASSIGNABLE_JOB_ROLES = ["coordinator", "engineer", "qa"];
 const jobSyncInflight = new Map<string, Promise<void>>();
@@ -39,6 +41,8 @@ type CreateJobData = {
   status?: string;
   progress?: number;
   additionalFields?: { label: string; value: string }[] | null;
+  originalJobId?: string | null;
+  isRework?: boolean;
 };
 
 export class JobsService {
@@ -316,13 +320,131 @@ export class JobsService {
     throw new AppError("Access denied", 403);
   }
 
+  private async assertNoPendingExtras(jobId: string, action: string) {
+    const pendingExtras = await prisma.jobExtra.count({ where: { jobId, status: "pending" } });
+    if (pendingExtras > 0) {
+      throw new AppError(
+        `Work authorization locked — ${pendingExtras} unapproved extra(s) must be approved before ${action}.`,
+        409,
+      );
+    }
+  }
+
+  private async assertPartOnApprovedScope(
+    tenantId: string,
+    job: { id: string; estimateId?: string | null },
+    inventoryItemId: string,
+    actorRole?: string,
+  ) {
+    if (actorRole === "admin" || actorRole === "coordinator") return;
+
+    const [reservation, approvedExtra, estimateLine, extraCount, reservationCount, approvedPartsLine, partsRequestCount] = await Promise.all([
+      prisma.stockReservation.findFirst({
+        where: { tenantId, jobId: job.id, inventoryItemId },
+        select: { id: true },
+      }),
+      prisma.jobExtra.findFirst({
+        where: { jobId: job.id, inventoryItemId, status: "approved" },
+        select: { id: true },
+      }),
+      job.estimateId
+        ? prisma.estimateLineItem.findFirst({
+            where: { estimateId: job.estimateId, inventoryItemId },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
+      prisma.jobExtra.count({ where: { jobId: job.id } }),
+      prisma.stockReservation.count({ where: { tenantId, jobId: job.id } }),
+      prisma.jobPartsRequestLine.findFirst({
+        where: {
+          inventoryItemId,
+          request: { jobId: job.id, status: { in: ["approved", "issued", "closed"] } },
+        },
+        select: { id: true },
+      }),
+      prisma.jobPartsRequest.count({ where: { jobId: job.id } }),
+    ]);
+
+    if (reservation || approvedExtra || estimateLine || approvedPartsLine) return;
+
+    const hasScope = Boolean(job.estimateId) || extraCount > 0 || reservationCount > 0 || partsRequestCount > 0;
+    if (!hasScope) return;
+
+    throw new AppError(
+      "This part is not on the approved repair scope. Request extra scope and wait for authorization.",
+      409,
+    );
+  }
+
+  private async maybeAutoEscalateOverdue(
+    job: { id: string; reference: string; status: string; scheduledFor: Date; customerName: string },
+    tenantId: string,
+  ) {
+    if (job.status === "completed" || job.status === "delivery") return;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    if (job.scheduledFor >= startOfToday) return;
+
+    const existing = await prisma.jobActivity.findFirst({
+      where: {
+        jobId: job.id,
+        OR: [{ action: "Escalation Logged" }, { action: "Automatic overdue escalation" }],
+      },
+      select: { id: true },
+    });
+    if (existing) return;
+
+    const overdueDays = Math.max(
+      1,
+      Math.floor((Date.now() - job.scheduledFor.getTime()) / (1000 * 60 * 60 * 24)),
+    );
+    try {
+      await prisma.jobActivity.create({
+        data: {
+          jobId: job.id,
+          actor: "System",
+          action: "Automatic overdue escalation",
+          note: `Job overdue by ${overdueDays} day(s) — automatic escalation.`,
+        },
+      });
+      await prisma.notification.create({
+        data: {
+          tenantId,
+          type: "job",
+          title: "Job overdue",
+          body: `${job.reference} for ${job.customerName} is overdue by ${overdueDays} day(s).`,
+          recipientRole: "coordinator",
+        },
+      });
+    } catch {
+      // Opening a job must not fail if escalation logging is unavailable.
+    }
+  }
+
   async getById(id: string, tenantId: string, actorId?: string, actorRole?: string) {
     const job = await jobsRepository.findById(id, tenantId);
     if (!job) throw new AppError("Job not found", 404);
     await this.assertJobAccess(job, tenantId, actorId, actorRole);
+    await this.maybeAutoEscalateOverdue(job, tenantId);
+    const [workbench, stockDeductions] = await Promise.all([
+      loadJobWorkbenchContext(tenantId, job),
+      Promise.resolve(
+        summarizeStockDeductions(job.stockDeductions ?? [], job.stockMovements ?? []),
+      ),
+    ]);
     return {
       ...job,
       additionalFields: normalizeAdditionalFields(job.additionalFields) ?? [],
+      workbench,
+      stockDeductions,
+      partsRequests: (job.partsRequests ?? []).map((request) => ({
+        ...request,
+        lines: (request.lines ?? []).map((line) => ({
+          ...line,
+          issuedRemaining: issuedRemaining(line),
+          unusedIssued: issuedRemaining(line),
+        })),
+      })),
     };
   }
 
@@ -359,6 +481,8 @@ export class JobsService {
             scheduledFor: new Date(data.scheduledFor),
             progress: data.progress ?? 0,
             additionalFields: normalizeAdditionalFields(data.additionalFields) ?? Prisma.JsonNull,
+            originalJobId: data.originalJobId ?? null,
+            isRework: Boolean(data.isRework || data.originalJobId),
             assignments: {
               create: {
                 tenantId,
@@ -447,6 +571,59 @@ export class JobsService {
     });
   }
 
+  async createRework(tenantId: string, jobId: string, actorId: string, note?: string) {
+    const original = await jobsRepository.findById(jobId, tenantId);
+    if (!original) throw new AppError("Original job not found", 404);
+    if (!original.customerId || !original.equipmentId) {
+      throw new AppError("Original job is missing customer or equipment", 409);
+    }
+    const engineerId = original.engineerId;
+    if (!engineerId) throw new AppError("Assign an engineer on the original job before creating rework", 409);
+    const scheduledFor = new Date();
+    scheduledFor.setDate(scheduledFor.getDate() + 1);
+    return prisma.$transaction(async (tx) => {
+      const reference = await generateReference(tenantId, "JOB", "serviceJob", tx);
+      return tx.serviceJob.create({
+        data: {
+          tenantId,
+          serviceRequestId: original.serviceRequestId,
+          estimateId: null,
+          customerId: original.customerId,
+          equipmentId: original.equipmentId,
+          reference,
+          requestRef: original.requestRef,
+          customerName: original.customerName,
+          equipmentName: original.equipmentName,
+          engineer: original.engineer,
+          engineerId,
+          type: original.type,
+          typeOther: original.typeOther,
+          status: "scheduled",
+          scheduledFor,
+          progress: 0,
+          originalJobId: original.id,
+          isRework: true,
+          assignments: {
+            create: {
+              tenantId,
+              userId: engineerId,
+              role: "engineer",
+              isLead: true,
+              assignedBy: actorId,
+            },
+          },
+          activities: {
+            create: {
+              actor: "System",
+              action: "Rework scheduled",
+              note: note?.trim() || `Rework of ${original.reference}`,
+            },
+          },
+        },
+      });
+    });
+  }
+
   async update(id: string, tenantId: string, data: Record<string, unknown>, actorId?: string, actorRole?: string) {
     const existing = await this.getById(id, tenantId, actorId, actorRole);
 
@@ -480,6 +657,9 @@ export class JobsService {
 
     if (data.status && data.status !== existing.status) {
       assertJobTransition(existing.status, String(data.status));
+      if (data.status === "inProgress" && existing.status === "scheduled") {
+        await this.assertNoPendingExtras(id, "starting work");
+      }
     }
 
     const advancingPastQa =
@@ -829,16 +1009,54 @@ export class JobsService {
     return { job: updated, workLog };
   }
 
-  async requestParts(id: string, tenantId: string, actorId: string, actorRole: string, notes: string) {
+  async requestParts(
+    id: string,
+    tenantId: string,
+    actorId: string,
+    actorRole: string,
+    notes: string,
+    lines: { inventoryItemId: string; quantity: number; batchNumber?: string | null; serialNumbers?: string | null }[] = [],
+  ) {
     const job = await this.getById(id, tenantId, actorId, actorRole);
     const actor = await usersRepository.findById(actorId, tenantId);
     const actorName = actor?.name ?? actorId;
 
     assertJobTransition(job.status, "partsPending");
 
-    const request = await jobActionsRepository.addPartsRequest(id, {
-      notes,
-      requestedBy: actorName,
+    const request = await prisma.$transaction(async (tx) => {
+      const created = await tx.jobPartsRequest.create({
+        data: { jobId: id, notes, requestedBy: actorName, status: "pending" },
+      });
+      for (const row of lines) {
+        const item = await tx.inventoryItem.findFirst({ where: { id: row.inventoryItemId, tenantId } });
+        if (!item) throw new AppError("Inventory item not found", 404);
+        await tx.jobPartsRequestLine.create({
+          data: {
+            requestId: created.id,
+            inventoryItemId: item.id,
+            itemName: item.name,
+            sku: item.sku,
+            qtyRequested: row.quantity,
+            unitCost: item.unitCost,
+            sellingPrice: item.sellingPrice,
+            batchNumber: trackingValue(row.batchNumber),
+            serialNumbers: trackingValue(row.serialNumbers),
+          },
+        });
+      }
+      await tx.notification.createMany({
+        data: ["inventory", "admin", "coordinator"].map((recipientRole) => ({
+          tenantId,
+          type: "stock",
+          title: "Parts request",
+          body: `${job.reference}: ${notes.slice(0, 120)}`,
+          recipientRole,
+        })),
+      });
+      return tx.jobPartsRequest.findUniqueOrThrow({
+        where: { id: created.id },
+        include: { lines: true },
+      });
     });
 
     const updated = await jobsRepository.update(id, tenantId, {
@@ -851,7 +1069,10 @@ export class JobsService {
     await jobActionsRepository.addActivity(id, {
       actor: actorName,
       action: "Parts requested",
-      note: notes.slice(0, 200),
+      note: (request.lines.length
+        ? request.lines.map((line) => `${line.qtyRequested} × ${line.sku}`).join(", ")
+        : notes
+      ).slice(0, 200),
     });
 
     return { job: updated, partsRequest: request };
@@ -928,13 +1149,109 @@ export class JobsService {
     actorRole: string,
     inventoryItemId: string,
     quantity: number,
+    options?: { lineId?: string; batchNumber?: string | null; serialNumbers?: string | null },
   ) {
     const job = await this.getById(id, tenantId, actorId, actorRole);
     const actor = await usersRepository.findById(actorId, tenantId);
     const actorName = actor?.name ?? actorId;
+    if (job.status === "scheduled") {
+      await this.assertNoPendingExtras(id, "starting work");
+    }
+    await this.assertPartOnApprovedScope(tenantId, job, inventoryItemId, actorRole);
     return prisma.$transaction(async (tx) => {
       const item = await tx.inventoryItem.findFirst({ where: { id: inventoryItemId, tenantId } });
       if (!item) throw new AppError("Inventory item not found", 404);
+      const line = options?.lineId
+        ? await tx.jobPartsRequestLine.findFirst({
+            where: { id: options.lineId, inventoryItemId, request: { jobId: id } },
+          })
+        : await tx.jobPartsRequestLine.findFirst({
+            where: { inventoryItemId, request: { jobId: id, status: { in: ["approved", "issued"] } } },
+            orderBy: { createdAt: "asc" },
+          });
+      const openIssued = line ? issuedRemaining(line) : 0;
+      if (line && openIssued > 0) {
+        if (quantity > openIssued) {
+          throw new AppError(`Only ${openIssued} issued unit(s) remain to use for ${item.sku}`, 409);
+        }
+        const stock = await tx.inventoryItem.update({
+          where: { id: item.id },
+          data: { issued: { decrement: quantity } },
+        });
+        const updatedLine = await tx.jobPartsRequestLine.update({
+          where: { id: line.id },
+          data: {
+            qtyConsumed: { increment: quantity },
+            ...(trackingValue(options?.batchNumber) ? { batchNumber: trackingValue(options?.batchNumber) } : {}),
+            ...(trackingValue(options?.serialNumbers) ? { serialNumbers: trackingValue(options?.serialNumbers) } : {}),
+          },
+        });
+        const siblings = await tx.jobPartsRequestLine.findMany({ where: { requestId: line.requestId } });
+        await tx.jobPartsRequest.update({
+          where: { id: line.requestId },
+          data: { status: rollupPartsRequestStatus(siblings.map((row) => row.id === updatedLine.id ? updatedLine : row), "issued") },
+        });
+        const movement = await tx.stockMovement.create({
+          data: {
+            tenantId,
+            inventoryItemId,
+            jobId: id,
+            type: "consume",
+            quantity: -quantity,
+            balanceAfter: stock.inStock,
+            referenceType: "job_parts_request",
+            referenceId: line.requestId,
+            reason: `Used on ${job.reference}`,
+            batchNumber: trackingValue(options?.batchNumber ?? line.batchNumber),
+            serialNumber: trackingValue(options?.serialNumbers ?? line.serialNumbers),
+            actorId,
+          },
+        });
+        const deduction = await tx.jobStockDeduction.create({
+          data: {
+            jobId: id,
+            inventoryItemId,
+            itemName: item.name,
+            sku: item.sku,
+            quantity,
+            deductedBy: actorName,
+          },
+        });
+        await tx.jobActivity.create({
+          data: {
+            jobId: id,
+            actor: actorName,
+            action: "Stock consumed",
+            note: `${quantity} × ${item.name} (${item.sku})`,
+          },
+        });
+        const updated = await tx.serviceJob.update({
+          where: { id },
+          data: {
+            progress: Math.min(job.progress + 10, 95),
+            status: job.status === "partsPending" || job.status === "scheduled" ? "inProgress" : job.status,
+          },
+        });
+        if (job.status === "scheduled" || job.status === "partsPending") {
+          await startWorkLog(tx, tenantId, id, actorId, "Field work started");
+        }
+        return { job: updated, deduction, movement };
+      }
+
+      const waiting = await tx.jobPartsRequestLine.findFirst({
+        where: {
+          inventoryItemId,
+          request: { jobId: id, status: { in: ["pending", "approved"] } },
+        },
+        include: { request: true },
+        orderBy: { createdAt: "asc" },
+      });
+      if (waiting && waiting.request.status === "pending") {
+        throw new AppError("These parts are waiting for inventory approval.", 409);
+      }
+      if (waiting && waiting.qtyApproved > waiting.qtyIssued) {
+        throw new AppError("These parts are approved but not issued yet. Wait for inventory to issue stock.", 409);
+      }
       const reservation = await tx.stockReservation.findFirst({
         where: { tenantId, jobId: id, inventoryItemId, status: "active" },
         orderBy: { createdAt: "asc" },
@@ -1040,6 +1357,111 @@ export class JobsService {
       }
       return { job: updated, deduction, movement };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async returnStock(
+    id: string,
+    tenantId: string,
+    actorId: string,
+    actorRole: string,
+    inventoryItemId: string,
+    quantity: number,
+    options?: { disposition?: "return" | "scrap"; lineId?: string; batchNumber?: string | null; serialNumbers?: string | null },
+  ) {
+    const job = await this.getById(id, tenantId, actorId, actorRole);
+    if (job.status === "completed") {
+      throw new AppError("Cannot return unused parts on a completed job", 409);
+    }
+    const actor = await usersRepository.findById(actorId, tenantId);
+    const actorName = actor?.name ?? actorId;
+    const disposition = options?.disposition ?? "return";
+    const result = await prisma.$transaction(async (tx) => {
+      const item = await tx.inventoryItem.findFirst({ where: { id: inventoryItemId, tenantId } });
+      if (!item) throw new AppError("Inventory item not found", 404);
+      const line = options?.lineId
+        ? await tx.jobPartsRequestLine.findFirst({
+            where: { id: options.lineId, inventoryItemId, request: { jobId: id } },
+          })
+        : await tx.jobPartsRequestLine.findFirst({
+            where: { inventoryItemId, request: { jobId: id, status: { in: ["approved", "issued"] } } },
+            orderBy: { createdAt: "asc" },
+          });
+      const openIssued = line ? issuedRemaining(line) : 0;
+      const used = await tx.jobStockDeduction.aggregate({
+        where: { jobId: id, inventoryItemId },
+        _sum: { quantity: true },
+      });
+      const alreadyReturnedRows = await tx.stockMovement.findMany({
+        where: { jobId: id, inventoryItemId, type: { in: ["return", "scrap"] } },
+        select: { quantity: true },
+      });
+      const alreadyReturned = alreadyReturnedRows.reduce((sum, row) => sum + Math.abs(row.quantity), 0);
+      const legacyReturnable = Math.max(0, (used._sum.quantity ?? 0) - alreadyReturned);
+      const returnable = openIssued > 0 ? openIssued : legacyReturnable;
+      if (returnable < 1) {
+        throw new AppError(
+          disposition === "scrap"
+            ? "No unused quantity remains to scrap for this part"
+            : "No unused quantity remains to return for this part",
+          409,
+        );
+      }
+      if (quantity > returnable) {
+        throw new AppError(`Cannot ${disposition} more than unused quantity (${returnable})`, 409);
+      }
+
+      const stock = await tx.inventoryItem.update({
+        where: { id: item.id },
+        data: openIssued > 0
+          ? disposition === "scrap"
+            ? { issued: { decrement: quantity }, damaged: { increment: quantity } }
+            : { issued: { decrement: quantity }, inStock: { increment: quantity } }
+          : disposition === "scrap"
+            ? { damaged: { increment: quantity } }
+            : { inStock: { increment: quantity } },
+      });
+      if (line && openIssued > 0) {
+        const updatedLine = await tx.jobPartsRequestLine.update({
+          where: { id: line.id },
+          data: disposition === "scrap"
+            ? { qtyScrapped: { increment: quantity } }
+            : { qtyReturned: { increment: quantity } },
+        });
+        const siblings = await tx.jobPartsRequestLine.findMany({ where: { requestId: line.requestId } });
+        await tx.jobPartsRequest.update({
+          where: { id: line.requestId },
+          data: { status: rollupPartsRequestStatus(siblings.map((row) => row.id === updatedLine.id ? updatedLine : row), "issued") },
+        });
+      }
+      const movement = await tx.stockMovement.create({
+        data: {
+          tenantId,
+          inventoryItemId,
+          jobId: id,
+          type: disposition === "scrap" ? "scrap" : "return",
+          quantity: disposition === "scrap" ? -quantity : quantity,
+          balanceAfter: stock.inStock,
+          referenceType: line ? "job_parts_request" : "job",
+          referenceId: line?.requestId ?? id,
+          reason: disposition === "scrap" ? "Unused parts scrapped / damaged" : "Unused parts returned",
+          batchNumber: trackingValue(options?.batchNumber ?? line?.batchNumber),
+          serialNumber: trackingValue(options?.serialNumbers ?? line?.serialNumbers),
+          actorId,
+        },
+      });
+      await tx.jobActivity.create({
+        data: {
+          jobId: id,
+          actor: actorName,
+          action: disposition === "scrap" ? "Parts scrapped" : "Unused parts returned",
+          note: `${quantity} × ${item.name} (${item.sku})`,
+        },
+      });
+      return { movement, itemName: item.name, sku: item.sku };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    const updated = await this.getById(id, tenantId, actorId, actorRole);
+    return { job: updated, ...result };
   }
 
   async addActivity(id: string, tenantId: string, payload: { action: string; note?: string; actor?: string }, actorId?: string, actorRole?: string) {

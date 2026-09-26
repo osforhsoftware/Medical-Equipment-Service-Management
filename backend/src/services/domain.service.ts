@@ -18,6 +18,14 @@ import {
   syncJobExtraStockRequest,
   upsertOpenStockPurchaseRequest,
 } from "@/lib/stockPurchaseRequest";
+import {
+  computeLandedCostTotal,
+  computeLandedImportExtras,
+  computeLandedUnitCost,
+} from "@/lib/landedCost";
+import { serviceRequestsService } from "@/services/serviceRequests.service";
+import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
+import { assertCustomerCreditAllows, assertLineMargin } from "@/lib/commercialRules";
 
 type Actor = { userId: string; role: string };
 type JsonObject = Record<string, unknown>;
@@ -185,6 +193,19 @@ export class DomainService {
       });
       const discount = money(input.discount ?? 0);
       const total = money(Prisma.Decimal.max(0, subtotal.minus(discount)).plus(tax));
+      if (estimate.customerId) {
+        for (const line of input.lines as Array<{ description?: string; unitPrice?: number; inventoryItemId?: string | null }>) {
+          if (!line.inventoryItemId) continue;
+          const item = await tx.inventoryItem.findFirst({
+            where: { id: line.inventoryItemId, tenantId },
+            select: { unitCost: true },
+          });
+          assertLineMargin(String(line.description || "line"), Number(line.unitPrice ?? 0), item ? Number(item.unitCost) : null);
+        }
+        if (input.sendForApproval === true || input.status === "pendingAdminApproval" || input.status === "sent") {
+          await assertCustomerCreditAllows(tenantId, estimate.customerId, Number(total), tx);
+        }
+      }
       const revisionNumber = estimate.revision + 1;
 
       await tx.estimateLineItem.deleteMany({ where: { estimateId } });
@@ -200,7 +221,15 @@ export class DomainService {
           terms: input.terms,
           notes: input.notes,
           createdBy: actor.userId,
-          snapshot: { lines: input.lines, terms: input.terms, notes: input.notes, discount: input.discount },
+          snapshot: {
+            lines: input.lines,
+            terms: input.terms,
+            notes: input.notes,
+            discount: input.discount,
+            currency: input.currency,
+            warranty: input.warranty,
+            estimatedCompletion: input.estimatedCompletion,
+          },
         },
       });
       await tx.estimateLineItem.createMany({
@@ -239,6 +268,14 @@ export class DomainService {
           partsCost: money(lines.filter((x: any) => x.type === "part").reduce((s: number, x: any) => s + Number(x.lineTotal), 0)),
           terms: input.terms,
           notes: input.notes,
+          ...(input.currency ? { currency: input.currency } : {}),
+          warranty: input.warranty !== undefined ? input.warranty : undefined,
+          estimatedCompletion:
+            input.estimatedCompletion !== undefined
+              ? input.estimatedCompletion
+                ? new Date(input.estimatedCompletion)
+                : null
+              : undefined,
           status: nextStatus as never,
           salespersonId: actor.userId,
           ...(nextStatus === "pendingAdminApproval" || nextStatus === "sent" ? { sentAt: new Date() } : {}),
@@ -883,11 +920,18 @@ export class DomainService {
               branchId: transfer.toBranchId,
               sku: source.sku,
               name: source.name,
+              itemClass: source.itemClass,
               category: source.category,
+              subcategory: source.subcategory,
+              manufacturer: source.manufacturer,
               inStock: line.quantity,
               reorderLevel: source.reorderLevel,
+              maxLevel: source.maxLevel,
+              binLocation: source.binLocation,
               unitCost: source.unitCost,
+              sellingPrice: source.sellingPrice,
               supplier: source.supplier,
+              supplierId: source.supplierId,
             },
           });
         }
@@ -935,21 +979,226 @@ export class DomainService {
         return { ...line, lineTotal: money(net.plus(net.mul(new Prisma.Decimal(line.taxRate).div(100)))) };
       });
       const total = money(lines.reduce((sum: Prisma.Decimal, line: any) => sum.plus(line.lineTotal), new Prisma.Decimal(0)));
+      const landedCostTotal = computeLandedCostTotal({
+        merchandiseTotal: total,
+        freightCost: input.freightCost,
+        customsCost: input.customsCost,
+        insuranceCost: input.insuranceCost,
+      });
+      const currency =
+        typeof input.currency === "string" && input.currency.trim()
+          ? input.currency.trim().toUpperCase()
+          : "INR";
       return tx.purchaseOrder.create({
         data: {
           tenantId,
           supplierId: input.supplierId,
           supplier: input.supplier,
+          supplierReference:
+            typeof input.supplierReference === "string" && input.supplierReference.trim()
+              ? input.supplierReference.trim()
+              : null,
+          currency,
           branchId: input.branchId,
           reference: ref("PO"),
           items: lines.length,
           total,
+          freightCost: input.freightCost != null ? money(input.freightCost) : null,
+          customsCost: input.customsCost != null ? money(input.customsCost) : null,
+          insuranceCost: input.insuranceCost != null ? money(input.insuranceCost) : null,
+          landedCostTotal,
           expectedDate: input.expectedDate,
           lineItems: { create: lines },
         },
-        include: { lineItems: true },
+        include: { lineItems: true, shipment: true },
       });
     });
+  }
+
+  async upsertPurchaseShipment(tenantId: string, purchaseOrderId: string, input: any) {
+    return prisma.$transaction(async (tx) => {
+      const po = await tx.purchaseOrder.findFirst({
+        where: { id: purchaseOrderId, tenantId, status: { not: "cancelled" } },
+        include: { shipment: true },
+      });
+      if (!po) throw new AppError("Purchase order not found", 404);
+      if (po.status === "received") {
+        throw new AppError("Cannot change shipment after the PO is fully received", 409);
+      }
+
+      const freightCost = input.freightCost != null ? money(input.freightCost) : null;
+      const shipmentData = {
+        courier: typeof input.courier === "string" && input.courier.trim() ? input.courier.trim() : null,
+        trackingNumber:
+          typeof input.trackingNumber === "string" && input.trackingNumber.trim()
+            ? input.trackingNumber.trim()
+            : null,
+        freightCost,
+        customsInfo:
+          typeof input.customsInfo === "string" && input.customsInfo.trim()
+            ? input.customsInfo.trim()
+            : null,
+        etd: input.etd ? new Date(input.etd) : null,
+        eta: input.eta ? new Date(input.eta) : null,
+        notes: typeof input.notes === "string" && input.notes.trim() ? input.notes.trim() : null,
+      };
+
+      const shipment = po.shipment
+        ? await tx.purchaseShipment.update({
+            where: { id: po.shipment.id },
+            data: shipmentData,
+          })
+        : await tx.purchaseShipment.create({
+            data: { tenantId, purchaseOrderId, ...shipmentData },
+          });
+
+      const landedCostTotal = computeLandedCostTotal({
+        merchandiseTotal: po.total,
+        freightCost,
+        customsCost: po.customsCost,
+        insuranceCost: po.insuranceCost,
+      });
+      const expectedDate = shipment.eta ?? po.expectedDate;
+      await tx.purchaseOrder.update({
+        where: { id: po.id },
+        data: { freightCost, landedCostTotal, expectedDate },
+      });
+
+      return tx.purchaseOrder.findFirstOrThrow({
+        where: { id: po.id },
+        include: { lineItems: true, shipment: true, receipts: true },
+      });
+    });
+  }
+
+  async updatePurchaseLandedCosts(tenantId: string, purchaseOrderId: string, input: any) {
+    const po = await prisma.purchaseOrder.findFirst({
+      where: { id: purchaseOrderId, tenantId, status: { not: "cancelled" } },
+    });
+    if (!po) throw new AppError("Purchase order not found", 404);
+    if (po.status === "received") {
+      throw new AppError("Cannot change landed costs after the PO is fully received", 409);
+    }
+
+    const freightCost =
+      input.freightCost !== undefined
+        ? input.freightCost != null
+          ? money(input.freightCost)
+          : null
+        : po.freightCost;
+    const customsCost =
+      input.customsCost !== undefined
+        ? input.customsCost != null
+          ? money(input.customsCost)
+          : null
+        : po.customsCost;
+    const insuranceCost =
+      input.insuranceCost !== undefined
+        ? input.insuranceCost != null
+          ? money(input.insuranceCost)
+          : null
+        : po.insuranceCost;
+    const landedCostTotal = computeLandedCostTotal({
+      merchandiseTotal: po.total,
+      freightCost,
+      customsCost,
+      insuranceCost,
+    });
+
+    const data: Prisma.PurchaseOrderUpdateInput = {
+      freightCost,
+      customsCost,
+      insuranceCost,
+      landedCostTotal,
+    };
+    if (input.supplierReference !== undefined) {
+      data.supplierReference =
+        typeof input.supplierReference === "string" && input.supplierReference.trim()
+          ? input.supplierReference.trim()
+          : null;
+    }
+    if (typeof input.currency === "string" && input.currency.trim()) {
+      data.currency = input.currency.trim().toUpperCase();
+    }
+
+    return prisma.purchaseOrder.update({
+      where: { id: po.id },
+      data,
+      include: { lineItems: true, shipment: true, receipts: true },
+    });
+  }
+
+  async convertSupplierQuoteToPurchaseOrder(tenantId: string, rfqId: string, quoteId: string) {
+    const rfq = await prisma.supplierRFQ.findFirst({
+      where: { id: rfqId, tenantId },
+      include: { quotes: true },
+    });
+    if (!rfq) throw new AppError("RFQ not found", 404);
+    if (rfq.status === "cancelled") throw new AppError("Cannot convert a cancelled RFQ", 409);
+
+    const quote = rfq.quotes.find((row) => row.id === quoteId);
+    if (!quote) throw new AppError("Supplier quote not found", 404);
+
+    const rfqLines = (Array.isArray(rfq.lines) ? rfq.lines : []) as Array<Record<string, unknown>>;
+    const quoteLines = (Array.isArray(quote.lines) ? quote.lines : []) as Array<Record<string, unknown>>;
+    if (!quoteLines.length) throw new AppError("Quote has no lines to convert", 409);
+
+    const lines = [];
+    for (const quoteLine of quoteLines) {
+      const index = Number(quoteLine.rfqLineIndex);
+      const rfqLine = Number.isInteger(index) && index >= 0 ? rfqLines[index] ?? {} : {};
+      const linkedId = typeof rfqLine.inventoryItemId === "string" ? rfqLine.inventoryItemId.trim() : "";
+      const description = String(quoteLine.description || rfqLine.description || "").trim();
+      let item = linkedId
+        ? await prisma.inventoryItem.findFirst({ where: { id: linkedId, tenantId } })
+        : null;
+      if (!item && description) {
+        item = await prisma.inventoryItem.findFirst({
+          where: {
+            tenantId,
+            OR: [{ name: description }, { sku: description }],
+          },
+        });
+      }
+      if (!item) {
+        throw new AppError(
+          `Link RFQ line "${description || `#${(Number.isInteger(index) ? index : 0) + 1}`}" to an inventory item before converting to a PO`,
+          409,
+        );
+      }
+      const quantity = Math.max(Number(quoteLine.quantity) || 0, Number(quoteLine.moq) || 0, 1);
+      lines.push({
+        inventoryItemId: item.id,
+        sku: item.sku,
+        description: description || item.name,
+        quantityOrdered: quantity,
+        unitCost: Number(quoteLine.unitPrice) || 0,
+        taxRate: 0,
+      });
+    }
+
+    const maxLeadDays = Math.max(0, ...quoteLines.map((line) => Number(line.deliveryDays) || 0));
+    const expectedDate = new Date();
+    expectedDate.setDate(expectedDate.getDate() + (maxLeadDays || 7));
+
+    const purchaseOrder = await this.createPurchaseOrder(tenantId, {
+      supplierId: rfq.supplierId,
+      supplier: rfq.supplierName,
+      currency: quote.currency || "INR",
+      expectedDate,
+      lines,
+    });
+
+    await prisma.purchaseOrder.update({
+      where: { id: purchaseOrder.id },
+      data: { status: "sent" },
+    });
+    await prisma.supplierRFQ.update({
+      where: { id: rfq.id },
+      data: { status: "closed" },
+    });
+
+    return { purchaseOrder: { ...purchaseOrder, status: "sent" }, rfqId: rfq.id, quoteId: quote.id };
   }
 
   async receivePurchaseOrder(tenantId: string, purchaseOrderId: string, actor: Actor, input: any) {
@@ -959,6 +1208,15 @@ export class DomainService {
         include: { lineItems: true },
       });
       if (!po) throw new AppError("Receivable purchase order not found", 404);
+      const merchandiseTotal = po.lineItems.reduce(
+        (sum, line) => sum.plus(line.lineTotal),
+        new Prisma.Decimal(0),
+      );
+      const importExtras = computeLandedImportExtras({
+        freightCost: po.freightCost,
+        customsCost: po.customsCost,
+        insuranceCost: po.insuranceCost,
+      });
       const receipt = await tx.purchaseReceipt.create({
         data: { tenantId, purchaseOrderId, reference: input.reference, notes: input.notes, receivedBy: actor.userId },
       });
@@ -968,9 +1226,10 @@ export class DomainService {
         if (received.quantity > line.quantityOrdered - line.quantityReceived) {
           throw new AppError(`Receipt exceeds outstanding quantity for ${line.description}`, 409);
         }
+        const landedUnitCost = computeLandedUnitCost(line, merchandiseTotal, importExtras);
         const item = await tx.inventoryItem.update({
           where: { id: line.inventoryItemId },
-          data: { inStock: { increment: received.quantity }, unitCost: line.unitCost },
+          data: { inStock: { increment: received.quantity }, unitCost: landedUnitCost },
         });
         await tx.purchaseOrderLine.update({
           where: { id: line.id },
@@ -982,7 +1241,7 @@ export class DomainService {
             purchaseOrderLineId: line.id,
             inventoryItemId: item.id,
             quantity: received.quantity,
-            unitCost: line.unitCost,
+            unitCost: landedUnitCost,
           },
         });
         let allocatable = received.quantity;
@@ -1302,6 +1561,10 @@ export class DomainService {
         sum.plus(money(line.quantity).mul(line.unitPrice).minus(line.discount)), new Prisma.Decimal(0)));
       const total = money(sourceLines.reduce((sum, line) => sum.plus(line.lineTotal), new Prisma.Decimal(0)));
       const tax = money(total.minus(amount));
+      const invoiceCustomerId = job.customerId ?? job.estimate.customerId;
+      if (invoiceCustomerId) {
+        await assertCustomerCreditAllows(tenantId, invoiceCustomerId, Number(total), tx);
+      }
       const invoice = await tx.invoice.create({
         data: {
           tenantId,
@@ -1559,36 +1822,51 @@ export class DomainService {
   }
 
   async customerPortal(tenantId: string, userId: string) {
+    if (!CUSTOMER_PORTAL_ENABLED) {
+      throw new AppError("Customer Portal is temporarily unavailable.", 503);
+    }
     const user = await prisma.user.findFirst({ where: { id: userId, tenantId, role: "customer", isActive: true } });
     if (!user?.customerId) throw new AppError("Customer profile is not linked", 403);
     const customerId = user.customerId;
     const [customer, equipment, requests, estimates, invoices] = await Promise.all([
-      prisma.customer.findFirst({ where: { id: customerId, tenantId } }),
-      prisma.equipment.findMany({ where: { tenantId, customerId }, orderBy: { name: "asc" } }),
+      prisma.customer.findFirst({
+        where: { id: customerId, tenantId },
+        select: { id: true, name: true, reference: true },
+      }),
+      prisma.equipment.findMany({
+        where: { tenantId, customerId },
+        orderBy: { name: "asc" },
+        select: {
+          id: true,
+          assetTag: true,
+          name: true,
+          model: true,
+          manufacturer: true,
+          category: true,
+          serialNumber: true,
+          location: true,
+          condition: true,
+          currentStatus: true,
+          lastServiceDate: true,
+          warrantyStart: true,
+          warrantyEnd: true,
+          noMachineWarranty: true,
+          serviceWarrantyStart: true,
+          serviceWarrantyEnd: true,
+          noServiceWarranty: true,
+          amcStatus: true,
+        },
+      }),
       prisma.serviceRequest.findMany({
         where: { tenantId, customerId },
         include: {
-          equipmentItems: true,
-          timelineEvents: { orderBy: { at: "desc" } },
-          inspectionReport: {
-            include: {
-              recommendations: true,
-              attachments: { include: { file: true } },
-            },
+          equipmentItems: {
+            select: { id: true, equipmentId: true, equipmentName: true, assetTag: true },
           },
           serviceJobs: {
-            include: {
-              workLogs: {
-                select: {
-                  id: true,
-                  startedAt: true,
-                  endedAt: true,
-                  workPerformed: true,
-                  testingResult: true,
-                  calibrationResult: true,
-                },
-              },
-            },
+            select: { id: true, status: true, createdAt: true },
+            orderBy: { createdAt: "desc" },
+            take: 1,
           },
         },
         orderBy: { createdAt: "desc" },
@@ -1598,7 +1876,6 @@ export class DomainService {
         include: {
           lineItems: true,
           decisions: { orderBy: { createdAt: "desc" } },
-          revisions: { orderBy: { revision: "desc" } },
         },
         orderBy: { createdAt: "desc" },
       }),
@@ -1623,17 +1900,101 @@ export class DomainService {
       include: { file: true },
       orderBy: { version: "desc" },
     });
+    const invoiceDocuments = invoices.flatMap((invoice) =>
+      (invoice.documents ?? []).map((document) => ({
+        ...document,
+        downloadUrl: `/api/files/${document.fileId}/download`,
+        kind: "invoice",
+        reference: invoice.reference,
+      })),
+    );
     return {
       customer,
       equipment,
-      requests,
-      estimates,
-      invoices,
-      documents: estimateDocuments.map((document) => ({
-        ...document,
-        downloadUrl: `/api/files/${document.fileId}/download`,
+      requests: requests.map((request) => ({
+        id: request.id,
+        reference: request.reference,
+        customerId: request.customerId,
+        equipmentId: request.equipmentId,
+        equipmentName: request.equipmentName,
+        type: request.type,
+        typeOther: request.typeOther,
+        priority: request.priority,
+        status: request.status,
+        description: request.description,
+        slaDue: request.slaDue,
+        createdAt: request.createdAt,
+        equipmentItems: request.equipmentItems,
+        jobStatus: request.serviceJobs[0]?.status ?? null,
       })),
+      estimates,
+      invoices: invoices.map((invoice) => ({
+        id: invoice.id,
+        reference: invoice.reference,
+        amount: invoice.amount,
+        tax: invoice.tax,
+        total: invoice.total,
+        paidTotal: invoice.paidTotal,
+        balanceDue: invoice.balanceDue,
+        status: invoice.status,
+        issuedAt: invoice.issuedAt,
+        dueAt: invoice.dueAt,
+        jobRef: invoice.jobRef,
+      })),
+      documents: [
+        ...estimateDocuments.map((document) => ({
+          id: document.id,
+          fileId: document.fileId,
+          entityType: document.entityType,
+          entityId: document.entityId,
+          originalName: document.file.originalName,
+          downloadUrl: `/api/files/${document.fileId}/download`,
+          kind: "estimate",
+          reference: estimates.find((estimate) => estimate.id === document.entityId)?.reference ?? null,
+        })),
+        ...invoiceDocuments.map((document) => ({
+          id: document.id,
+          fileId: document.fileId,
+          entityType: document.entityType,
+          entityId: document.entityId,
+          originalName: document.file?.originalName ?? null,
+          downloadUrl: document.downloadUrl,
+          kind: document.kind,
+          reference: document.reference,
+        })),
+      ],
     };
+  }
+
+  async createPortalServiceRequest(
+    tenantId: string,
+    userId: string,
+    input: {
+      equipmentId: string;
+      type?: string;
+      typeOther?: string | null;
+      priority: string;
+      description: string;
+    },
+  ) {
+    if (!CUSTOMER_PORTAL_ENABLED) {
+      throw new AppError("Customer Portal is temporarily unavailable.", 503);
+    }
+    const user = await prisma.user.findFirst({ where: { id: userId, tenantId, role: "customer", isActive: true } });
+    if (!user?.customerId) throw new AppError("Customer profile is not linked", 403);
+    const equipment = await prisma.equipment.findFirst({
+      where: { id: input.equipmentId, tenantId, customerId: user.customerId },
+      select: { id: true },
+    });
+    if (!equipment) throw new AppError("Equipment not found for this customer", 404);
+    return serviceRequestsService.create(tenantId, userId, {
+      customerId: user.customerId,
+      equipmentId: equipment.id,
+      type: input.type,
+      typeOther: input.typeOther,
+      priority: input.priority,
+      description: input.description,
+    });
   }
 
   async recordQrScan(tenantId: string, actor: Actor, input: any, metadata: { ip?: string; userAgent?: string }) {

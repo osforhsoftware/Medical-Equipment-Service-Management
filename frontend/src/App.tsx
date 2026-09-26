@@ -35,6 +35,7 @@ import Sales from "./pages/app/Sales.tsx";
 import SalesNew from "./pages/app/SalesNew.tsx";
 import SalesOrderDetail from "./pages/app/SalesOrderDetail.tsx";
 import SalesEnquiries from "./pages/app/SalesEnquiries.tsx";
+import SalesQuotations from "./pages/app/SalesQuotations.tsx";
 import Jobs from "./pages/app/Jobs.tsx";
 import JobDetail from "./pages/app/JobDetail.tsx";
 import Inventory from "./pages/app/Inventory.tsx";
@@ -48,10 +49,15 @@ import PurchaseReturns from "./pages/app/PurchaseReturns.tsx";
 import PurchaseReturnDetail from "./pages/app/PurchaseReturnDetail.tsx";
 
 import StockLedger from "./pages/app/StockLedger.tsx";
+import StockLocations from "./pages/app/StockLocations.tsx";
 import Billing from "./pages/app/BillingProfessional.tsx";
 import BillingJobDetail from "./pages/app/BillingJobDetail.tsx";
 import BillingInvoiceDetail from "./pages/app/BillingInvoiceDetail.tsx";
 import Reports from "./pages/app/Reports.tsx";
+import ServiceReportsPage from "./pages/app/reports/ServiceReportsPage.tsx";
+import FinancialReportsPage from "./pages/app/reports/FinancialReportsPage.tsx";
+import InventoryReportsPage from "./pages/app/reports/InventoryReportsPage.tsx";
+import ManagementReportsPage from "./pages/app/reports/ManagementReportsPage.tsx";
 import Notifications from "./pages/app/Notifications.tsx";
 import QRTracking from "./pages/app/QRTracking.tsx";
 import AuditLogs from "./pages/app/AuditLogs.tsx";
@@ -63,18 +69,19 @@ import Projects from "./pages/app/Projects.tsx";
 import ProjectDetail from "./pages/app/ProjectDetail.tsx";
 import OfficeAssets from "./pages/app/OfficeAssets.tsx";
 import MasterData from "./pages/app/MasterData.tsx";
-import ExpensesCommissions from "./pages/app/ExpensesCommissions.tsx";
+import Finance from "./pages/app/Finance.tsx";
 import RFQs from "./pages/app/RFQs.tsx";
 import WarrantyClaims from "./pages/app/WarrantyClaims.tsx";
 
 import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
-// Portal pages retained for later re-enable — see docs/CUSTOMER_PORTAL.md
+// Customer portal — see docs/CUSTOMER_PORTAL.md
 import { PortalLayout } from "./pages/portal/PortalLayout.tsx";
 import PortalDashboard from "./pages/portal/PortalDashboard.tsx";
 import PortalEquipment from "./pages/portal/PortalEquipment.tsx";
 import PortalEstimates from "./pages/portal/PortalEstimates.tsx";
 import PortalEstimateDetail from "./pages/portal/PortalEstimateDetail.tsx";
 import PortalHistory from "./pages/portal/PortalHistory.tsx";
+import PortalDocuments from "./pages/portal/PortalDocuments.tsx";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -91,7 +98,7 @@ function LegacyTicketRedirect() {
 }
 
 const App = () => (
-  <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
+  <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
@@ -108,7 +115,9 @@ const App = () => (
               <Route path="sales" element={<ModuleGuard module="Sales"><Sales /></ModuleGuard>} />
               <Route path="sales/new" element={<ModuleGuard module="Sales"><SalesNew /></ModuleGuard>} />
               <Route path="sales/orders/:id" element={<ModuleGuard module="Sales"><SalesOrderDetail /></ModuleGuard>} />
-              <Route path="sales-enquiries" element={<ModuleGuard module="Sales Enquiries"><SalesEnquiries /></ModuleGuard>} />
+              <Route path="sales/quotations" element={<ModuleGuard module="Sales" orModules={["Sales Enquiries"]}><SalesQuotations /></ModuleGuard>} />
+              <Route path="sales-enquiries" element={<ModuleGuard module="Sales" orModules={["Sales Enquiries"]}><SalesEnquiries /></ModuleGuard>} />
+              <Route path="sales/enquiry" element={<Navigate to="/app/sales-enquiries" replace />} />
               <Route path="equipment" element={<ModuleGuard module="Equipment"><Equipment /></ModuleGuard>} />
               <Route path="equipment/:id" element={<ModuleGuard module="Equipment"><EquipmentDetail /></ModuleGuard>} />
               <Route path="service-requests" element={<Navigate to="/app/service-tickets" replace />} />
@@ -121,32 +130,39 @@ const App = () => (
               <Route path="estimates" element={<ModuleGuard module="Estimates"><Estimates /></ModuleGuard>} />
               <Route path="estimates/new" element={<ModuleGuard module="Estimates"><EstimateBuilder /></ModuleGuard>} />
               <Route path="estimates/:ticketId/build" element={<ModuleGuard module="Estimates"><EstimateBuilder /></ModuleGuard>} />
-              <Route path="estimates/:id/preview" element={<ModuleGuard module="Estimates"><EstimatePreview /></ModuleGuard>} />
-              <Route path="estimates/:id" element={<ModuleGuard module="Estimates"><EstimateDetail /></ModuleGuard>} />
+              <Route path="estimates/:id/preview" element={<ModuleGuard module="Estimates" orModules={["Sales"]}><EstimatePreview /></ModuleGuard>} />
+              <Route path="estimates/:id" element={<ModuleGuard module="Estimates" orModules={["Sales"]}><EstimateDetail /></ModuleGuard>} />
               <Route path="jobs" element={<ModuleGuard module="Service Jobs"><ResponsivePage mobile={<MobileJobs />} desktop={<Jobs />} /></ModuleGuard>} />
               <Route path="jobs/:id" element={<ModuleGuard module="Service Jobs"><ResponsivePage mobile={<MobileJobDetail />} desktop={<JobDetail />} /></ModuleGuard>} />
               <Route path="profile" element={<ResponsivePage mobile={<MobileProfile />} desktop={<MobileProfile />} />} />
               <Route path="projects" element={<ModuleGuard module="Projects"><Projects /></ModuleGuard>} />
               <Route path="projects/:id" element={<ModuleGuard module="Projects"><ProjectDetail /></ModuleGuard>} />
               <Route path="service-catalog" element={<ModuleGuard module="Service Catalog"><ServiceCatalog /></ModuleGuard>} />
-              <Route path="inventory" element={<ModuleGuard module="Inventory Items"><Inventory /></ModuleGuard>} />
-              <Route path="inventory/:id" element={<ModuleGuard module="Inventory Items"><InventoryDetail /></ModuleGuard>} />
-              <Route path="stock-purchase-requests" element={<ModuleGuard module="Stock Purchase Requests"><StockPurchaseRequests /></ModuleGuard>} />
-              <Route path="stock-purchase-requests/:id" element={<ModuleGuard module="Stock Purchase Requests"><StockPurchaseRequestDetail /></ModuleGuard>} />
+              <Route path="inventory" element={<ModuleGuard module="Inventory" orModules={["Inventory Items"]}><Inventory /></ModuleGuard>} />
+              <Route path="inventory/:id" element={<ModuleGuard module="Inventory" orModules={["Inventory Items"]}><InventoryDetail /></ModuleGuard>} />
+              <Route path="stock-purchase-requests" element={<ModuleGuard module="Inventory" orModules={["Stock Purchase Requests", "Purchase"]}><StockPurchaseRequests /></ModuleGuard>} />
+              <Route path="stock-purchase-requests/:id" element={<ModuleGuard module="Inventory" orModules={["Stock Purchase Requests", "Purchase"]}><StockPurchaseRequestDetail /></ModuleGuard>} />
               <Route path="suppliers" element={<ModuleGuard module="Suppliers"><Suppliers /></ModuleGuard>} />
-              <Route path="rfqs" element={<ModuleGuard module="Supplier RFQs"><RFQs /></ModuleGuard>} />
+              <Route path="rfqs" element={<ModuleGuard module="Purchase" orModules={["Supplier RFQs"]}><RFQs /></ModuleGuard>} />
               <Route path="warranty-claims" element={<ModuleGuard module="Warranty Claims"><WarrantyClaims /></ModuleGuard>} />
-              <Route path="purchase-orders" element={<ModuleGuard module="Purchase Orders"><PurchaseOrders /></ModuleGuard>} />
-              <Route path="purchase-orders/:id" element={<ModuleGuard module="Purchase Orders"><PurchaseOrderDetail /></ModuleGuard>} />
+              <Route path="purchase-orders" element={<ModuleGuard module="Purchase" orModules={["Purchase Orders"]}><PurchaseOrders /></ModuleGuard>} />
+              <Route path="purchase-orders/:id" element={<ModuleGuard module="Purchase" orModules={["Purchase Orders"]}><PurchaseOrderDetail /></ModuleGuard>} />
               <Route path="purchase-returns" element={<ModuleGuard module="Purchase Returns"><PurchaseReturns /></ModuleGuard>} />
               <Route path="purchase-returns/:id" element={<ModuleGuard module="Purchase Returns"><PurchaseReturnDetail /></ModuleGuard>} />
 
-              <Route path="stock-ledger" element={<ModuleGuard module="Stock Ledger"><StockLedger /></ModuleGuard>} />
+              <Route path="stock-ledger" element={<ModuleGuard module="Inventory" orModules={["Stock Ledger"]}><StockLedger /></ModuleGuard>} />
+              <Route path="stock-transfers" element={<ModuleGuard module="Inventory" orModules={["Stock Locations", "Stock Transfers"]}><StockLocations /></ModuleGuard>} />
+              <Route path="stock-locations" element={<Navigate to="/app/stock-transfers" replace />} />
               <Route path="billing" element={<ModuleGuard module="Billing"><ResponsivePage mobile={<MobileBilling />} desktop={<Billing />} /></ModuleGuard>} />
               <Route path="billing/jobs/:jobId" element={<ModuleGuard module="Billing"><BillingJobDetail /></ModuleGuard>} />
               <Route path="billing/invoices/:invoiceId" element={<ModuleGuard module="Billing"><BillingInvoiceDetail /></ModuleGuard>} />
-              <Route path="finance-operations" element={<ModuleGuard module="Expenses & Commissions"><ExpensesCommissions /></ModuleGuard>} />
+              <Route path="finance" element={<ModuleGuard module="Finance" orModules={["Billing", "Expenses & Commissions"]}><Finance /></ModuleGuard>} />
+              <Route path="finance-operations" element={<Navigate to="/app/finance?stage=payments" replace />} />
               <Route path="reports" element={<ModuleGuard module="Reports"><Reports /></ModuleGuard>} />
+              <Route path="reports/service" element={<ModuleGuard module="Reports"><ServiceReportsPage /></ModuleGuard>} />
+              <Route path="reports/financial" element={<ModuleGuard module="Reports"><FinancialReportsPage /></ModuleGuard>} />
+              <Route path="reports/inventory" element={<ModuleGuard module="Reports"><InventoryReportsPage /></ModuleGuard>} />
+              <Route path="reports/management" element={<ModuleGuard module="Reports"><ManagementReportsPage /></ModuleGuard>} />
               <Route path="notifications" element={<ModuleGuard module="Notifications"><Notifications /></ModuleGuard>} />
               <Route path="qr-tracking" element={<ModuleGuard module="QR Tracking"><ResponsivePage mobile={<MobileQR />} desktop={<QRTracking />} /></ModuleGuard>} />
               <Route path="audit-logs" element={<ModuleGuard module="Audit Logs"><AuditLogs /></ModuleGuard>} />
@@ -165,6 +181,7 @@ const App = () => (
                 <Route path="estimates" element={<PortalEstimates />} />
                 <Route path="estimates/:id/preview" element={<EstimatePreview />} />
                 <Route path="estimates/:id" element={<PortalEstimateDetail />} />
+                <Route path="documents" element={<PortalDocuments />} />
                 <Route path="history" element={<PortalHistory />} />
               </Route>
             ) : (

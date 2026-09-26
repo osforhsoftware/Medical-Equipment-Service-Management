@@ -90,7 +90,7 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
     setLoadingReport(true);
     try {
       setInventory(
-        await api.listInventory({ limit: 100, page: 1 }).then((r) => r.data).catch(() => [] as BackendInventoryItem[]),
+        await api.listInventory({ limit: 100, page: 1, status: "active" }).then((r) => r.data).catch(() => [] as BackendInventoryItem[]),
       );
       const report = await api.getInspectionReport(task.id);
       if (report) {

@@ -22,8 +22,10 @@ export function StatCard({ label, value, icon: Icon, trend, accent = "primary" }
   return (
     <Card className="flex items-start justify-between gap-3 p-5">
       <div className="min-w-0">
-        <p className="text-[13px] text-muted-foreground">{label}</p>
-        <p className="mt-1.5 text-[1.65rem] font-semibold leading-none tracking-tight text-foreground">{value}</p>
+        <p className="overflow-text text-[13px] text-muted-foreground" title={label}>{label}</p>
+        <p className="mt-1.5 overflow-num text-[1.65rem] font-semibold leading-none tracking-tight text-foreground" title={value}>
+          {value}
+        </p>
         {trend && (
           <p
             className={cn(

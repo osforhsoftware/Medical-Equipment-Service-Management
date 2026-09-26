@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { Loader2, Pencil, Tags } from "lucide-react";
+import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -75,6 +76,8 @@ export default function MasterData() {
   const [editing, setEditing] = useState<BackendTaxonomyTerm | null>(null);
   const [saving, setSaving] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<BackendTaxonomyTerm | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
   const {
@@ -193,6 +196,30 @@ export default function MasterData() {
       toast.apiError(err, { fallback: "Unable to update term" });
     } finally {
       setPendingId(null);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const result = await api.deleteTaxonomy(deleteTarget.id);
+      if (result?.deactivated) {
+        toast.success("Term deactivated", {
+          description: `${deleteTarget.name} is in use and was deactivated instead of deleted.`,
+        });
+      } else {
+        toast.success("Term deleted", {
+          description: `${deleteTarget.name} was removed.`,
+        });
+        if (editing?.id === deleteTarget.id) cancelEdit();
+      }
+      setDeleteTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ["taxonomy"] });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to delete term" });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -381,6 +408,16 @@ export default function MasterData() {
                             >
                               {term.isActive ? "Deactivate" : "Activate"}
                             </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
+                              disabled={pendingId === term.id || deleting}
+                              onClick={() => setDeleteTarget(term)}
+                            >
+                              Delete
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -392,6 +429,35 @@ export default function MasterData() {
           </div>
         </div>
       </div>
+
+      <DeleteConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null);
+        }}
+        title={`Delete ${tab.singular}?`}
+        description={
+          <div className="space-y-2">
+            <p>
+              This will permanently remove{" "}
+              <span className="font-medium text-foreground">{deleteTarget?.name}</span>
+              {(deleteTarget?.usageCount ?? 0) === 0 ? "." : null}
+            </p>
+            {(deleteTarget?.usageCount ?? 0) > 0 ? (
+              <p>
+                It is used by {deleteTarget?.usageCount} record
+                {deleteTarget?.usageCount === 1 ? "" : "s"}, so it will be deactivated
+                instead of deleted.
+              </p>
+            ) : (
+              <p>This cannot be undone.</p>
+            )}
+          </div>
+        }
+        confirmLabel={(deleteTarget?.usageCount ?? 0) > 0 ? "Deactivate" : "Delete"}
+        loading={deleting}
+        onConfirm={() => void confirmDelete()}
+      />
     </div>
   );
 }

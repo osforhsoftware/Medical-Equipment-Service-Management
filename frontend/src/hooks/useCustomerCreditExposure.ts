@@ -47,3 +47,11 @@ export function useCustomerCreditExposure(customerId: string | undefined | null)
     isLoading: customerQuery.isLoading,
   };
 }
+
+export function creditBlocksSave(
+  result: Pick<CreditExposureResult, "creditLimit" | "outstandingBalance">,
+  currentTotal = 0,
+) {
+  if (result.creditLimit == null || result.creditLimit <= 0) return false;
+  return result.outstandingBalance + Math.max(0, currentTotal) > result.creditLimit + 0.009;
+}

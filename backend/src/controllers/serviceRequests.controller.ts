@@ -24,6 +24,8 @@ export class ServiceRequestsController {
           slaDueFrom: query.slaDueFrom,
           slaDueTo: query.slaDueTo,
           search: query.search,
+          customerId: query.customerId,
+          equipmentId: query.equipmentId,
           skip: query.skip,
           take: query.take,
           orderBy: query.orderBy,

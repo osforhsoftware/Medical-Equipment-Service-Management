@@ -1,30 +1,37 @@
-# Customer Portal (disabled)
+# Customer Portal
 
-The Customer Portal (`/portal`) is implemented but **disabled for now** per client direction (“for future, Disable Now”). Portal source under `frontend/src/pages/portal/` is retained for a later re-enable.
+The Customer Portal (`/portal`) is **enabled**. A customer user sees only their own service equipment, tickets, estimates, and documents.
 
-Staff app (`/app`) is unaffected.
+Staff app (`/app`) is unchanged.
 
-## Current behavior
+## What a customer can do
 
-- `/portal` and `/portal/*` redirect to `/login`.
-- Customer-role login is rejected (frontend + backend) with a temporary-unavailable message.
-- Existing customer sessions are signed out when they hit `/login`.
+- Sign in and land on `/portal`.
+- See **their** registered service equipment (asset, serial, warranty, status). They cannot see other customers or staff inventory.
+- Submit a service request for their equipment (`POST /api/domain/portal/requests`).
+- See request / job status on Overview and Service History.
+- Review and approve, reject, or request revision on an estimate.
+- Open their estimate and invoice documents.
+
+## Staff setup
+
+1. Create or edit a user in **Users**.
+2. Assign role **Customer Portal** only.
+3. Link the user to a customer record. Without that link, portal login returns “Customer profile is not linked”.
+4. The customer must already have equipment on that record.
+
+Demo seed user: username `portal` (St. Mary's Hospital).
+
+## Disable later
+
+Set both flags to `false` and restart:
+
+- `frontend/src/config/features.ts` → `CUSTOMER_PORTAL_ENABLED = false`
+- `backend/src/config/features.ts` → `CUSTOMER_PORTAL_ENABLED = false`
+
+When disabled:
+
+- `/portal` redirects to `/login`.
+- Customer login is rejected.
 - `GET /api/domain/portal` returns 503.
-- Customer role is omitted from estimate decision API access and from the Users UI create/edit role picker.
-- Creating/updating a user with the `customer` role via API is rejected while disabled.
-- Portal page components remain in the repo; they are simply not mounted.
-
-## How to re-enable
-
-1. Set the flag to `true` in **both** places:
-   - `frontend/src/config/features.ts` → `CUSTOMER_PORTAL_ENABLED = true`
-   - `backend/src/config/features.ts` → `CUSTOMER_PORTAL_ENABLED = true`
-2. Restart frontend and backend so the change is loaded.
-3. Smoke-test:
-   - Log in as a `customer` user → lands on `/portal`.
-   - Open Overview, Equipment, Estimates, History.
-   - Approve/reject an estimate from the portal (uses `POST /api/domain/estimates/:id/decisions`).
-   - Confirm staff `/app` still works for non-customer roles.
-4. (Optional) Create or reactivate a customer portal user in **Users** (role “Customer Portal”).
-
-No other code changes are required if the flag wiring is left intact.
+- Customer role cannot be assigned in Users.

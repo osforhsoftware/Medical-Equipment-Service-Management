@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { Building2, Loader2 } from "lucide-react";
@@ -47,10 +47,12 @@ export function QuickAddCustomerDialog({
   open,
   onOpenChange,
   onCreated,
+  initialName = "",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (customer: BackendCustomer) => void;
+  initialName?: string;
 }) {
   const queryClient = useQueryClient();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -76,6 +78,13 @@ export function QuickAddCustomerDialog({
       fieldOrder: ["name", "type", "phone", "address"],
       schema,
     });
+
+  useEffect(() => {
+    if (!open) return;
+    const seed = initialName.trim();
+    if (!seed) return;
+    setForm((prev) => (prev.name.trim() ? prev : { ...prev, name: seed }));
+  }, [open, initialName]);
 
   const set = (patch: Partial<FormState>) => {
     setForm((prev) => ({ ...prev, ...patch }));

@@ -196,7 +196,7 @@ function emptyCommission(): CommissionForm {
   return { payeeName: "", basisAmount: "", rate: "", invoiceId: "" };
 }
 
-export default function ExpensesCommissions() {
+export default function ExpensesCommissions({ embedded = false }: { embedded?: boolean }) {
   const queryClient = useQueryClient();
   const [expenses, setExpenses] = useState<BackendExpense[]>([]);
   const [commissions, setCommissions] = useState<BackendCommission[]>([]);
@@ -609,40 +609,54 @@ export default function ExpensesCommissions() {
     },
   ];
 
+  const actions = (
+    <div className="flex flex-wrap gap-2">
+      <Button type="button" variant="outline" onClick={exportCurrent} disabled={loading}>
+        <FileSpreadsheet className="mr-1 h-4 w-4" />
+        Export Excel
+      </Button>
+      <Button
+        variant="outline"
+        onClick={() => {
+          expenseValidation.reset();
+          setExpense(emptyExpense());
+          setExpenseOpen(true);
+        }}
+      >
+        <Plus className="mr-1 h-4 w-4" /> Expense
+      </Button>
+      <Button
+        variant="brand"
+        onClick={() => {
+          commissionValidation.reset();
+          setCommission(emptyCommission());
+          setCommissionOpen(true);
+        }}
+      >
+        <Plus className="mr-1 h-4 w-4" /> Commission
+      </Button>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Finance Operations"
-        description="Track project expenses, vendor spend, and referral commission accruals through payout."
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={exportCurrent} disabled={loading}>
-              <FileSpreadsheet className="mr-1 h-4 w-4" />
-              Export Excel
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                expenseValidation.reset();
-                setExpense(emptyExpense());
-                setExpenseOpen(true);
-              }}
-            >
-              <Plus className="mr-1 h-4 w-4" /> Expense
-            </Button>
-            <Button
-              variant="brand"
-              onClick={() => {
-                commissionValidation.reset();
-                setCommission(emptyCommission());
-                setCommissionOpen(true);
-              }}
-            >
-              <Plus className="mr-1 h-4 w-4" /> Commission
-            </Button>
+      {embedded ? (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Outgoing costs</h2>
+            <p className="text-sm text-muted-foreground">
+              Record expenses and commissions. These reduce Profit.
+            </p>
           </div>
-        }
-      />
+          {actions}
+        </div>
+      ) : (
+        <PageHeader
+          title="Finance"
+          description="Outgoing costs in the Finance module. Use Receivables, Payments, VAT, Profit, and Credit for the full desk."
+          actions={actions}
+        />
+      )}
 
       <DateRangeFilter value={dateRange} onChange={setDateRange} />
 

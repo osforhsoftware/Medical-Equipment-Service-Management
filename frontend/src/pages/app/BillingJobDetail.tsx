@@ -88,7 +88,7 @@ export default function BillingJobDetail() {
 
   useEffect(() => {
     void Promise.all([
-      api.listInventory({ limit: 100, page: 1 }).then((res) => setInventory(res.data)).catch(() => setInventory([])),
+      api.listInventory({ limit: 100, page: 1, status: "active" }).then((res) => setInventory(res.data)).catch(() => setInventory([])),
       api.listServiceCatalog().then(setCatalog).catch(() => setCatalog([])),
     ]);
   }, []);

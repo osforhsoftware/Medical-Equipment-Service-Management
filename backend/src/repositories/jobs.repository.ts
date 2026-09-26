@@ -12,6 +12,11 @@ const jobIncludes = {
   stockMovements: { orderBy: { createdAt: "desc" as const } },
   photos: { include: { file: true }, orderBy: { createdAt: "asc" as const } },
   signature: true,
+  stockDeductions: { orderBy: { createdAt: "desc" as const } },
+  partsRequests: {
+    include: { lines: { include: { inventoryItem: true }, orderBy: { createdAt: "asc" as const } } },
+    orderBy: { createdAt: "desc" as const },
+  },
 } satisfies Prisma.ServiceJobInclude;
 
 export type JobQaScope = "pending" | "history";
@@ -28,6 +33,7 @@ export interface JobListFilters {
   qaScope?: JobQaScope;
   /** recent (default) = hide completed older than 7 days; archive = only those; all = no hide */
   completedScope?: CompletedScope;
+  customerId?: string;
   skip: number;
   take: number;
   orderBy: Prisma.ServiceJobOrderByWithRelationInput;
@@ -75,6 +81,10 @@ function buildWhere(tenantId: string, filters: Omit<JobListFilters, "skip" | "ta
     ];
   } else if (filters.engineer) {
     where.engineer = filters.engineer;
+  }
+
+  if (filters.customerId) {
+    where.customerId = filters.customerId;
   }
 
   if (filters.search) {

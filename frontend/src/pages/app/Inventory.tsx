@@ -1,13 +1,18 @@
-import { useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { Plus, PackageCheck, Loader2, AlertTriangle, Boxes, Lock, Eye, Package, X, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import { Plus, PackageCheck, Loader2, AlertTriangle, Boxes, Lock, Eye, Package, X, ChevronLeft, ChevronRight, ExternalLink, MapPin, PackageMinus, RefreshCw, IndianRupee, Pencil, Trash2, RotateCcw } from "lucide-react";
+import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { InventoryStageNav, inventoryStageFromLocation } from "@/components/inventory/InventoryStageNav";
+import { ModuleQuickAction } from "@/components/shared/ModuleFlowStrip";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { StatCard } from "@/components/shared/StatCard";
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -44,10 +49,11 @@ import { EMPTY_PAGINATION_META } from "@/lib/listing";
 import { navItems } from "@/config/nav";
 import { INVENTORY_WRITE_ROLES } from "@/config/roles";
 import { activeTerms, termLabel } from "@/lib/taxonomy";
-import { parseCustomerAdditionalFields } from "@/lib/customerFields";
+import { parseCustomerAdditionalFields, sanitizeCustomerAdditionalFields } from "@/lib/customerFields";
 import {
   formatInventoryItemClass,
   INVENTORY_ITEM_CLASS_OPTIONS,
+  INVENTORY_ITEM_CLASSES,
   inferItemClassFromCategory,
   type InventoryItemClass,
 } from "@/lib/inventoryItemClass";
@@ -68,7 +74,7 @@ const inventorySchema = z
   .object({
     sku: z.string().trim().max(64, "SKU must be 64 characters or fewer."),
     name: fieldRules.requiredString("Name"),
-    itemClass: z.enum(["spare_part", "consumable"]),
+    itemClass: z.enum(INVENTORY_ITEM_CLASSES),
     category: z.string(),
     categoryOther: z.string().optional(),
     description: fieldRules.optionalString(),
@@ -91,7 +97,7 @@ const inventorySchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["itemClass"],
-        message: "Select Spare Parts or Consumables.",
+        message: "Select Spare Parts, Consumables, or Equipment.",
       });
     }
     if (data.category === ADD_OPTION) {
@@ -132,6 +138,8 @@ const emptyForm = {
   binLocation: "",
   trackBatches: false,
   trackSerials: false,
+  batchNumbers: "",
+  serialNumbers: "",
   unitCost: "0",
   sellingPrice: "0",
   deliveryCharge: "0",
@@ -140,6 +148,54 @@ const emptyForm = {
   supplierId: "",
   supplierOther: "",
 };
+
+function buildTrackingAdditionalFields(
+  form: typeof emptyForm,
+  existingAdditionalFields?: BackendInventoryItem["additionalFields"],
+) {
+  const preserved = parseCustomerAdditionalFields(existingAdditionalFields).filter(
+    (f) => f.label !== "Batch numbers" && f.label !== "Serial numbers",
+  );
+  const fields: { label: string; value: string }[] = [...preserved];
+  if (form.trackBatches && form.batchNumbers.trim()) {
+    fields.push({ label: "Batch numbers", value: form.batchNumbers.trim() });
+  }
+  if (form.trackSerials && form.serialNumbers.trim()) {
+    fields.push({ label: "Serial numbers", value: form.serialNumbers.trim() });
+  }
+  return fields.length ? sanitizeCustomerAdditionalFields(fields) : undefined;
+}
+
+function formFromItem(item: BackendInventoryItem): typeof emptyForm {
+  const extras = parseCustomerAdditionalFields(item.additionalFields);
+  const batch = extras.find((f) => f.label === "Batch numbers")?.value ?? "";
+  const serials = extras.find((f) => f.label === "Serial numbers")?.value ?? "";
+  return {
+    sku: item.sku ?? "",
+    name: item.name ?? "",
+    itemClass: (item.itemClass as InventoryItemClass) || inferItemClassFromCategory(item.category),
+    category: item.category ?? "",
+    categoryOther: "",
+    description: item.description ?? "",
+    manufacturer: item.manufacturer ?? "",
+    compatibleModels: item.compatibleModels ?? "",
+    inStock: String(item.inStock ?? 0),
+    reorderLevel: String(item.reorderLevel ?? 0),
+    maxLevel: String(item.maxLevel ?? 0),
+    binLocation: item.binLocation ?? "",
+    trackBatches: Boolean(item.trackBatches),
+    trackSerials: Boolean(item.trackSerials),
+    batchNumbers: batch,
+    serialNumbers: serials,
+    unitCost: String(item.unitCost ?? 0),
+    sellingPrice: String(item.sellingPrice ?? 0),
+    deliveryCharge: String(item.deliveryCharge ?? 0),
+    deliveryChargeType: (item.deliveryChargeType === "perUnit" ? "perUnit" : "flat") as "flat" | "perUnit",
+    unitOfMeasure: item.unitOfMeasure ?? "pcs",
+    supplierId: item.supplierId ?? "",
+    supplierOther: "",
+  };
+}
 
 function InlineAddTerm({
   id,
@@ -199,7 +255,9 @@ function InlineAddTerm({
 
 export default function Inventory() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  const stage = inventoryStageFromLocation("/app/inventory", searchParams.get("stage"));
   const { user, hasRole } = useAuth();
   const { rbacMatrix } = useSettings();
   const canManage = hasRole(INVENTORY_WRITE_ROLES);
@@ -220,12 +278,16 @@ export default function Inventory() {
     listParams,
     setPage,
     setLimit,
-  } = useListingUrlState({ filterKeys: ["category", "itemClass"] });
+  } = useListingUrlState({ filterKeys: ["category", "itemClass", "status"] });
 
   const debouncedSearch = useDebouncedValue(search);
   const queryParams = useMemo(
-    () => ({ ...listParams, search: debouncedSearch || undefined }),
-    [listParams, debouncedSearch],
+    () => ({
+      ...listParams,
+      search: debouncedSearch || undefined,
+      status: filters.status || "active",
+    }),
+    [listParams, debouncedSearch, filters.status],
   );
 
   const itemsQuery = usePaginatedQuery({
@@ -236,7 +298,7 @@ export default function Inventory() {
 
   const statsQuery = useQuery({
     queryKey: ["inventory", "stats"],
-    queryFn: () => api.listInventory({ limit: 100, page: 1 }),
+    queryFn: () => api.listInventory({ limit: 100, page: 1, status: "active" }),
     staleTime: 60_000,
   });
 
@@ -261,10 +323,15 @@ export default function Inventory() {
   const suppliers = suppliersQuery.data ?? [];
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<BackendInventoryItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [addingTerm, setAddingTerm] = useState<"category" | "supplier" | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [existingImageFileIds, setExistingImageFileIds] = useState<string[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<BackendInventoryItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
   const [previewState, setPreviewState] = useState<{
     title: string;
     images: string[];
@@ -308,6 +375,8 @@ export default function Inventory() {
 
   const lowStock = statsItems.filter((i) => i.inStock <= i.reorderLevel).length;
   const reserved = statsItems.reduce((s, i) => s + i.reserved, 0);
+  const issued = statsItems.reduce((s, i) => s + (i.issued ?? 0), 0);
+  const damaged = statsItems.reduce((s, i) => s + (i.damaged ?? 0), 0);
   const totalValue = statsItems.reduce((s, i) => s + i.inStock * Number(i.unitCost), 0);
   const sparePartsValue = statsItems.filter((i) => i.itemClass === "spare_part").reduce((s, i) => s + i.inStock * Number(i.unitCost), 0);
   const consumablesValue = statsItems.filter((i) => i.itemClass === "consumable").reduce((s, i) => s + i.inStock * Number(i.unitCost), 0);
@@ -320,10 +389,97 @@ export default function Inventory() {
   );
 
   const openCreate = () => {
+    setEditingItem(null);
     setForm(emptyForm);
     setImageFiles([]);
+    setExistingImageFileIds([]);
     resetValidation();
     setDialogOpen(true);
+  };
+
+  const openEdit = (item: BackendInventoryItem) => {
+    setEditingItem(item);
+    setForm(formFromItem(item));
+    setImageFiles([]);
+    setExistingImageFileIds((item.images ?? []).map((img) => img.fileId));
+    resetValidation();
+    setDialogOpen(true);
+  };
+
+  const closeDialog = () => {
+    if (saving) return;
+    setDialogOpen(false);
+    setEditingItem(null);
+    resetValidation();
+    if (searchParams.get("edit")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("edit");
+      setSearchParams(next, { replace: true });
+    }
+  };
+
+  // Deep-link: /app/inventory?stage=parts&edit=<id>
+  useEffect(() => {
+    const editId = searchParams.get("edit");
+    if (!editId || !canManage || dialogOpen) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const item = await api.getInventoryItem(editId);
+        if (cancelled) return;
+        openEdit(item);
+      } catch (err) {
+        toast.apiError(err, { fallback: "Unable to open item for editing" });
+        const next = new URLSearchParams(searchParams);
+        next.delete("edit");
+        setSearchParams(next, { replace: true });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- open once when edit id appears
+  }, [searchParams.get("edit"), canManage]);
+
+  const openDelete = (item: BackendInventoryItem) => {
+    setDeleteTarget(item);
+  };
+
+  const closeDelete = () => {
+    if (deleting) return;
+    setDeleteTarget(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.deleteInventoryItem(deleteTarget.id);
+      toast.success("Item moved to trash", {
+        description: `${deleteTarget.name} is inactive. Stock history and linked documents remain.`,
+      });
+      setDeleteTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to move item to trash" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const restoreItem = async (item: BackendInventoryItem) => {
+    setRestoringId(item.id);
+    try {
+      await api.restoreInventoryItem(item.id);
+      toast.success("Item restored", {
+        description: `${item.name} is active again.`,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to restore item" });
+    } finally {
+      setRestoringId(null);
+    }
   };
 
   const findExistingTerm = (terms: BackendTaxonomyTerm[], name: string) =>
@@ -394,12 +550,13 @@ export default function Inventory() {
 
     setSaving(true);
     try {
-      const imageFileIds: string[] = [];
+      const uploadedIds: string[] = [];
       for (const file of imageFiles) {
         const uploaded = await api.uploadFile(file);
-        imageFileIds.push(uploaded.id);
+        uploadedIds.push(uploaded.id);
       }
-      await api.createInventoryItem({
+      const imageFileIds = [...existingImageFileIds, ...uploadedIds];
+      const payload = {
         sku: form.sku.trim(),
         name: form.name.trim(),
         itemClass: form.itemClass,
@@ -421,14 +578,20 @@ export default function Inventory() {
         supplier: supplier?.name ?? "",
         supplierId: form.supplierId || null,
         imageFileIds,
-      });
-      toast({ title: "Inventory item added", description: form.name.trim() });
-      setDialogOpen(false);
-      resetValidation();
+        additionalFields: buildTrackingAdditionalFields(form, editingItem?.additionalFields),
+      };
+      if (editingItem) {
+        await api.updateInventoryItem(editingItem.id, payload);
+        toast({ title: "Inventory item updated", description: form.name.trim() });
+      } else {
+        await api.createInventoryItem(payload);
+        toast({ title: "Inventory item added", description: form.name.trim() });
+      }
+      closeDialog();
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
     } catch (err) {
       if (!applyApiErrors(err, dialogRef.current)) {
-        toast.apiError(err, { fallback: "Unable to save item" });
+        toast.apiError(err, { fallback: editingItem ? "Unable to update item" : "Unable to save item" });
       }
     } finally {
       setSaving(false);
@@ -536,6 +699,16 @@ export default function Inventory() {
       ),
     },
     {
+      key: "issued",
+      header: "Issued",
+      render: (i) => <span className="text-sm">{i.issued ?? 0}</span>,
+    },
+    {
+      key: "damaged",
+      header: "Damaged",
+      render: (i) => <span className="text-sm">{i.damaged ?? 0}</span>,
+    },
+    {
       key: "stockState",
       header: "Stock",
       render: (i) => {
@@ -565,33 +738,204 @@ export default function Inventory() {
     },
     { key: "sellingPrice", header: "Sell", render: (i) => <span className="text-sm">{formatCurrency(i.sellingPrice ?? 0)}</span> },
     { key: "unitCost", header: "Cost", render: (i) => <span className="text-sm">{formatCurrency(i.unitCost)}</span> },
+    ...(stage === "cost"
+      ? [{
+          key: "stockValue" as const,
+          header: "Stock value",
+          render: (i: BackendInventoryItem) => (
+            <span className="font-semibold">{formatCurrency(i.inStock * Number(i.unitCost))}</span>
+          ),
+        }]
+      : []),
     { key: "supplier", header: "Supplier", render: (i) => <span className="text-sm text-muted-foreground">{i.supplier}</span> },
+    {
+      key: "status",
+      header: "Status",
+      render: (i) => <StatusBadge status={(i.status === "inactive" ? "inactive" : "active") as "active" | "inactive"} />,
+    },
+    ...(canManage
+      ? [
+          {
+            key: "actions" as keyof BackendInventoryItem,
+            header: "Actions",
+            className: "w-[1%] whitespace-nowrap text-right",
+            render: (i: BackendInventoryItem) => (
+              <div
+                className="flex items-center justify-end gap-1"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                <Button variant="outline" size="sm" onClick={() => openEdit(i)}>
+                  <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
+                </Button>
+                {i.status === "inactive" ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={restoringId === i.id}
+                    onClick={() => void restoreItem(i)}
+                  >
+                    {restoringId === i.id ? (
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                    )}
+                    Restore
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => openDelete(i)}
+                  >
+                    <Trash2 className="mr-1 h-3.5 w-3.5" /> Trash
+                  </Button>
+                )}
+              </div>
+            ),
+          } satisfies Column<BackendInventoryItem>,
+        ]
+      : []),
   ];
 
   return (
     <RoleGuard roles={["admin", "inventory", "engineer"]}>
       <div className="space-y-6">
         <PageHeader
-          title="Inventory Items"
-          description="Spare parts with cost, selling price, delivery charges, and system-managed reservations."
+          title={
+            stage === "overview"
+              ? "Inventory Overview"
+              : stage === "cost"
+                ? "Cost"
+                : "Parts"
+          }
+          description={
+            stage === "overview"
+              ? "Stock health at a glance — catalog, issues, locations, reorder, and cost."
+              : stage === "cost"
+                ? "Unit cost, selling price, and stock value on hand."
+                : "Parts catalog for spare parts, consumables, and equipment."
+          }
           actions={
-            canManage ? (
+            canManage && (stage === "parts" || stage === "overview") ? (
               <Button onClick={openCreate} variant="brand">
                 <Plus className="mr-1 h-4 w-4" /> Add Item
               </Button>
             ) : undefined
           }
         />
+        <InventoryStageNav stage={stage} />
+
+        {stage === "overview" ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="Total SKUs" value={String(pagination.total)} icon={Boxes} accent="primary" />
+              <StatCard label="Low stock" value={String(lowStock)} icon={AlertTriangle} accent="warning" />
+              <StatCard label="On-hand value" value={formatCurrencyShort(totalValue)} icon={PackageCheck} accent="success" />
+              <StatCard label="Reserved / damaged" value={`${reserved} / ${damaged}`} icon={Lock} accent="accent" />
+            </div>
+
+            {lowStock > 0 ? (
+              <Link
+                to="/app/stock-purchase-requests"
+                className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm text-warning-foreground hover:bg-warning/10"
+              >
+                <AlertTriangle className="h-4 w-4" /> {lowStock} item(s) at or below reorder level — open Reorder.
+              </Link>
+            ) : null}
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {canManage ? (
+                <ModuleQuickAction title="Add item" hint="Create a catalog SKU" icon={Plus} onClick={openCreate} />
+              ) : null}
+              <ModuleQuickAction title="Stock issue" hint="Approve & issue movements" icon={PackageMinus} to="/app/stock-ledger" />
+              <ModuleQuickAction title="Locations" hint="Bins & transfers" icon={MapPin} to="/app/stock-transfers" />
+              <ModuleQuickAction
+                title="Reorder"
+                hint={lowStock > 0 ? `${lowStock} low-stock SKU(s)` : "Purchase requests"}
+                icon={RefreshCw}
+                to="/app/stock-purchase-requests"
+              />
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Stock value</CardTitle>
+                  <CardDescription className="text-xs">Book value by item class</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <div className="flex justify-between gap-2 rounded-lg border px-3 py-2">
+                    <span className="text-muted-foreground">Spare parts</span>
+                    <span className="font-mono font-medium">{formatCurrency(sparePartsValue)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2 rounded-lg border px-3 py-2">
+                    <span className="text-muted-foreground">Consumables</span>
+                    <span className="font-mono font-medium">{formatCurrency(consumablesValue)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2 rounded-lg border px-3 py-2">
+                    <span className="text-muted-foreground">Total on hand</span>
+                    <span className="font-mono font-semibold">{formatCurrency(totalValue)}</span>
+                  </div>
+                  <Button variant="outline" size="sm" className="mt-2 w-full gap-1.5" asChild>
+                    <Link to="/app/inventory?stage=cost">
+                      <IndianRupee className="h-3.5 w-3.5" /> Open cost view
+                    </Link>
+                  </Button>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                  <div>
+                    <CardTitle className="text-base">Parts catalog</CardTitle>
+                    <CardDescription className="text-xs">Browse and edit stock items</CardDescription>
+                  </div>
+                  <Button variant="ghost" size="sm" asChild className="h-8 text-xs text-primary">
+                    <Link to="/app/inventory?stage=parts">View all →</Link>
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {(statsItems.slice(0, 5)).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left text-sm hover:bg-muted/40"
+                      onClick={() => navigate(`/app/inventory/${item.id}`)}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{item.name}</p>
+                        <p className="font-mono text-xs text-muted-foreground">{item.sku}</p>
+                      </div>
+                      <span className="shrink-0 font-mono text-xs">{item.inStock} on hand</span>
+                    </button>
+                  ))}
+                  {statsItems.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-muted-foreground">No inventory items yet.</p>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </div>
+          </>
+        ) : (
+          <>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Total SKUs" value={String(pagination.total)} icon={Boxes} accent="primary" />
-          <StatCard label="Reserved Units" value={String(reserved)} icon={Lock} accent="accent" />
+          {stage === "cost" ? (
+            <StatCard label="On-hand value" value={formatCurrencyShort(totalValue)} icon={PackageCheck} accent="accent" />
+          ) : (
+            <StatCard label="Reserved / issued / damaged" value={`${reserved} / ${issued} / ${damaged}`} icon={Lock} accent="accent" />
+          )}
           <StatCard label="Spare Parts Value" value={formatCurrencyShort(sparePartsValue)} icon={PackageCheck} accent="success" />
-          <StatCard label="Consumables Value" value={formatCurrencyShort(consumablesValue)} icon={PackageCheck} accent="info" />
+          <StatCard label="Consumables Value" value={formatCurrencyShort(consumablesValue)} icon={PackageCheck} accent="accent" />
         </div>
         {lowStock > 0 && (
-          <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm text-warning-foreground">
-            <AlertTriangle className="h-4 w-4" /> {lowStock} item(s) at or below reorder level — raise a Stock Purchase Request.
-          </div>
+          <Link
+            to="/app/stock-purchase-requests"
+            className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm text-warning-foreground hover:bg-warning/10"
+          >
+            <AlertTriangle className="h-4 w-4" /> {lowStock} item(s) at or below reorder level — open Reorder.
+          </Link>
         )}
 
         <DataTable
@@ -603,7 +947,7 @@ export default function Inventory() {
           searchPlaceholder="Search inventory items…"
           emptyMessage="No inventory items yet."
           emptyHint="Try changing your search or filters."
-          filterValues={filters}
+          filterValues={{ ...filters, status: filters.status || "active" }}
           onFilterChange={setFilter}
           filters={[
             {
@@ -612,6 +956,14 @@ export default function Inventory() {
               options: INVENTORY_ITEM_CLASS_OPTIONS.map((o) => ({ label: o.label, value: o.value })),
             },
             { key: "category", label: "Category", options: categoryFilterOptions },
+            {
+              key: "status",
+              label: "Status",
+              options: [
+                { label: "Active", value: "active" },
+                { label: "Trash", value: "inactive" },
+              ],
+            },
           ]}
           pagination={pagination}
           onPageChange={setPage}
@@ -622,11 +974,13 @@ export default function Inventory() {
           onRetry={() => loadItems()}
           onRowClick={(item) => navigate(`/app/inventory/${item.id}`)}
         />
+          </>
+        )}
 
-        <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetValidation(); setDialogOpen(open); }}>
+        <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); else setDialogOpen(open); }}>
           <DialogContent ref={dialogRef} className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Add Inventory Item</DialogTitle>
+              <DialogTitle>{editingItem ? "Edit Inventory Item" : "Add Inventory Item"}</DialogTitle>
             </DialogHeader>
             <form
               noValidate
@@ -645,6 +999,22 @@ export default function Inventory() {
                   multiple
                   onChange={(e) => setImageFiles(Array.from(e.target.files ?? []))}
                 />
+                {existingImageFileIds.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {existingImageFileIds.map((fileId) => (
+                      <div key={fileId} className="group relative h-14 w-14 overflow-hidden rounded-lg border border-border bg-muted">
+                        <img src={api.fileDownloadUrl(fileId)} alt="" className="h-full w-full object-cover" />
+                        <button
+                          type="button"
+                          className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                          onClick={() => setExistingImageFileIds((prev) => prev.filter((id) => id !== fileId))}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 {imageFiles.length > 0 ? (
                   <div className="flex flex-wrap gap-2 pt-1">
                     {imageFiles.map((file, idx) => {
@@ -696,9 +1066,11 @@ export default function Inventory() {
                     const suggestedCategory =
                       itemClass === "consumable"
                         ? categories.find((c) => c.slug === "consumables")?.slug ?? form.category
-                        : form.category === "consumables"
-                          ? categories.find((c) => c.slug === "spare-parts")?.slug ?? ""
-                          : form.category;
+                        : itemClass === "equipment"
+                          ? categories.find((c) => c.slug === "equipment")?.slug ?? form.category
+                          : form.category === "consumables" || form.category === "equipment"
+                            ? categories.find((c) => c.slug === "spare-parts")?.slug ?? ""
+                            : form.category;
                     const next = {
                       ...form,
                       itemClass,
@@ -710,7 +1082,7 @@ export default function Inventory() {
                   }}
                 >
                   <SelectTrigger className={fieldErrorClass(shouldShow("itemClass"))}>
-                    <SelectValue placeholder="Spare Parts or Consumables" />
+                    <SelectValue placeholder="Spare Parts, Consumables, or Equipment" />
                   </SelectTrigger>
                   <SelectContent>
                     {INVENTORY_ITEM_CLASS_OPTIONS.map((opt) => (
@@ -721,7 +1093,7 @@ export default function Inventory() {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Spare Parts or Consumables. Technical category options stay available below.
+                  Spare Parts, Consumables, or Equipment. Technical category options stay available below.
                 </p>
                 {shouldShow("itemClass") && <FormFieldError field="itemClass" message={errors.itemClass} />}
               </div>
@@ -746,14 +1118,11 @@ export default function Inventory() {
                       itemClass:
                         v === ADD_OPTION
                           ? form.itemClass
-                          : inferItemClassFromCategory(v) === "consumable"
-                            ? "consumable"
-                            : form.itemClass === "consumable" && v !== "consumables"
-                              ? form.itemClass
-                              : form.itemClass,
+                          : inferItemClassFromCategory(v),
                     };
                     if (v !== ADD_OPTION && v === "consumables") next.itemClass = "consumable";
                     if (v !== ADD_OPTION && v === "spare-parts") next.itemClass = "spare_part";
+                    if (v !== ADD_OPTION && v === "equipment") next.itemClass = "equipment";
                     setForm(next);
                     clearError("category");
                     if (v !== ADD_OPTION) clearError("categoryOther");
@@ -1013,22 +1382,62 @@ export default function Inventory() {
                   <Checkbox
                     id="track-batches"
                     checked={form.trackBatches}
-                    onCheckedChange={(checked) => setForm({ ...form, trackBatches: checked === true })}
+                    onCheckedChange={(checked) =>
+                      setForm({
+                        ...form,
+                        trackBatches: checked === true,
+                        batchNumbers: checked === true ? form.batchNumbers : "",
+                      })
+                    }
                   />
                   <Label htmlFor="track-batches" className="font-normal">
                     Track batches
                   </Label>
                 </div>
+                {form.trackBatches ? (
+                  <div className="grid gap-2 pl-6">
+                    <Label htmlFor="batch-numbers" className="text-muted-foreground font-normal">
+                      Batch numbers
+                    </Label>
+                    <Textarea
+                      id="batch-numbers"
+                      value={form.batchNumbers}
+                      placeholder="Enter batch or lot numbers (one per line or comma-separated)"
+                      rows={3}
+                      onChange={(e) => setForm({ ...form, batchNumbers: e.target.value })}
+                    />
+                  </div>
+                ) : null}
                 <div className="flex items-center gap-2">
                   <Checkbox
                     id="track-serials"
                     checked={form.trackSerials}
-                    onCheckedChange={(checked) => setForm({ ...form, trackSerials: checked === true })}
+                    onCheckedChange={(checked) =>
+                      setForm({
+                        ...form,
+                        trackSerials: checked === true,
+                        serialNumbers: checked === true ? form.serialNumbers : "",
+                      })
+                    }
                   />
                   <Label htmlFor="track-serials" className="font-normal">
                     Track serial numbers
                   </Label>
                 </div>
+                {form.trackSerials ? (
+                  <div className="grid gap-2 pl-6">
+                    <Label htmlFor="serial-numbers" className="text-muted-foreground font-normal">
+                      Serial numbers
+                    </Label>
+                    <Textarea
+                      id="serial-numbers"
+                      value={form.serialNumbers}
+                      placeholder="Enter serial numbers (one per line or comma-separated)"
+                      rows={3}
+                      onChange={(e) => setForm({ ...form, serialNumbers: e.target.value })}
+                    />
+                  </div>
+                ) : null}
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-2">
@@ -1078,17 +1487,40 @@ export default function Inventory() {
                 />
               )}
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+                <Button type="button" variant="outline" onClick={closeDialog}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={saving}>
                   {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Save item
+                  {editingItem ? "Save changes" : "Save item"}
                 </Button>
               </DialogFooter>
             </form>
           </DialogContent>
         </Dialog>
+
+        <DeleteConfirmDialog
+          open={!!deleteTarget}
+          onOpenChange={(open) => {
+            if (!open) closeDelete();
+          }}
+          title="Move to trash?"
+          description={
+            <div className="space-y-2">
+              <p>
+                This soft-removes{" "}
+                <span className="font-medium text-foreground">{deleteTarget?.name}</span>
+                {deleteTarget?.sku ? ` (${deleteTarget.sku})` : ""}. The product is marked inactive — not permanently erased.
+              </p>
+              <p>
+                Stock history, reservations, purchase lines, and sales lines stay linked. Restore anytime from the Trash status filter.
+              </p>
+            </div>
+          }
+          confirmLabel="Move to trash"
+          loading={deleting}
+          onConfirm={() => void confirmDelete()}
+        />
 
         {previewState ? (
           <Dialog open={Boolean(previewState)} onOpenChange={(open) => !open && setPreviewState(null)}>

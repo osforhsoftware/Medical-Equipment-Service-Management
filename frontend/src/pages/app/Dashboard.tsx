@@ -140,8 +140,8 @@ function roleQuickActions(role: Role): QuickAction[] {
       ];
     case "inventory":
       return [
-        { label: "Low Stock", to: "/app/inventory", icon: AlertTriangle },
-        { label: "Purchase Orders", to: "/app/purchase-orders", icon: ShoppingCart },
+        { label: "Low Stock", to: "/app/stock-purchase-requests", icon: AlertTriangle },
+        { label: "Purchase", to: "/app/rfqs", icon: ShoppingCart },
         { label: "Purchase Returns", to: "/app/purchase-returns", icon: Package },
 
         { label: "Notifications", to: "/app/notifications", icon: Bell },

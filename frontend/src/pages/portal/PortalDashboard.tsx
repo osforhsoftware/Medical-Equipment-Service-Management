@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { HardDrive, FileClock, ShieldCheck, ArrowRight, Loader2 } from "lucide-react";
+import { HardDrive, FileClock, ShieldCheck, ArrowRight, Loader2, Plus } from "lucide-react";
 import { StatCard } from "@/components/shared/StatCard";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { PortalRequestDialog } from "@/components/portal/PortalRequestDialog";
 import { useAuth } from "@/context/AuthContext";
 import { api, type BackendEquipment, type BackendEstimate, type BackendServiceRequest } from "@/lib/api";
-import { formatDate } from "@/lib/format";
-import { formatCurrency } from "@/lib/format";
+import { formatDate, formatCurrency, formatServiceStatus, formatJobStatus } from "@/lib/format";
+import { isEstimatePendingDecision } from "@/lib/estimates";
 import { toast } from "@/lib/toast";
+
+const CLOSED_STATUSES = new Set(["completed", "invoiced", "finished", "closed", "cancelled", "pending_invoice"]);
 
 export default function PortalDashboard() {
   const { user } = useAuth();
@@ -19,34 +22,41 @@ export default function PortalDashboard() {
   const [myRequests, setMyRequests] = useState<BackendServiceRequest[]>([]);
   const [pendingEstimates, setPendingEstimates] = useState<BackendEstimate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [requestOpen, setRequestOpen] = useState(false);
 
-  useEffect(() => {
+  const load = () => {
     if (!user) { setLoading(false); return; }
+    setLoading(true);
     void api.getCustomerPortal()
       .then((portal) => {
         setMyEquipment(portal.equipment);
         setMyRequests(portal.requests);
-        setPendingEstimates(
-          portal.estimates.filter((estimate) =>
-            ["sent", "revision", "pendingAdminApproval"].includes(estimate.status),
-          ),
-        );
+        setPendingEstimates(portal.estimates.filter((estimate) => isEstimatePendingDecision(estimate.status)));
       })
       .catch((error) => toast.apiError(error, { fallback: "Request failed" }))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
   }, [user]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={`Welcome, ${user?.name}`}
-        description="Your equipment, service requests and estimates at a glance."
+        description="Your service equipment, requests, and estimates only."
+        actions={
+          <Button size="sm" onClick={() => setRequestOpen(true)} disabled={myEquipment.length === 0}>
+            <Plus className="mr-1 h-4 w-4" /> New request
+          </Button>
+        }
       />
       {loading ? <div className="flex justify-center gap-2 py-12 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /> Loading overview…</div> : null}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="My Equipment" value={String(myEquipment.length)} icon={HardDrive} accent="primary" />
-        <StatCard label="Active Requests" value={String(myRequests.filter((r) => !["completed", "invoiced", "finished"].includes(r.status)).length)} icon={FileClock} accent="accent" />
+        <StatCard label="Active Requests" value={String(myRequests.filter((r) => !CLOSED_STATUSES.has(r.status)).length)} icon={FileClock} accent="accent" />
         <StatCard label="Estimates to Review" value={String(pendingEstimates.length)} icon={ShieldCheck} accent="warning" />
       </div>
 
@@ -79,13 +89,22 @@ export default function PortalDashboard() {
             <div key={r.id} className="flex items-center justify-between rounded-xl border border-border/80 bg-gradient-to-r from-secondary/30 to-transparent p-3 transition-colors hover:border-primary/20">
               <div>
                 <p className="text-sm font-medium">{r.equipmentName}</p>
-                <p className="text-xs text-muted-foreground">{r.reference}{r.type ? ` · ${r.type}` : ""}</p>
+                <p className="text-xs text-muted-foreground">
+                  {r.reference}{r.type ? ` · ${r.type}` : ""}
+                  {"jobStatus" in r && r.jobStatus ? ` · Job: ${formatJobStatus(String(r.jobStatus))}` : ""}
+                </p>
               </div>
-              <StatusBadge status={r.status} />
+              <StatusBadge status={r.status} label={formatServiceStatus(r.status)} />
             </div>
           ))}
         </CardContent>
       </Card>
+      <PortalRequestDialog
+        open={requestOpen}
+        onOpenChange={setRequestOpen}
+        equipment={myEquipment}
+        onCreated={load}
+      />
     </div>
   );
 }

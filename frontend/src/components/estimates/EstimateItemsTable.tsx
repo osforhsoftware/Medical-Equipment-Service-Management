@@ -16,11 +16,11 @@ import { inventoryOriginUnitPrice, MarginWarningBadge } from "@/components/share
 import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 
 const LINE_GRID =
-  "grid grid-cols-[minmax(0,1.5fr)_8.5rem_5.5rem_7rem_5.5rem_6.5rem_7.5rem] items-start gap-x-2";
+  "grid grid-cols-[minmax(0,1.4fr)_7rem_8.5rem_5.5rem_7rem_5.5rem_6.5rem_7.5rem] items-start gap-x-2";
 const LINE_GRID_EDIT =
-  "grid grid-cols-[minmax(0,1.5fr)_8.5rem_5.5rem_7rem_5.5rem_6.5rem_7.5rem_2.5rem] items-start gap-x-2";
+  "grid grid-cols-[minmax(0,1.4fr)_7rem_8.5rem_5.5rem_7rem_5.5rem_6.5rem_7.5rem_2.5rem] items-start gap-x-2";
 const numberInputClass =
-  "h-10 min-w-0 w-full px-2 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+  "h-10 min-w-0 w-full overflow-hidden px-2 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 const CUSTOM_CATALOG_VALUE = "__custom__";
 
 interface EstimateItemsTableProps {
@@ -30,6 +30,7 @@ interface EstimateItemsTableProps {
   catalog?: BackendCatalogItem[];
   inventory?: BackendInventoryItem[];
   invalid?: boolean;
+  adjustUnitPrice?: (basePrice: number) => number;
   onChange?: (lines: EstimateLineInput[]) => void;
 }
 
@@ -40,6 +41,7 @@ export function EstimateItemsTable({
   catalog = [],
   inventory = [],
   invalid,
+  adjustUnitPrice,
   onChange,
 }: EstimateItemsTableProps) {
   const editable = mode === "edit";
@@ -84,7 +86,7 @@ export function EstimateItemsTable({
       type: "part",
       description: item.name,
       partNumber: item.sku,
-      unitPrice: inventoryOriginUnitPrice(item) + delivery / Math.max(qty, 1),
+      unitPrice: (adjustUnitPrice ?? ((n) => n))(inventoryOriginUnitPrice(item)) + delivery / Math.max(qty, 1),
       // Store cost price for margin warnings
       costPrice: Number(item.unitCost) || 0,
     });
@@ -119,13 +121,14 @@ export function EstimateItemsTable({
               "border-b border-border bg-muted/40 px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground",
             )}
           >
-            <div>Description</div>
-            <div>Type</div>
-            <div className="pr-2 text-right">Qty</div>
-            <div className="pr-2 text-right">Unit Price</div>
-            <div className="pr-2 text-right">Tax %</div>
-            <div className="pr-2 text-right">Discount</div>
-            <div className="pr-2 text-right">Total</div>
+            <div className="overflow-text">Description</div>
+            <div className="overflow-text">Part no.</div>
+            <div className="overflow-text">Type</div>
+            <div className="overflow-text pr-2 text-right">Qty</div>
+            <div className="overflow-text pr-2 text-right">Unit Price</div>
+            <div className="overflow-text pr-2 text-right">Tax %</div>
+            <div className="overflow-text pr-2 text-right">Discount</div>
+            <div className="overflow-text pr-2 text-right">Total</div>
             {editable ? <div /> : null}
           </div>
           {lines.length === 0 ? (
@@ -134,7 +137,7 @@ export function EstimateItemsTable({
             lines.map((line, index) => (
               <div key={index} className="border-b border-border px-3 py-2 last:border-0">
                 <div className={gridClass}>
-                  <div className="min-w-0">
+                  <div className="min-w-0 overflow-hidden">
                     {editable ? (
                       <div className="space-y-1.5">
                         <Input
@@ -171,13 +174,29 @@ export function EstimateItemsTable({
                         </div>
                       </div>
                     ) : (
-                      <div className="min-w-0 py-2">
-                        <p className="font-medium">{line.description || "—"}</p>
-                        {line.partNumber ? <p className="text-xs text-muted-foreground">{line.partNumber}</p> : null}
+                      <div className="min-w-0 overflow-hidden py-2">
+                        <p className="overflow-text font-medium" title={line.description || undefined}>
+                          {line.description || "—"}
+                        </p>
                       </div>
                     )}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 overflow-hidden">
+                    {editable ? (
+                      <Input
+                        value={line.partNumber ?? ""}
+                        onChange={(e) => updateLine(index, { partNumber: e.target.value || null })}
+                        placeholder="SKU / PN"
+                        aria-label={`Line ${index + 1} part number`}
+                        className="min-w-0"
+                      />
+                    ) : (
+                      <span className="overflow-text block py-2 text-xs text-muted-foreground" title={line.partNumber || undefined}>
+                        {line.partNumber || "—"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0 overflow-hidden">
                     {editable ? (
                       <Select value={line.type} onValueChange={(v) => updateLine(index, { type: v as EstimateLineInput["type"] })}>
                         <SelectTrigger className="min-w-0" aria-label={`Line ${index + 1} type`}>
@@ -192,10 +211,10 @@ export function EstimateItemsTable({
                         </SelectContent>
                       </Select>
                     ) : (
-                      <span className="block py-2 text-muted-foreground">{formatLineType(line.type)}</span>
+                      <span className="overflow-text block py-2 text-muted-foreground">{formatLineType(line.type)}</span>
                     )}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 overflow-hidden">
                     {editable ? (
                       <Input
                         type="number"
@@ -207,10 +226,10 @@ export function EstimateItemsTable({
                         aria-label={`Line ${index + 1} quantity`}
                       />
                     ) : (
-                      <span className="block py-2 pr-2 text-right tabular-nums">{line.quantity}</span>
+                      <span className="overflow-num block py-2 pr-2 text-right">{line.quantity}</span>
                     )}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 overflow-hidden">
                     {editable ? (
                       <div className="space-y-1">
                         <Input
@@ -234,10 +253,12 @@ export function EstimateItemsTable({
                         )}
                       </div>
                     ) : (
-                      <span className="block py-2 pr-2 text-right tabular-nums">{formatCurrency(line.unitPrice)}</span>
+                      <span className="overflow-num block py-2 pr-2 text-right" title={formatCurrency(line.unitPrice)}>
+                        {formatCurrency(line.unitPrice)}
+                      </span>
                     )}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 overflow-hidden">
                     {editable ? (
                       <Input
                         type="number"
@@ -249,10 +270,10 @@ export function EstimateItemsTable({
                         aria-label={`Line ${index + 1} tax rate`}
                       />
                     ) : (
-                      <span className="block py-2 pr-2 text-right tabular-nums">{line.taxRate}%</span>
+                      <span className="overflow-num block py-2 pr-2 text-right">{line.taxRate}%</span>
                     )}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 overflow-hidden">
                     {editable ? (
                       <Input
                         type="number"
@@ -264,11 +285,15 @@ export function EstimateItemsTable({
                         aria-label={`Line ${index + 1} discount`}
                       />
                     ) : (
-                      <span className="block py-2 pr-2 text-right tabular-nums">{formatCurrency(line.discount || 0)}</span>
+                      <span className="overflow-num block py-2 pr-2 text-right" title={formatCurrency(line.discount || 0)}>
+                        {formatCurrency(line.discount || 0)}
+                      </span>
                     )}
                   </div>
-                  <div className="flex h-10 items-center justify-end pr-2 font-medium tabular-nums">
-                    {formatCurrency(lineTotal(line))}
+                  <div className="flex h-10 min-w-0 items-center justify-end overflow-hidden pr-2 font-medium">
+                    <span className="overflow-num" title={formatCurrency(lineTotal(line))}>
+                      {formatCurrency(lineTotal(line))}
+                    </span>
                   </div>
                   {editable ? (
                     <div className="flex h-10 items-center justify-center">

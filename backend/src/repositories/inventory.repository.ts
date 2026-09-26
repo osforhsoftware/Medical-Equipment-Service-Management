@@ -1,5 +1,5 @@
 import { prisma } from "@/db/prisma";
-import type { InventoryItem, Prisma } from "@prisma/client";
+import type { EntityStatus, InventoryItem, Prisma } from "@prisma/client";
 import type { PaginatedResult } from "@/types";
 import { searchContains } from "@/utils/searchFilter";
 
@@ -9,6 +9,7 @@ export interface InventoryListFilters {
   itemClass?: string;
   stockStatus?: string;
   supplierId?: string;
+  status?: string;
   search?: string;
   skip: number;
   take: number;
@@ -22,6 +23,7 @@ function buildWhere(tenantId: string, filters: Omit<InventoryListFilters, "skip"
     ...(filters.category ? { category: filters.category } : {}),
     ...(filters.itemClass ? { itemClass: filters.itemClass } : {}),
     ...(filters.supplierId ? { supplierId: filters.supplierId } : {}),
+    ...(filters.status ? { status: filters.status as EntityStatus } : {}),
     ...(filters.stockStatus === "out" ? { inStock: 0 } : {}),
   };
 
@@ -88,7 +90,7 @@ export class InventoryRepository {
 
   async findLowStock(tenantId: string): Promise<InventoryItem[]> {
     const items = await prisma.inventoryItem.findMany({
-      where: { tenantId },
+      where: { tenantId, status: "active" },
       include: { images: { include: { file: true }, orderBy: { sortOrder: "asc" } } },
       orderBy: { name: "asc" },
     });
@@ -110,8 +112,24 @@ export class InventoryRepository {
     return prisma.inventoryItem.update({ where: { id }, data });
   }
 
-  async delete(id: string, tenantId: string): Promise<void> {
-    await prisma.inventoryItem.deleteMany({ where: { id, tenantId } });
+  async softDelete(id: string, tenantId: string): Promise<InventoryItem> {
+    await prisma.inventoryItem.updateMany({
+      where: { id, tenantId },
+      data: { status: "inactive" },
+    });
+    const item = await this.findById(id, tenantId);
+    if (!item) throw new Error("Inventory item not found after soft delete");
+    return item;
+  }
+
+  async restore(id: string, tenantId: string): Promise<InventoryItem> {
+    await prisma.inventoryItem.updateMany({
+      where: { id, tenantId },
+      data: { status: "active" },
+    });
+    const item = await this.findById(id, tenantId);
+    if (!item) throw new Error("Inventory item not found after restore");
+    return item;
   }
 }
 

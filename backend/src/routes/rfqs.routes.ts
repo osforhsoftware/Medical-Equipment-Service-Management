@@ -4,6 +4,7 @@ import { authenticate, requireRole } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
 import { validate } from "@/middleware/validate";
 import { createRfqSchema, updateRfqSchema, createSupplierQuoteSchema } from "@/schemas/rfqs.schema";
+import { domainService } from "@/services/domain.service";
 import { success } from "@/utils/response";
 
 const router = Router();
@@ -11,6 +12,7 @@ router.use(authenticate, resolveTenant);
 
 const canAccess = requireRole("admin", "inventory", "coordinator", "billing");
 const canManage = requireRole("admin", "inventory", "coordinator");
+const canConvertToPo = requireRole("admin", "inventory");
 
 router.get("/", canAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -116,13 +118,29 @@ router.post("/:id/quotes", canManage, validate(createSupplierQuoteSchema), async
       return;
     }
 
-    const { validUntil, lines, notes } = req.body;
+    const {
+      validUntil,
+      lines,
+      notes,
+      currency,
+      warranty,
+      incoterm,
+      shippingTerms,
+      paymentTerms,
+      countryOfOrigin,
+    } = req.body;
     const quote = await prisma.supplierQuote.create({
       data: {
         tenantId,
         rfqId,
         lines,
         notes,
+        currency,
+        warranty,
+        incoterm,
+        shippingTerms,
+        paymentTerms,
+        countryOfOrigin,
         validUntil: validUntil ? new Date(validUntil) : null,
       },
     });
@@ -133,6 +151,19 @@ router.post("/:id/quotes", canManage, validate(createSupplierQuoteSchema), async
     });
 
     res.status(201).json(success("Supplier quote submitted", quote));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/:id/quotes/:quoteId/convert-to-po", canConvertToPo, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await domainService.convertSupplierQuoteToPurchaseOrder(
+      req.tenantId!,
+      req.params.id,
+      req.params.quoteId,
+    );
+    res.status(201).json(success("Purchase order created from supplier quote", data));
   } catch (err) {
     next(err);
   }

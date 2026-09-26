@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { QuickAddCustomerDialog } from "@/components/sales/QuickAddCustomerDialog";
 import { CreditExposureBanner } from "@/components/shared/CreditExposureBanner";
+import { creditBlocksSave, useCustomerCreditExposure } from "@/hooks/useCustomerCreditExposure";
 import { inventoryOriginUnitPrice } from "@/components/shared/InventoryHelpers";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { Badge } from "@/components/ui/badge";
@@ -131,6 +132,7 @@ async function listSaleInventoryItems(search?: string) {
     search: search || undefined,
     sortBy: "name",
     sortOrder: "asc",
+    status: "active",
   });
   const totalPages = Math.min(first.meta.totalPages || 1, search ? 1 : 5);
   if (totalPages <= 1) return first.data;
@@ -142,6 +144,7 @@ async function listSaleInventoryItems(search?: string) {
           page: index + 2,
           sortBy: "name",
           sortOrder: "asc",
+          status: "active",
         })
         .then((result) => result.data),
     ),
@@ -317,6 +320,8 @@ export function SaleFormDialog({
     const tax = lines.reduce((sum, line) => sum + (lineNet(line) * (line.taxRate || 0)) / 100, 0);
     return { subtotal, discount, tax, total: subtotal - discount + tax };
   }, [lines]);
+  const credit = useCustomerCreditExposure(customerId);
+  const creditBlocked = creditBlocksSave(credit, totals.total);
 
   const addInventory = (item: BackendInventoryItem) => {
     setLines((prev) => {
@@ -406,6 +411,10 @@ export function SaleFormDialog({
   const save = async () => {
     if (!customerId) {
       toast({ title: "Pick a customer", variant: "destructive" });
+      return;
+    }
+    if (creditBlocked) {
+      toast({ title: "Credit limit exceeded", description: "Pay outstanding invoices or raise the limit.", variant: "destructive" });
       return;
     }
     const ready = lines.filter((line) => line.description.trim() && line.quantity > 0);
@@ -1034,12 +1043,12 @@ export function SaleFormDialog({
           <DialogFooter className="border-t bg-muted/40 p-4 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-start">
               <div className="text-left">
-                <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">
+                <p className="overflow-num text-[10px] uppercase tracking-wider font-bold text-muted-foreground" title={`Subtotal: ${formatCurrency(totals.subtotal)}`}>
                   Subtotal: {formatCurrency(totals.subtotal)}
                 </p>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-xs text-muted-foreground font-medium">Total Sale:</span>
-                  <span className="text-2xl font-black text-amber-600 dark:text-amber-400">
+                <div className="flex min-w-0 items-baseline gap-2">
+                  <span className="shrink-0 text-xs text-muted-foreground font-medium">Total Sale:</span>
+                  <span className="overflow-num text-2xl font-black text-amber-600 dark:text-amber-400" title={formatCurrency(totals.total)}>
                     {formatCurrency(totals.total)}
                   </span>
                 </div>
@@ -1054,7 +1063,7 @@ export function SaleFormDialog({
                 type="button"
                 variant="brand"
                 className="h-10 px-6 gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-semibold shadow-md shadow-amber-500/20"
-                disabled={saving}
+                disabled={saving || creditBlocked}
                 onClick={() => void save()}
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}

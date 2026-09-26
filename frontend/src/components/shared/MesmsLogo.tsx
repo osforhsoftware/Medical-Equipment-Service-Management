@@ -127,7 +127,7 @@ export function MesmsLogo({
       viewBox="0 0 64 64"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className="shrink-0 drop-shadow-sm transition-transform duration-300 hover:scale-105"
+      className="shrink-0"
       aria-hidden="true"
     >
       <defs>
@@ -236,7 +236,7 @@ export function MesmsLogo({
       <div className="flex flex-col leading-none">
         <div className="flex items-center gap-1.5">
           <span className={cn(config.titleClass, textColor)}>MESMS</span>
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-teal-400 animate-pulse" />
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-teal-400" />
         </div>
         {showSubtitle && size !== "xs" && (
           <span className={cn(config.subtitleClass, subtextColor, "uppercase mt-0.5 tracking-wider")}>

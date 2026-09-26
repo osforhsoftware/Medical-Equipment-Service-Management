@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { INVENTORY_ITEM_CLASSES } from "@/lib/inventoryItemClass";
 
+const additionalFieldSchema = z.object({
+  label: z.string().trim().min(1).max(80),
+  value: z.string().trim().max(5000).default(""),
+});
+
 export const createInventorySchema = z.object({
   sku: z.string().trim().max(64).optional(),
   name: z.string().min(2, "Name is required").max(200),
@@ -25,6 +30,37 @@ export const createInventorySchema = z.object({
   supplier: z.string().max(120).optional().default(""),
   supplierId: z.string().cuid().optional().nullable(),
   imageFileIds: z.array(z.string().cuid()).optional(),
+  additionalFields: z.array(additionalFieldSchema).max(30).optional().nullable(),
 });
 
 export const updateInventorySchema = createInventorySchema.partial();
+
+export const approvePartsRequestSchema = z.object({
+  lines: z
+    .array(
+      z.object({
+        lineId: z.string().min(1),
+        qtyApproved: z.coerce.number().int().min(0),
+      }),
+    )
+    .max(30)
+    .optional(),
+});
+
+export const rejectPartsRequestSchema = z.object({
+  reason: z.string().trim().max(2000).optional(),
+});
+
+export const issuePartsRequestSchema = z.object({
+  lines: z
+    .array(
+      z.object({
+        lineId: z.string().min(1),
+        quantity: z.coerce.number().int().min(1),
+        batchNumber: z.string().trim().max(191).optional().nullable(),
+        serialNumbers: z.string().trim().max(191).optional().nullable(),
+      }),
+    )
+    .max(30)
+    .optional(),
+});

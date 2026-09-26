@@ -41,6 +41,7 @@ export const DEFAULT_TAXONOMY_TERMS: Record<TaxonomyTypeName, DefaultTaxonomyTer
   ],
   inventory_category: [
     { name: "Spare Parts", slug: "spare-parts", sortOrder: 5 },
+    { name: "Equipment", slug: "equipment", sortOrder: 7 },
     { name: "Modules", slug: "modules", sortOrder: 10 },
     { name: "Sensors", slug: "sensors", sortOrder: 20 },
     { name: "Consumables", slug: "consumables", sortOrder: 30 },
@@ -100,6 +101,8 @@ export const TAXONOMY_LEGACY_ALIASES: Record<TaxonomyTypeName, Record<string, st
     "Spare Parts": "spare-parts",
     "spare_parts": "spare-parts",
     spare_part: "spare-parts",
+    Equipment: "equipment",
+    equipment: "equipment",
   },
   inventory_subcategory: {},
   expense_category: {},

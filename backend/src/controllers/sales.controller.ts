@@ -1,15 +1,20 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { salesService } from "@/services/sales.service";
+import { isSalesSelfScoped } from "@/lib/salesScope";
 import { success } from "@/utils/response";
 
 function actor(req: Request) {
   return { userId: req.user!.userId, name: req.user!.name, role: req.user!.role };
 }
 
+function selfSalespersonId(req: Request) {
+  return isSalesSelfScoped(req.user?.role) ? req.user!.userId : undefined;
+}
+
 export class SalesController {
   async getDesk(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await salesService.getDesk(req.tenantId!);
+      const data = await salesService.getDesk(req.tenantId!, actor(req));
       res.json(success("Sales desk fetched successfully", data));
     } catch (err) {
       next(err);
@@ -27,6 +32,7 @@ export class SalesController {
         from: typeof from === "string" ? from : undefined,
         to: typeof to === "string" ? to : undefined,
         search: typeof search === "string" ? search : undefined,
+        salespersonId: selfSalespersonId(req),
       });
       res.json(success("Sales orders fetched successfully", data));
     } catch (err) {
@@ -36,7 +42,7 @@ export class SalesController {
 
   async getOrder(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await salesService.getOrder(req.tenantId!, req.params.id);
+      const data = await salesService.getOrder(req.tenantId!, req.params.id, actor(req));
       res.json(success("Sales order fetched successfully", data));
     } catch (err) {
       next(err);
@@ -63,7 +69,7 @@ export class SalesController {
 
   async updateOrder(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await salesService.updateOrder(req.tenantId!, req.params.id, req.body);
+      const data = await salesService.updateOrder(req.tenantId!, req.params.id, req.body, actor(req));
       res.json(success("Sale updated successfully", data));
     } catch (err) {
       next(err);
@@ -72,7 +78,7 @@ export class SalesController {
 
   async deliver(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await salesService.deliver(req.tenantId!, req.params.id, req.user!.userId);
+      const data = await salesService.deliver(req.tenantId!, req.params.id, req.user!.userId, req.user!.role);
       res.json(success("Sales order delivered and stock deducted", data));
     } catch (err) {
       next(err);
@@ -81,7 +87,7 @@ export class SalesController {
 
   async createInvoice(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await salesService.createInvoice(req.tenantId!, req.params.id, req.body);
+      const data = await salesService.createInvoice(req.tenantId!, req.params.id, req.body, actor(req));
       res.status(201).json(success("Invoice created from sales order", data));
     } catch (err) {
       next(err);
@@ -92,7 +98,11 @@ export class SalesController {
     try {
       const from = typeof req.query.from === "string" ? req.query.from : undefined;
       const to = typeof req.query.to === "string" ? req.query.to : undefined;
-      const data = await salesService.getReports(req.tenantId!, { from, to });
+      const data = await salesService.getReports(req.tenantId!, {
+        from,
+        to,
+        salespersonId: selfSalespersonId(req),
+      });
       res.json(success("Sales reports fetched successfully", data));
     } catch (err) {
       next(err);

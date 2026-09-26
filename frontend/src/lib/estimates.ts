@@ -1,5 +1,6 @@
 import type { BackendEstimate, BackendEstimateLine, EstimateLineInput } from "@/lib/api";
 import type { DocumentLine } from "@/components/shared/ProfessionalDocument";
+import { parseAmount } from "@/lib/format";
 
 export const ESTIMATE_STATUS_OPTIONS = [
   { label: "Draft", value: "draft" },
@@ -26,7 +27,7 @@ export const ESTIMATE_LINE_TYPES = [
   { value: "part", label: "Part" },
   { value: "service", label: "Service" },
   { value: "custom", label: "Custom" },
-  { value: "transport", label: "Transport" },
+  { value: "transport", label: "Delivery / logistics" },
   { value: "testing", label: "Testing" },
   { value: "calibration", label: "Calibration" },
   { value: "other", label: "Other" },
@@ -53,7 +54,10 @@ export function canEditEstimate(status: string) {
 }
 
 export function lineNet(line: Pick<EstimateLineInput, "quantity" | "unitPrice" | "discount">) {
-  return Math.max(0, line.quantity * line.unitPrice - (line.discount || 0));
+  const quantity = parseAmount(line.quantity);
+  const unitPrice = parseAmount(line.unitPrice);
+  const discount = parseAmount(line.discount || 0);
+  return Math.max(0, quantity * unitPrice - discount);
 }
 
 export function lineTotal(line: Pick<EstimateLineInput, "quantity" | "unitPrice" | "discount" | "taxRate">) {
@@ -109,7 +113,7 @@ export function estimateToDocumentLines(estimate: BackendEstimate): DocumentLine
 export function mapEstimateLine(line: BackendEstimateLine): DocumentLine {
   return {
     id: line.id,
-    description: line.description,
+    description: line.partNumber ? `${line.description} (${line.partNumber})` : line.description,
     type: line.type,
     quantity: Number(line.quantity),
     unitPrice: Number(line.unitPrice),

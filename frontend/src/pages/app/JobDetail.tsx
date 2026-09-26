@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { Camera, ClipboardList, Download, Loader2, PackageMinus, Pencil, PlusCircle, Trash2, UserPlus, Wrench } from "lucide-react";
+import { Camera, ClipboardList, Download, Loader2, PackageMinus, Pencil, PlusCircle, Trash2, Undo2, UserPlus, Wrench } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
@@ -17,6 +17,7 @@ import {
 } from "@/components/shared/RecordDetailLayout";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { JobWorkReportPanel } from "@/components/jobs/JobWorkReportPanel";
+import { JobWorkbenchContextSection } from "@/components/jobs/JobWorkbenchContext";
 import { pickWorkReportLog, useJobWorkReportEditor } from "@/components/jobs/useJobWorkReportEditor";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
@@ -39,6 +40,7 @@ import {
   type BackendInventoryItem,
   type BackendJobActivity,
   type BackendJobExtra,
+  type BackendJobPartsRequestLine,
   type BackendServiceJob,
   type BackendUser,
   type JobPhotoInput,
@@ -171,6 +173,11 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
   const [partsOpen, setPartsOpen] = useState(false);
   const [editingExtraId, setEditingExtraId] = useState<string | null>(null);
   const [stockOpen, setStockOpen] = useState(false);
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [returnItemId, setReturnItemId] = useState("");
+  const [returnLineId, setReturnLineId] = useState("");
+  const [returnQty, setReturnQty] = useState(1);
+  const [returnDisposition, setReturnDisposition] = useState<"return" | "scrap">("return");
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoCaptions, setPhotoCaptions] = useState<string[]>([]);
   const [partsNote, setPartsNote] = useState("");
@@ -219,6 +226,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
   const [dispatchDate, setDispatchDate] = useState("");
   const [estimatedDeliveryDate, setEstimatedDeliveryDate] = useState("");
   const [downloadingReport, setDownloadingReport] = useState(false);
+  const [creatingRework, setCreatingRework] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const photosDialogRef = useRef<HTMLDivElement>(null);
   const scopeDialogRef = useRef<HTMLDivElement>(null);
@@ -272,6 +280,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
   const canManageRegistration = hasRole(JOB_CREATE_ROLES);
   /** Overdue escalation notes — matches POST /jobs/:id/activities roles. */
   const canLogEscalation = hasRole(["admin", "coordinator", "engineer"]) && canMutate;
+  const canCreateRework = hasRole(["admin", "coordinator"]) && canMutate;
   const statusOptions = canApproveComplete ? JOB_STATUS_OPTIONS : ENGINEER_STATUS_OPTIONS;
   const awaitingQa = job?.status === "review";
   const awaitingDelivery = job?.status === "delivery";
@@ -466,6 +475,20 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
       }
     } finally {
       setRegistrationSaving(false);
+    }
+  };
+
+  const createRework = async () => {
+    if (!job) return;
+    setCreatingRework(true);
+    try {
+      const rework = await api.createJobRework(job.id);
+      toast.success("Rework job created", { description: rework.reference });
+      navigate(`/app/jobs/${rework.id}`);
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to create rework" });
+    } finally {
+      setCreatingRework(false);
     }
   };
 
@@ -691,11 +714,14 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
         });
       } else {
         await api.addJobExtra(job.id, payload);
-        await api.requestJobParts(job.id, partsNote.trim());
+        await api.requestJobParts(job.id, {
+          notes: partsNote.trim(),
+          lines: selectedItem ? [{ inventoryItemId: selectedItem.id, quantity: partsQty }] : [],
+        });
         toast({
           title: "Parts / scope request submitted",
           description: selectedItem
-            ? "The requested parts were sent to purchasing and the service coordinator."
+            ? "Sent to inventory for approve → issue. Coordinator also reviews extra scope."
             : "Sent to the service coordinator for approval.",
         });
       }
@@ -718,7 +744,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
     resetPartsForm();
     setPartsOpen(true);
     try {
-      setInventory((await api.listInventory({ limit: 100, page: 1 })).data);
+      setInventory((await api.listInventory({ limit: 100, page: 1, status: "active" })).data);
     } catch {
       setInventory([]);
     }
@@ -734,7 +760,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
     scopeValidation.reset();
     setPartsOpen(true);
     try {
-      setInventory((await api.listInventory({ limit: 100, page: 1 })).data);
+      setInventory((await api.listInventory({ limit: 100, page: 1, status: "active" })).data);
     } catch {
       setInventory([]);
     }
@@ -768,14 +794,14 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
     }
   };
 
-  const openStockDialog = async () => {
+  const openStockDialog = async (presetItemId?: string, presetQty = 1) => {
     setStockOpen(true);
-    setStockItemId("");
+    setStockItemId(presetItemId ?? "");
     setStockClassFilter("all");
-    setStockQty(1);
+    setStockQty(presetQty);
     stockValidation.reset();
     try {
-      setInventory((await api.listInventory({ limit: 100, page: 1 })).data);
+      setInventory((await api.listInventory({ limit: 100, page: 1, status: "active" })).data);
     } catch {
       setInventory([]);
     }
@@ -792,7 +818,11 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
   const handleDeductStock = async () => {
     if (!job) return;
     const item = inventory.find((i) => i.id === stockItemId);
-    const inStock = item?.inStock ?? 0;
+    const issuedRemaining = (job.partsRequests ?? [])
+      .flatMap((request) => request.lines ?? [])
+      .filter((line) => line.inventoryItemId === stockItemId)
+      .reduce((sum, line) => sum + (line.issuedRemaining ?? Math.max(0, line.qtyIssued - line.qtyConsumed - line.qtyReturned - line.qtyScrapped)), 0);
+    const inStock = issuedRemaining > 0 ? issuedRemaining : (item?.inStock ?? 0);
     const values = { stockItemId, stockQty };
     const fieldErrors = validateStock(values, inStock);
     if (Object.keys(fieldErrors).length > 0) {
@@ -802,9 +832,16 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
 
     setActionSaving(true);
     try {
-      const result = await api.deductJobStock(job.id, { inventoryItemId: stockItemId, quantity: stockQty });
-      setJob(result.job);
-      toast({ title: "Stock deducted", description: `${stockQty} × ${item!.name} deducted.` });
+      const issuedLine = (job.partsRequests ?? [])
+        .flatMap((request) => request.lines ?? [])
+        .find((line) => line.inventoryItemId === stockItemId && (line.issuedRemaining ?? Math.max(0, line.qtyIssued - line.qtyConsumed - line.qtyReturned - line.qtyScrapped)) > 0);
+      await api.deductJobStock(job.id, {
+        inventoryItemId: stockItemId,
+        quantity: stockQty,
+        lineId: issuedLine?.id,
+      });
+      setJob(await api.getJob(job.id));
+      toast({ title: "Parts used", description: `${stockQty} × ${item!.name} consumed on this job.` });
       setStockOpen(false);
       stockValidation.reset();
       await refreshActivities(job.id);
@@ -812,6 +849,45 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
       if (!stockValidation.applyApiErrors(err, stockDialogRef.current)) {
         toast.apiError(err, { fallback: "Deduction failed" });
       }
+    } finally {
+      setActionSaving(false);
+    }
+  };
+
+  const openReturnDialog = (inventoryItemId: string, maxQty: number, lineId?: string) => {
+    setReturnItemId(inventoryItemId);
+    setReturnLineId(lineId ?? "");
+    setReturnQty(Math.max(1, maxQty));
+    setReturnDisposition("return");
+    setReturnOpen(true);
+  };
+
+  const handleReturnStock = async () => {
+    if (!job || !returnItemId) return;
+    const line = (job.partsRequests ?? []).flatMap((request) => request.lines ?? []).find((row) => row.id === returnLineId);
+    const deduction = (job.stockDeductions ?? []).find((row) => row.inventoryItemId === returnItemId);
+    const maxQty = line?.unusedIssued ?? line?.issuedRemaining ?? deduction?.returnableQuantity ?? 0;
+    if (returnQty < 1 || returnQty > maxQty) {
+      toast.error("Invalid quantity", { description: `Enter between 1 and ${maxQty}.` });
+      return;
+    }
+    setActionSaving(true);
+    try {
+      const result = await api.returnJobStock(job.id, {
+        inventoryItemId: returnItemId,
+        quantity: returnQty,
+        disposition: returnDisposition,
+        lineId: returnLineId || undefined,
+      });
+      setJob(result.job);
+      toast({
+        title: returnDisposition === "scrap" ? "Parts scrapped" : "Unused parts returned",
+        description: `${returnQty} × ${line?.itemName ?? deduction?.itemName ?? "item"} ${returnDisposition === "scrap" ? "written off as damaged" : "returned to stock"}.`,
+      });
+      setReturnOpen(false);
+      await refreshActivities(job.id);
+    } catch (err) {
+      toast.apiError(err, { fallback: returnDisposition === "scrap" ? "Unable to scrap parts" : "Unable to return unused parts" });
     } finally {
       setActionSaving(false);
     }
@@ -860,6 +936,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
         meta={job ? [
           { label: "Scheduled", value: formatDate(job.scheduledFor) },
           { label: "Ticket", value: job.requestRef },
+          ...(job.isRework ? [{ label: "Type", value: "Rework" }] : []),
           ...(isProject ? [{ label: "Lead", value: job.engineer || "Not assigned" }] : []),
         ] : undefined}
         loading={loading}
@@ -898,6 +975,25 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
               {job.estimateId && canAccessEstimates ? (
                 <Button variant="outline" asChild>
                   <Link to={`/app/estimates/${job.estimateId}`}>Open estimate</Link>
+                </Button>
+              ) : null}
+              {job.originalJobId ? (
+                <Button variant="outline" asChild>
+                  <Link to={`/app/jobs/${job.originalJobId}`}>Open original job</Link>
+                </Button>
+              ) : null}
+              {job.status === "completed" && canCreateRework ? (
+                <Button
+                  variant="outline"
+                  disabled={creatingRework}
+                  onClick={() => void createRework()}
+                >
+                  {creatingRework ? (
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Wrench className="mr-1.5 h-4 w-4" />
+                  )}
+                  {creatingRework ? "Creating…" : "Create rework"}
                 </Button>
               ) : null}
               {job.status === "completed" && canAccessBilling ? (
@@ -1050,6 +1146,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                   </div>
                   <Progress value={job.progress} className="h-2" />
                 </DetailSection>
+                <JobWorkbenchContextSection workbench={job.workbench} />
                 <DetailSection title={isProject ? "Project details" : "Job details"}>
                   <DetailInfoGrid
                     items={[
@@ -1058,6 +1155,8 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                       { label: "Equipment", value: job.equipmentName },
                       { label: "Lead", value: job.engineer || "Not assigned" },
                       { label: "Scheduled", value: formatDate(job.scheduledFor) },
+                      { label: "Priority", value: job.workbench?.priority ? <StatusBadge status={job.workbench.priority} /> : "—" },
+                      { label: "Target date", value: job.workbench?.targetDate ? formatDate(job.workbench.targetDate) : "—" },
                       { label: "Service ticket", value: job.serviceRequestId ? (
                         <Link className="text-primary hover:underline normal-case" to={`/app/service-tickets/${job.serviceRequestId}`}>
                           {job.requestRef}
@@ -1380,6 +1479,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
             id: "parts",
             label: "Parts",
             content: (
+              <div className="space-y-4">
               <DetailSection title="Additional parts / scope">
                 {extras.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No extra parts or scope changes yet.</p>
@@ -1437,6 +1537,78 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                   </div>
                 )}
               </DetailSection>
+              <DetailSection title="Spare parts chain">
+                {(job.partsRequests ?? []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No spare-part request yet. Request a part to start approve → issue → use → return/scrap.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {(job.partsRequests ?? []).map((request) => (
+                      <div key={request.id} className="rounded-lg border p-3 text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-medium capitalize">{request.status.replace(/_/g, " ")}</p>
+                          <p className="text-xs text-muted-foreground">{request.requestedBy}</p>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">{request.notes}</p>
+                        {(request.lines ?? []).length === 0 ? (
+                          <p className="mt-2 text-xs text-muted-foreground">Notes only — no SKU lines.</p>
+                        ) : (
+                          <div className="mt-3 space-y-2">
+                            {(request.lines ?? []).map((line: BackendJobPartsRequestLine) => {
+                              const unused = line.unusedIssued ?? line.issuedRemaining ?? Math.max(0, line.qtyIssued - line.qtyConsumed - line.qtyReturned - line.qtyScrapped);
+                              return (
+                                <div key={line.id} className="rounded-md bg-muted/40 p-2">
+                                  <p className="font-medium">{line.itemName}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {line.sku} · Req {line.qtyRequested} · Appr {line.qtyApproved} · Issued {line.qtyIssued} · Used {line.qtyConsumed} · Ret {line.qtyReturned} · Scrap {line.qtyScrapped}
+                                  </p>
+                                  {canUpdateJob && job.status !== "completed" && unused > 0 ? (
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                      <Button size="sm" variant="outline" onClick={() => void openStockDialog(line.inventoryItemId, 1)}>
+                                        Use
+                                      </Button>
+                                      <Button size="sm" variant="outline" onClick={() => openReturnDialog(line.inventoryItemId, unused, line.id)}>
+                                        <Undo2 className="mr-1 h-3.5 w-3.5" />
+                                        Return / scrap
+                                      </Button>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </DetailSection>
+              <DetailSection title="Parts used / unused">
+                {(job.stockDeductions ?? []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No stock has been deducted on this job yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {(job.stockDeductions ?? []).map((row) => (
+                      <div key={row.id} className="flex justify-between gap-3 rounded-lg border p-3 text-sm">
+                        <div>
+                          <p className="font-medium">{row.itemName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {row.sku} · Used {row.quantity}
+                            {row.returnedQuantity ? ` · Returned ${row.returnedQuantity}` : ""}
+                            {typeof row.returnableQuantity === "number" ? ` · Unused ${row.returnableQuantity}` : ""}
+                          </p>
+                        </div>
+                        {canUpdateJob && job.status !== "completed" && (row.returnableQuantity ?? 0) > 0 ? (
+                          <Button size="sm" variant="outline" onClick={() => openReturnDialog(row.inventoryItemId, row.returnableQuantity ?? 1)}>
+                            <Undo2 className="mr-1 h-3.5 w-3.5" />
+                            Return unused
+                          </Button>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </DetailSection>
+              </div>
             ),
           },
           {
@@ -1586,6 +1758,26 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                         <Link to={`/app/billing/jobs/${job.id}`}>Open billing for this job</Link>
                       </Button>
                     ) : null}
+                    {canCreateRework ? (
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        disabled={creatingRework}
+                        onClick={() => void createRework()}
+                      >
+                        {creatingRework ? (
+                          <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Wrench className="mr-1.5 h-4 w-4" />
+                        )}
+                        {creatingRework ? "Creating…" : "Create rework"}
+                      </Button>
+                    ) : null}
+                    {job.originalJobId ? (
+                      <Button variant="outline" className="w-full" asChild>
+                        <Link to={`/app/jobs/${job.originalJobId}`}>Open original job</Link>
+                      </Button>
+                    ) : null}
                     {job.serviceRequestId && canAccessTickets ? (
                       <Button variant="outline" className="w-full" asChild>
                         <Link to={`/app/service-tickets/${job.serviceRequestId}`}>Open linked ticket</Link>
@@ -1633,7 +1825,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                           onClick={() => workReport.openReport(job)}
                         />
                         <ActionBtn icon={PlusCircle} label="Parts / scope" onClick={() => void openPartsDialog()} />
-                        <ActionBtn icon={PackageMinus} label="Stock" onClick={() => void openStockDialog()} />
+                        <ActionBtn icon={PackageMinus} label="Use parts" onClick={() => void openStockDialog()} />
                         <ActionBtn icon={Camera} label="Quick photos" onClick={() => { photosValidation.reset(); resetPhotoDraft(); setPhotosOpen(true); }} />
                       </div>
                     ) : null}
@@ -1862,7 +2054,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
 
       <Dialog open={stockOpen} onOpenChange={(open) => { if (!open) stockValidation.reset(); setStockOpen(open); }}>
         <DialogContent ref={stockDialogRef} className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Deduct Stock</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Use issued parts</DialogTitle></DialogHeader>
           <form
             noValidate
             onSubmit={(e) => {
@@ -1912,9 +2104,15 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                     stockValidation.clearError("stockQty");
                   }}
                   placeholder="Select item"
-                  getOptionLabel={(i) =>
-                    `${formatInventoryItemClass(i.itemClass)} · ${i.name} (${i.sku}) — ${i.inStock} in stock`
-                  }
+                  getOptionLabel={(i) => {
+                    const issued = (job?.partsRequests ?? [])
+                      .flatMap((request) => request.lines ?? [])
+                      .filter((line) => line.inventoryItemId === i.id)
+                      .reduce((sum, line) => sum + (line.issuedRemaining ?? 0), 0);
+                    return issued > 0
+                      ? `${formatInventoryItemClass(i.itemClass)} · ${i.name} (${i.sku}) — ${issued} issued to this job`
+                      : `${formatInventoryItemClass(i.itemClass)} · ${i.name} (${i.sku}) — ${i.inStock} in stock`;
+                  }}
                   triggerClassName={fieldErrorClass(stockValidation.shouldShow("stockItemId"))}
                 />
                 {stockValidation.shouldShow("stockItemId") && (
@@ -1964,6 +2162,57 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
               )}
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={returnOpen} onOpenChange={setReturnOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{returnDisposition === "scrap" ? "Scrap unused parts" : "Return unused parts"}</DialogTitle>
+            <DialogDescription>
+              Return unused issued parts to warehouse stock, or scrap them as damaged. You cannot exceed the unused quantity.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div>
+              <p className="text-sm font-medium">
+                {(job?.partsRequests ?? []).flatMap((request) => request.lines ?? []).find((row) => row.id === returnLineId)?.itemName
+                  ?? (job?.stockDeductions ?? []).find((row) => row.inventoryItemId === returnItemId)?.itemName
+                  ?? "Part"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Unused: {(job?.partsRequests ?? []).flatMap((request) => request.lines ?? []).find((row) => row.id === returnLineId)?.unusedIssued
+                  ?? (job?.stockDeductions ?? []).find((row) => row.inventoryItemId === returnItemId)?.returnableQuantity
+                  ?? 0}
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label>Disposition</Label>
+              <Select value={returnDisposition} onValueChange={(value) => setReturnDisposition(value as "return" | "scrap")}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="return">Return to stock</SelectItem>
+                  <SelectItem value="scrap">Scrap / damaged</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="return-qty">Quantity</Label>
+              <Input
+                id="return-qty"
+                type="number"
+                min={1}
+                value={returnQty}
+                onChange={(e) => setReturnQty(Number(e.target.value) || 1)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setReturnOpen(false)}>Cancel</Button>
+            <Button disabled={actionSaving} onClick={() => void handleReturnStock()}>
+              {actionSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : returnDisposition === "scrap" ? "Scrap" : "Return to stock"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

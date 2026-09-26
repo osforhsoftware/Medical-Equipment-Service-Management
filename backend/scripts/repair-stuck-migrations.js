@@ -108,6 +108,24 @@ const ALREADY_APPLIED_CHECKS = {
     columnExists("equipment", "no_machine_warranty"),
   "20260925143000_purchase_order_landed_costs": () =>
     columnExists("purchase_orders", "freight_cost"),
+  "20260926100000_inventory_additional_fields": () =>
+    columnExists("inventory_items", "additional_fields"),
+  "20260926121000_purchasing_shipment_pipeline": () =>
+    tableExists("purchase_shipments"),
+  "20260926120000_gap_contacts_rework": () =>
+    tableExists("customer_contacts"),
+  "20260925160000_supplier_quote_commercial_fields": () =>
+    columnExists("supplier_quotes", "currency"),
+  "20260926124500_estimate_commercial_fields": () =>
+    columnExists("estimates", "warranty"),
+  "20260926130000_customer_restrictions": () =>
+    columnExists("customers", "restrictions"),
+  "20260926140000_job_parts_traceability": () =>
+    tableExists("job_parts_request_lines"),
+  "20260926170000_sales_enquiry_created_by": () =>
+    columnExists("sales_enquiries", "created_by"),
+  "20260926180000_inventory_item_status": () =>
+    columnExists("inventory_items", "status"),
 };
 
 async function pendingMigrations() {

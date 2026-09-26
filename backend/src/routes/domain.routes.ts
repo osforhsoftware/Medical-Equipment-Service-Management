@@ -15,6 +15,8 @@ import {
   createPurchaseOrderSchema,
   createPurchaseReturnSchema,
   createStockTransferSchema,
+  updatePurchaseLandedCostsSchema,
+  upsertPurchaseShipmentSchema,
   estimateDecisionSchema,
   estimateRevisionSchema,
   expenseSchema,
@@ -26,6 +28,7 @@ import {
   officeAssetSchema,
   officeAssetUpdateSchema,
   paymentSchema,
+  portalServiceRequestSchema,
   qrScanSchema,
   receivePurchaseOrderSchema,
   referralSchema,
@@ -93,6 +96,8 @@ router.get("/stock-transfers/:id", inventory, c.stockTransferById);
 router.post("/stock-transfers/:id/dispatch", inventory, c.stockTransferDispatch);
 router.post("/stock-transfers/:id/receive", inventory, c.stockTransferReceive);
 router.post("/purchase-orders", inventory, validate(createPurchaseOrderSchema), c.purchaseOrder);
+router.put("/purchase-orders/:id/shipment", inventory, validate(upsertPurchaseShipmentSchema), c.upsertPurchaseShipment);
+router.put("/purchase-orders/:id/landed-costs", inventory, validate(updatePurchaseLandedCostsSchema), c.updatePurchaseLandedCosts);
 router.post("/purchase-orders/:id/receipts", inventory, validate(receivePurchaseOrderSchema), c.receivePurchaseOrder);
 router.get("/purchase-returns", inventory, c.purchaseReturns);
 router.post("/purchase-returns", inventory, validate(createPurchaseReturnSchema), c.purchaseReturnCreate);
@@ -106,12 +111,15 @@ router.post("/service-tickets/:id/finish", requireRole("admin", "coordinator", "
 router.get("/equipment-history/:assetTag", requireStaff, c.equipmentHistory);
 router.get("/projects/:requestId", requireStaff, c.projectDetails);
 router.post("/qr-scans", requireStaff, validate(qrScanSchema), c.qrScan);
-router.get("/portal", (req, res, next) => {
+const portalOnly = (req: Request, res: Response, next: NextFunction) => {
   if (!CUSTOMER_PORTAL_ENABLED) {
     return next(new AppError("Customer Portal is temporarily unavailable.", 503));
   }
   return requireRole("customer")(req, res, next);
-}, c.customerPortal);
+};
+
+router.get("/portal", portalOnly, c.customerPortal);
+router.post("/portal/requests", portalOnly, validate(portalServiceRequestSchema), c.createPortalServiceRequest);
 
 router.get("/office-assets", requireRole("admin"), c.officeAssets);
 router.post("/office-assets", requireRole("admin"), validate(officeAssetSchema), c.officeAssetCreate);

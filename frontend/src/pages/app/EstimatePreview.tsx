@@ -7,6 +7,7 @@ import { ESTIMATE_READ_ROLES } from "@/config/roles";
 import { Button } from "@/components/ui/button";
 import { ApiError, api, type BackendCustomer, type BackendEstimate } from "@/lib/api";
 import { estimateToDocumentLines } from "@/lib/estimates";
+import { formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 export default function EstimatePreview() {
@@ -127,7 +128,7 @@ export default function EstimatePreview() {
             customerPhone={customer?.phone || undefined}
             customerEmail={customer?.email || undefined}
             equipmentName={estimate.equipmentName}
-            issueDate={estimate.createdAt}
+            issueDate={estimate.sentAt ?? estimate.createdAt}
             validOrDueLabel="Valid until"
             validOrDueDate={estimate.validUntil}
             ticketRef={estimate.requestRef}
@@ -135,7 +136,14 @@ export default function EstimatePreview() {
             detailRows={[
               { label: "Equipment", value: estimate.equipmentName },
               { label: "Ticket", value: estimate.requestRef },
-              { label: "Status", value: estimate.status },
+              { label: "Revision", value: `Rev ${estimate.revision}` },
+              { label: "Currency", value: estimate.currency || "INR" },
+              ...(estimate.estimatedCompletion
+                ? [{ label: "Est. completion", value: formatDate(estimate.estimatedCompletion) }]
+                : []),
+              ...(estimate.warranty ? [{ label: "Warranty", value: estimate.warranty }] : []),
+              ...(estimate.preparedBy ? [{ label: "Prepared by", value: estimate.preparedBy }] : []),
+              { label: "Approval", value: estimate.status },
             ]}
             lines={estimateToDocumentLines(estimate)}
             discount={Number(estimate.discount ?? 0)}

@@ -30,7 +30,7 @@ export const MOBILE_NAV_TABS: MobileNavTab[] = [
   { id: "inspections", label: "Inspect", icon: Search, to: "/app/inspections", module: "Inspections" },
   { id: "estimates", label: "Estimates", icon: FileText, to: "/app/estimates", module: "Estimates" },
   { id: "sales", label: "Sales", icon: Store, to: "/app/sales", module: "Sales" },
-  { id: "inventory", label: "Stock", icon: Boxes, to: "/app/inventory", module: "Inventory Items" },
+  { id: "inventory", label: "Stock", icon: Boxes, to: "/app/inventory", module: "Inventory" },
   { id: "billing", label: "Billing", icon: Receipt, to: "/app/billing", module: "Billing" },
   { id: "tickets", label: "Tickets", icon: ClipboardList, to: "/app/service-tickets", module: "Service Tickets" },
   { id: "scan", label: "Scan", icon: QrCode, to: "/app/qr-tracking", module: "QR Tracking" },

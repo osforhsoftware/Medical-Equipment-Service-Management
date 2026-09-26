@@ -4,12 +4,8 @@ import {
   ShieldAlert,
   Plus,
   Search,
-  CheckCircle2,
-  XCircle,
-  Clock,
   Loader2,
   AlertTriangle,
-  FileText,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { RoleGuard } from "@/components/auth/RoleGuard";
@@ -36,9 +32,42 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAuth } from "@/context/AuthContext";
-import { api } from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import { api, type BackendEquipment } from "@/lib/api";
+import {
+  formatMachineWarrantyLabel,
+  formatServiceWarrantyLabel,
+  isEquipmentUnderActiveWarranty,
+} from "@/lib/equipmentWarranty";
+import { formatDate, formatServiceStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
+
+const NO_LINKED_TICKET = "__none__";
+const NO_LINKED_JOB = "__none__";
+
+const EMPTY_CREATE_FORM = {
+  customerId: "",
+  customerName: "",
+  equipmentId: "",
+  equipmentName: "",
+  serviceRequestId: "",
+  originalJobId: "",
+  underWarranty: false,
+  isPhysicalDamage: false,
+  componentCovered: true,
+  inspectorNotes: "",
+};
+
+function equipmentDisplayName(item: BackendEquipment): string {
+  const parts = [item.name.trim()];
+  if (item.model?.trim()) parts.push(item.model.trim());
+  if (item.manufacturer?.trim()) parts.push(item.manufacturer.trim());
+  return parts.join(" · ");
+}
+
+function equipmentSelectLabel(item: BackendEquipment): string {
+  const base = equipmentDisplayName(item);
+  return item.assetTag?.trim() ? `${base} (${item.assetTag.trim()})` : base;
+}
 
 export interface WarrantyClaimData {
   id: string;
@@ -48,6 +77,7 @@ export interface WarrantyClaimData {
   customerId?: string | null;
   customerName: string;
   serviceRequestId?: string | null;
+  originalJobId?: string | null;
   underWarranty: boolean;
   isPhysicalDamage: boolean;
   componentCovered: boolean;
@@ -70,17 +100,7 @@ export default function WarrantyClaims() {
   const [decideOpen, setDecideOpen] = useState(false);
   const [selectedClaim, setSelectedClaim] = useState<WarrantyClaimData | null>(null);
 
-  // Form state
-  const [form, setForm] = useState({
-    equipmentId: "",
-    equipmentName: "",
-    customerName: "",
-    serviceRequestId: "",
-    underWarranty: true,
-    isPhysicalDamage: false,
-    componentCovered: true,
-    inspectorNotes: "",
-  });
+  const [form, setForm] = useState({ ...EMPTY_CREATE_FORM });
 
   const [decisionForm, setDecisionForm] = useState<{
     claimDecision: "approved" | "rejected" | "partial";
@@ -105,19 +125,97 @@ export default function WarrantyClaims() {
     },
   });
 
+  const jobsLookupQuery = useQuery({
+    queryKey: ["jobs", "warranty-lookup"],
+    queryFn: () =>
+      api.listJobs({
+        completedScope: "all",
+        limit: 200,
+        page: 1,
+        sortBy: "createdAt",
+        sortOrder: "desc",
+      }),
+    staleTime: 60_000,
+  });
+
   const refetch = () => queryClient.invalidateQueries({ queryKey: ["warranty-claims"] });
 
+  const customersQuery = useQuery({
+    queryKey: ["customers", "options"],
+    queryFn: () => api.listCustomersOptions(),
+    enabled: createOpen,
+    staleTime: 60_000,
+  });
+
+  const equipmentQuery = useQuery({
+    queryKey: ["equipment", "options", form.customerId],
+    queryFn: () => api.listEquipmentOptions({ customerId: form.customerId }),
+    enabled: createOpen && Boolean(form.customerId),
+    staleTime: 60_000,
+  });
+
+  const serviceRequestsQuery = useQuery({
+    queryKey: ["service-requests", "warranty-link", form.customerId, form.equipmentId],
+    queryFn: () =>
+      api.listServiceRequests({
+        customerId: form.customerId,
+        equipmentId: form.equipmentId,
+        completedScope: "all",
+        limit: 100,
+        page: 1,
+        sortBy: "createdAt",
+        sortOrder: "desc",
+      }),
+    enabled: createOpen && Boolean(form.customerId) && Boolean(form.equipmentId),
+    staleTime: 30_000,
+  });
+
+  const jobsQuery = useQuery({
+    queryKey: ["jobs", "warranty-link", form.customerId],
+    queryFn: () =>
+      api.listJobs({
+        customerId: form.customerId,
+        completedScope: "all",
+        limit: 100,
+        page: 1,
+        sortBy: "createdAt",
+        sortOrder: "desc",
+      }),
+    enabled: createOpen && Boolean(form.customerId),
+    staleTime: 30_000,
+  });
+
+  const customers = customersQuery.data ?? [];
+  const equipmentOptions = equipmentQuery.data ?? [];
+  const linkedTickets = serviceRequestsQuery.data?.data ?? [];
+  const linkedJobs = (jobsQuery.data?.data ?? []).filter((job) =>
+    form.equipmentId ? job.equipmentId === form.equipmentId : true,
+  );
+  const selectedEquipment = equipmentOptions.find((e) => e.id === form.equipmentId);
+  const originalJobLabel = (jobId?: string | null) => {
+    if (!jobId) return null;
+    const fromDialog = (jobsQuery.data?.data ?? []).find((item) => item.id === jobId);
+    const fromList = (jobsLookupQuery.data?.data ?? []).find((item) => item.id === jobId);
+    return fromDialog?.reference ?? fromList?.reference ?? jobId;
+  };
+
   const handleCreate = async () => {
-    if (!form.equipmentName.trim() || !form.customerName.trim()) {
-      toast.error("Equipment and Customer name required");
+    if (!form.customerId.trim()) {
+      toast.error("Select a customer");
+      return;
+    }
+    if (!form.equipmentId.trim()) {
+      toast.error("Select equipment");
       return;
     }
     try {
       await api.post("/warranty-claims", {
-        equipmentId: form.equipmentId.trim() || "EQUIP-GENERIC",
+        equipmentId: form.equipmentId.trim(),
         equipmentName: form.equipmentName.trim(),
+        customerId: form.customerId.trim(),
         customerName: form.customerName.trim(),
         serviceRequestId: form.serviceRequestId.trim() || null,
+        originalJobId: form.originalJobId.trim() || null,
         underWarranty: form.underWarranty,
         isPhysicalDamage: form.isPhysicalDamage,
         componentCovered: form.componentCovered,
@@ -125,16 +223,7 @@ export default function WarrantyClaims() {
       });
       toast.success("Warranty claim logged successfully");
       setCreateOpen(false);
-      setForm({
-        equipmentId: "",
-        equipmentName: "",
-        customerName: "",
-        serviceRequestId: "",
-        underWarranty: true,
-        isPhysicalDamage: false,
-        componentCovered: true,
-        inspectorNotes: "",
-      });
+      setForm({ ...EMPTY_CREATE_FORM });
       refetch();
     } catch (err) {
       toast.apiError(err, { fallback: "Failed to log claim" });
@@ -293,6 +382,11 @@ export default function WarrantyClaims() {
                       </div>
                       <p className="font-semibold text-base mt-1">{c.equipmentName}</p>
                       <p className="text-xs text-muted-foreground">Customer: <span className="text-foreground font-medium">{c.customerName}</span></p>
+                      {c.originalJobId ? (
+                        <p className="text-xs text-muted-foreground">
+                          Original job: <span className="text-foreground font-medium">{originalJobLabel(c.originalJobId)}</span>
+                        </p>
+                      ) : null}
                       {c.inspectorNotes && (
                         <p className="text-xs text-muted-foreground mt-2 italic bg-muted/30 p-2 rounded">
                           Inspector Notes: "{c.inspectorNotes}"
@@ -351,30 +445,156 @@ export default function WarrantyClaims() {
 
             <div className="space-y-4 text-sm">
               <div className="space-y-1">
-                <Label>Equipment Name / Model <span className="text-destructive">*</span></Label>
-                <Input
-                  placeholder="e.g. Philips ECG PageWriter TC30"
-                  value={form.equipmentName}
-                  onChange={(e) => setForm((p) => ({ ...p, equipmentName: e.target.value }))}
-                />
+                <Label>Customer <span className="text-destructive">*</span></Label>
+                <Select
+                  value={form.customerId || undefined}
+                  onValueChange={(customerId) => {
+                    const customer = customers.find((c) => c.id === customerId);
+                    setForm((p) => ({
+                      ...p,
+                      customerId,
+                      customerName: customer?.name ?? "",
+                      equipmentId: "",
+                      equipmentName: "",
+                      serviceRequestId: "",
+                      originalJobId: "",
+                      underWarranty: false,
+                    }));
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select customer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {customers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-1">
-                <Label>Customer Name <span className="text-destructive">*</span></Label>
-                <Input
-                  placeholder="e.g. City Care Hospital"
-                  value={form.customerName}
-                  onChange={(e) => setForm((p) => ({ ...p, customerName: e.target.value }))}
-                />
+                <Label>Equipment <span className="text-destructive">*</span></Label>
+                <Select
+                  value={form.equipmentId || undefined}
+                  disabled={!form.customerId}
+                  onValueChange={(equipmentId) => {
+                    const item = equipmentOptions.find((e) => e.id === equipmentId);
+                    if (!item) return;
+                    setForm((p) => ({
+                      ...p,
+                      equipmentId,
+                      equipmentName: equipmentDisplayName(item),
+                      customerName: item.customerName?.trim() || p.customerName,
+                      serviceRequestId: "",
+                      originalJobId: "",
+                      underWarranty: isEquipmentUnderActiveWarranty(item),
+                    }));
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={
+                        form.customerId ? "Select equipment" : "Select a customer first"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {equipmentOptions.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {equipmentSelectLabel(item)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!form.customerId ? (
+                  <p className="text-xs text-muted-foreground">Choose the customer who owns the asset.</p>
+                ) : equipmentQuery.isLoading ? (
+                  <p className="text-xs text-muted-foreground">Loading equipment…</p>
+                ) : equipmentOptions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No registered equipment for this customer.</p>
+                ) : selectedEquipment ? (
+                  <p className="text-xs text-muted-foreground">
+                    Machine warranty: {formatMachineWarrantyLabel(selectedEquipment)} · Service warranty:{" "}
+                    {formatServiceWarrantyLabel(selectedEquipment)}
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-1">
-                <Label>Linked Service Ticket # (Optional)</Label>
-                <Input
-                  placeholder="e.g. SR-2026-0012"
-                  value={form.serviceRequestId}
-                  onChange={(e) => setForm((p) => ({ ...p, serviceRequestId: e.target.value }))}
-                />
+                <Label>Linked service ticket (optional)</Label>
+                <Select
+                  value={form.serviceRequestId || NO_LINKED_TICKET}
+                  disabled={!form.equipmentId}
+                  onValueChange={(value) =>
+                    setForm((p) => ({
+                      ...p,
+                      serviceRequestId: value === NO_LINKED_TICKET ? "" : value,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={
+                        form.equipmentId ? "Select a ticket" : "Select customer and equipment first"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_LINKED_TICKET}>No linked ticket</SelectItem>
+                    {linkedTickets.map((ticket) => (
+                      <SelectItem key={ticket.id} value={ticket.id}>
+                        {ticket.reference} · {formatServiceStatus(ticket.status)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.equipmentId && serviceRequestsQuery.isLoading ? (
+                  <p className="text-xs text-muted-foreground">Loading service tickets…</p>
+                ) : form.equipmentId && linkedTickets.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No service tickets found for this customer and equipment.
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="space-y-1">
+                <Label>Original service job (optional)</Label>
+                <Select
+                  value={form.originalJobId || NO_LINKED_JOB}
+                  disabled={!form.equipmentId}
+                  onValueChange={(value) =>
+                    setForm((p) => ({
+                      ...p,
+                      originalJobId: value === NO_LINKED_JOB ? "" : value,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={
+                        form.equipmentId ? "Select original job" : "Select customer and equipment first"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_LINKED_JOB}>No original job</SelectItem>
+                    {linkedJobs.map((job) => (
+                      <SelectItem key={job.id} value={job.id}>
+                        {job.reference} · {job.status}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.equipmentId && jobsQuery.isLoading ? (
+                  <p className="text-xs text-muted-foreground">Loading jobs…</p>
+                ) : form.equipmentId && linkedJobs.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No service jobs found for this customer and equipment.
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-2 pt-2 border-t">

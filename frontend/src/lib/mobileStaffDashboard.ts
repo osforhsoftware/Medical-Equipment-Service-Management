@@ -74,7 +74,7 @@ export function roleQuickActions(role: Role): MobileQuickAction[] {
     case "inventory":
       return [
         { label: "Inventory", to: "/app/inventory", icon: Package, primary: true },
-        { label: "Purchase", to: "/app/purchase-orders", icon: ShoppingCart },
+        { label: "Purchase", to: "/app/rfqs", icon: ShoppingCart },
         { label: "Sales fulfill", to: "/app/sales", icon: ShoppingCart },
         { label: "Alerts", to: "/app/notifications", icon: Bell },
       ];
@@ -291,13 +291,20 @@ const PATH_TO_MODULE: Record<string, string> = {
   "/app/service-requests": "Service Tickets",
   "/app/estimates": "Estimates",
   "/app/sales": "Sales",
+  "/app/sales-enquiries": "Sales",
   "/app/jobs": "Service Jobs",
-  "/app/inventory": "Inventory Items",
-  "/app/purchase-orders": "Purchase Orders",
+  "/app/inventory": "Inventory",
+  "/app/stock-purchase-requests": "Inventory",
+  "/app/rfqs": "Purchase",
+  "/app/purchase-orders": "Purchase",
   "/app/purchase-returns": "Purchase Returns",
 
-  "/app/stock-ledger": "Stock Ledger",
+  "/app/stock-ledger": "Inventory",
+  "/app/stock-transfers": "Inventory",
+  "/app/stock-locations": "Inventory",
   "/app/billing": "Billing",
+  "/app/finance": "Finance",
+  "/app/finance-operations": "Finance",
   "/app/notifications": "Notifications",
   "/app/reports": "Reports",
   "/app/customers": "Customers",

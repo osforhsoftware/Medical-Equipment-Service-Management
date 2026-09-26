@@ -23,11 +23,7 @@ export default function PortalEstimateDetail() {
     try {
       const portal = await api.getCustomerPortal();
       const match = portal.estimates.find((item) => item.id === id);
-      if (!match) {
-        setEstimate(null);
-        return;
-      }
-      setEstimate(await api.getEstimate(id).catch(() => match));
+      setEstimate(match ?? null);
     } catch (error) {
       toast.apiError(error, { fallback: "Unable to load estimate" });
       setEstimate(null);
@@ -115,7 +111,9 @@ export default function PortalEstimateDetail() {
                                                                                                                                                                                                                                                 detailRows={[
                                                                                                                                                                                                                                                   { label: "Equipment", value: estimate.equipmentName },
                                                                                                                                                                                                                                                   { label: "Ticket", value: estimate.requestRef },
-                                                                                                                                                                                                                                                  { label: "Status", value: estimate.status },
+                                                                                                                                                                                                                                                  { label: "Revision", value: `Rev ${estimate.revision}` },
+                                                                                                                                                                                                                                                  { label: "Currency", value: estimate.currency || "INR" },
+                                                                                                                                                                                                                                                  { label: "Approval", value: estimate.status },
                                                                                                                                                                                                                                                 ]}
                                                                                                                                                                                                                                                 lines={estimateToDocumentLines(estimate)}
                                                                                                                                                                                                                                                 discount={Number(estimate.discount ?? 0)}

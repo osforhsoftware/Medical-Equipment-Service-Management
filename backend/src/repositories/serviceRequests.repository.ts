@@ -37,6 +37,8 @@ export interface ServiceRequestListFilters {
   slaDueFrom?: string;
   slaDueTo?: string;
   search?: string;
+  customerId?: string;
+  equipmentId?: string;
   statuses?: string[];
   /** recent (default) = hide completed older than 7 days; archive = only those; all = no hide */
   completedScope?: CompletedScope;
@@ -163,6 +165,19 @@ function buildWhere(
         { assignedInspectorId: filters.mineUserId },
         { assignedEstimatorId: filters.mineUserId },
         { assignedEngineerId: filters.mineUserId },
+      ],
+    });
+  }
+
+  if (filters.customerId) {
+    where.customerId = filters.customerId;
+  }
+
+  if (filters.equipmentId) {
+    pushAnd(where, {
+      OR: [
+        { equipmentId: filters.equipmentId },
+        { equipmentItems: { some: { equipmentId: filters.equipmentId } } },
       ],
     });
   }

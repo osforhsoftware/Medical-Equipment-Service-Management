@@ -44,6 +44,16 @@ const stageDetailsSchema = z
 
         confirmedBy: z.string().optional().nullable(),
 
+        courier: z
+          .object({
+            name: z.string().trim().max(120).optional().nullable(),
+            waybill: z.string().trim().max(120).optional().nullable(),
+            dispatchDate: z.string().optional().nullable(),
+            estimatedDeliveryDate: z.string().optional().nullable(),
+          })
+          .optional()
+          .nullable(),
+
       })
 
       .optional(),

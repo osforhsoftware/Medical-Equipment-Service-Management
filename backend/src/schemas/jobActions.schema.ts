@@ -22,8 +22,16 @@ export const saveJobWorkReportSchema = z.object({
   recommendation: z.string().trim().max(5000).optional().nullable(),
 });
 
+const partsLineSchema = z.object({
+  inventoryItemId: z.string().min(1, "Inventory item is required"),
+  quantity: z.coerce.number().int().min(1, "Quantity must be at least 1"),
+  batchNumber: z.string().trim().max(191).optional().nullable(),
+  serialNumbers: z.string().trim().max(191).optional().nullable(),
+});
+
 export const requestJobPartsSchema = z.object({
   notes: z.string().trim().min(3, "Describe the parts needed").max(2000),
+  lines: z.array(partsLineSchema).max(30).optional().default([]),
 });
 
 export const captureJobSignatureSchema = z.object({
@@ -35,4 +43,16 @@ export const captureJobSignatureSchema = z.object({
 export const deductJobStockSchema = z.object({
   inventoryItemId: z.string().min(1, "Inventory item is required"),
   quantity: z.coerce.number().int().min(1, "Quantity must be at least 1"),
+  lineId: z.string().optional(),
+  batchNumber: z.string().trim().max(191).optional().nullable(),
+  serialNumbers: z.string().trim().max(191).optional().nullable(),
+});
+
+export const returnJobStockSchema = z.object({
+  inventoryItemId: z.string().min(1, "Inventory item is required"),
+  quantity: z.coerce.number().int().min(1, "Quantity must be at least 1"),
+  disposition: z.enum(["return", "scrap"]).optional().default("return"),
+  lineId: z.string().optional(),
+  batchNumber: z.string().trim().max(191).optional().nullable(),
+  serialNumbers: z.string().trim().max(191).optional().nullable(),
 });

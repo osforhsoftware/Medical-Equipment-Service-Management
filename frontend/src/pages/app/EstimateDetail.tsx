@@ -193,9 +193,10 @@ export default function EstimateDetail() {
         status={estimate?.status}
         statusLabel={estimate ? estimateStatusLabel(estimate.status) : undefined}
         meta={estimate ? [
-          { label: "Ticket", value: estimate.requestRef },
-          { label: "Revision", value: String(estimate.revision) },
+          { label: "Quotation", value: estimate.reference },
+          { label: "Revision", value: `Rev ${estimate.revision}` },
           { label: "Created", value: formatDate(estimate.createdAt) },
+          ...(estimate.sentAt ? [{ label: "Sent", value: formatDate(estimate.sentAt) }] : []),
         ] : undefined}
         loading={loading}
         error={error}
@@ -279,8 +280,15 @@ export default function EstimateDetail() {
                       ) : estimate.requestRef },
                       { label: "Customer", value: estimate.customerName },
                       { label: "Equipment", value: estimate.equipmentName },
-                      { label: "Revision", value: String(estimate.revision) },
+                      { label: "Revision", value: `Rev ${estimate.revision}` },
+                      { label: "Currency", value: estimate.currency || "INR" },
                       { label: "Valid until", value: formatDate(estimate.validUntil) },
+                      { label: "Est. completion", value: estimate.estimatedCompletion ? formatDate(estimate.estimatedCompletion) : "—" },
+                      { label: "Warranty", value: estimate.warranty || "—" },
+                      { label: "Prepared by", value: estimate.preparedBy || "—" },
+                      { label: "Created", value: formatDate(estimate.createdAt) },
+                      { label: "Sent", value: estimate.sentAt ? formatDate(estimate.sentAt) : "—" },
+                      { label: "Approval status", value: estimateStatusLabel(estimate.status) },
                     ]}
                   />
                 </DetailSection>

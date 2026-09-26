@@ -1,5 +1,12 @@
 import { Prisma } from "@prisma/client";
 
+export type JobDeliveryCourier = {
+  name?: string | null;
+  waybill?: string | null;
+  dispatchDate?: string | null;
+  estimatedDeliveryDate?: string | null;
+};
+
 export type JobQaStage = {
   result?: "pass" | "fail";
   notes?: string | null;
@@ -13,6 +20,7 @@ export type JobDeliveryStage = {
   receivedBy?: string | null;
   deliveredAt?: string | null;
   confirmedBy?: string | null;
+  courier?: JobDeliveryCourier | null;
 };
 
 export type JobStageDetails = {
@@ -26,6 +34,21 @@ function trimOrNull(value: unknown, max: number): string | null | undefined {
   if (typeof value !== "string") return null;
   const trimmed = value.trim().slice(0, max);
   return trimmed || null;
+}
+
+function parseCourier(raw: unknown): JobDeliveryCourier | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const c = raw as Record<string, unknown>;
+  const courier: JobDeliveryCourier = {
+    name: trimOrNull(c.name, 120) ?? null,
+    waybill: trimOrNull(c.waybill, 120) ?? null,
+    dispatchDate: typeof c.dispatchDate === "string" ? c.dispatchDate : null,
+    estimatedDeliveryDate: typeof c.estimatedDeliveryDate === "string" ? c.estimatedDeliveryDate : null,
+  };
+  if (!courier.name && !courier.waybill && !courier.dispatchDate && !courier.estimatedDeliveryDate) {
+    return undefined;
+  }
+  return courier;
 }
 
 export function parseJobStageDetails(value: unknown): JobStageDetails {
@@ -53,6 +76,7 @@ export function parseJobStageDetails(value: unknown): JobStageDetails {
         receivedBy: trimOrNull(deliveryRaw.receivedBy, 120) ?? null,
         deliveredAt: typeof deliveryRaw.deliveredAt === "string" ? deliveryRaw.deliveredAt : null,
         confirmedBy: typeof deliveryRaw.confirmedBy === "string" ? deliveryRaw.confirmedBy : null,
+        courier: parseCourier(deliveryRaw.courier),
       }
     : undefined;
 
@@ -74,7 +98,15 @@ export function mergeJobStageDetails(
   const base = parseJobStageDetails(existing);
   const next: JobStageDetails = {
     qa: patch.qa ? { ...base.qa, ...patch.qa } : base.qa,
-    delivery: patch.delivery ? { ...base.delivery, ...patch.delivery } : base.delivery,
+    delivery: patch.delivery
+      ? {
+          ...base.delivery,
+          ...patch.delivery,
+          courier: patch.delivery.courier
+            ? { ...base.delivery?.courier, ...patch.delivery.courier }
+            : base.delivery?.courier,
+        }
+      : base.delivery,
   };
   if (!next.qa && !next.delivery) return Prisma.JsonNull;
   return next as Prisma.InputJsonValue;

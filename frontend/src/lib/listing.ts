@@ -59,6 +59,7 @@ export interface ServiceRequestListParams extends BaseListParams {
   overdue?: boolean;
   mine?: boolean;
   customerId?: string;
+  equipmentId?: string;
   slaDueFrom?: string;
   slaDueTo?: string;
   /** recent | archive | all — soft-hide completed older than 7 days */
@@ -78,6 +79,7 @@ export interface InventoryListParams extends BaseListParams {
   itemClass?: string;
   stockStatus?: string;
   supplierId?: string;
+  status?: string;
 }
 
 export interface PurchaseOrderListParams extends BaseListParams {

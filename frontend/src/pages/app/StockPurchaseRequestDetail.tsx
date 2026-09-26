@@ -106,7 +106,7 @@ export default function StockPurchaseRequestDetail() {
     <RoleGuard roles={["admin", "inventory", "inspector", "engineer"]}>
       <RecordDetailLayout
         backTo="/app/stock-purchase-requests"
-        backLabel="Back to Stock Purchase Requests"
+        backLabel="Back to Reorder"
         title={request?.inventoryItem?.name ?? "Stock purchase request"}
         subtitle={request ? (
           <>

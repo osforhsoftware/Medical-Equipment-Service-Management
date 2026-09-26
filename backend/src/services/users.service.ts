@@ -1,9 +1,16 @@
 import bcrypt from "bcryptjs";
 import { usersRepository } from "@/repositories/users.repository";
 import { authRepository } from "@/repositories/auth.repository";
+import { customersRepository } from "@/repositories/customers.repository";
 import { AppError } from "@/middleware/errorHandler";
 import { enrichUserWithRoles, ensureSystemRoles, syncUserRoleAssignments } from "@/utils/userRoles";
 import { normalizeUserPermissions, parseUserPermissions } from "@/lib/userPermissions";
+
+async function assertLinkedCustomer(tenantId: string, customerId: string | null | undefined) {
+  if (!customerId) return;
+  const customer = await customersRepository.findById(customerId, tenantId);
+  if (!customer) throw new AppError("Customer not found", 404);
+}
 
 function resolveRoleSelection(data: { role?: string; roles?: string[]; primaryRole?: string }) {
   const roles = data.roles?.length ? data.roles : data.role ? [data.role] : undefined;
@@ -67,6 +74,11 @@ export class UsersService {
     const roleKeys = roleSelection?.roles ?? [primaryRole];
     const permissions = normalizeUserPermissions(data.permissions);
     assertAdminNotReadOnly(roleKeys, permissions);
+
+    if (roleKeys.includes("customer")) {
+      if (!data.customerId) throw new AppError("Link this portal user to a customer record", 400);
+      await assertLinkedCustomer(tenantId, data.customerId);
+    }
 
     await ensureSystemRoles(tenantId);
     const passwordHash = await bcrypt.hash(data.password, 10);
@@ -133,6 +145,12 @@ export class UsersService {
       data.permissions !== undefined ? normalizeUserPermissions(data.permissions) : undefined;
     if (permissions) {
       assertAdminNotReadOnly(nextRoleKeys, permissions);
+    }
+
+    if (nextRoleKeys.includes("customer")) {
+      const nextCustomerId = data.customerId !== undefined ? data.customerId : existing.customerId;
+      if (!nextCustomerId) throw new AppError("Link this portal user to a customer record", 400);
+      await assertLinkedCustomer(tenantId, nextCustomerId);
     }
 
     const passwordHash = data.password ? await bcrypt.hash(data.password, 10) : undefined;

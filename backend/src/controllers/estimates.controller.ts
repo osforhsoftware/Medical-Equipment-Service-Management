@@ -3,6 +3,7 @@ import { estimatesService } from "@/services/estimates.service";
 import { parseEstimateListQuery, sendPaginatedList } from "@/utils/listQuery";
 import { success } from "@/utils/response";
 import { userHasAnyRoleKey } from "@/utils/userRoles";
+import { isSalesSelfScoped } from "@/lib/salesScope";
 
 export class EstimatesController {
   async getAll(req: Request, res: Response, next: NextFunction) {
@@ -20,9 +21,11 @@ export class EstimatesController {
         req.user!.role,
         ["admin", "coordinator"],
       );
+      const salesScoped = isSalesSelfScoped(req.user!.role) && !isBroadViewer;
       const { data, total } = await estimatesService.getPaginated(req.tenantId!, {
         status: query.status,
-        estimatorId: isEstimatorOnly && !isBroadViewer ? req.user!.userId : undefined,
+        estimatorId:
+          (isEstimatorOnly || salesScoped) && !isBroadViewer ? req.user!.userId : undefined,
         search: query.search,
         customerId: query.customerId,
         createdFrom: query.createdFrom,
@@ -31,7 +34,7 @@ export class EstimatesController {
           ? query.kind
           : isEstimatorOnly && !isBroadViewer
             ? "service"
-            : req.user!.role === "sales"
+            : salesScoped
               ? "sales"
               : undefined,
         skip: query.skip,
@@ -44,7 +47,12 @@ export class EstimatesController {
 
   async getById(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await estimatesService.getById(req.params.id, req.tenantId!);
+      const data = await estimatesService.getById(
+        req.params.id,
+        req.tenantId!,
+        req.user!.userId,
+        req.user!.role,
+      );
       res.json(success("Estimate fetched successfully", data));
     } catch (err) { next(err); }
   }
@@ -58,14 +66,20 @@ export class EstimatesController {
 
   async update(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await estimatesService.update(req.params.id, req.tenantId!, req.body);
+      const data = await estimatesService.update(
+        req.params.id,
+        req.tenantId!,
+        req.body,
+        req.user!.userId,
+        req.user!.role,
+      );
       res.json(success("Estimate updated successfully", data));
     } catch (err) { next(err); }
   }
 
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      await estimatesService.delete(req.params.id, req.tenantId!);
+      await estimatesService.delete(req.params.id, req.tenantId!, req.user!.userId, req.user!.role);
       res.status(204).send();
     } catch (err) { next(err); }
   }

@@ -63,22 +63,70 @@ export function formatDateTime(value: string | Date | null | undefined) {
 
 export const CURRENCY_SYMBOL = "₹";
 
-export function toMoney(value: string | number) {
-  return Number(value).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+/** Compact Indian grouping once a value would otherwise overflow UI cells. */
+const COMPACT_AMOUNT = 1e12;
+
+/** Coerce API decimals, locale strings, and invalid values into a finite number. */
+export function parseAmount(value: unknown): number {
+  if (value == null || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "bigint") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof value === "object") {
+    const maybe = value as { toNumber?: () => number; toString?: () => string };
+    if (typeof maybe.toNumber === "function") {
+      const n = maybe.toNumber();
+      return Number.isFinite(n) ? n : 0;
+    }
+    const asString = typeof maybe.toString === "function" ? maybe.toString() : "";
+    if (asString && asString !== "[object Object]") return parseAmount(asString);
+    return 0;
+  }
+
+  const cleaned = String(value)
+    .trim()
+    .replace(/[₹$€£\s]/g, "")
+    .replace(/,/g, "");
+  if (!cleaned || cleaned === "-" || cleaned === "." || cleaned === "-.") return 0;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : 0;
 }
 
-export function formatCurrency(value: string | number) {
+function formatCompactAmount(n: number) {
+  const crores = n / 10_000_000;
+  if (Math.abs(crores) >= 10_000_000) return `${crores.toExponential(2)}Cr`;
+  return `${crores.toLocaleString("en-IN", { maximumFractionDigits: 2 })}Cr`;
+}
+
+function formatGroupedNumber(value: unknown, fractionDigits: { min: number; max: number }) {
+  const n = parseAmount(value);
+  if (Math.abs(n) >= COMPACT_AMOUNT) return formatCompactAmount(n);
+  return n.toLocaleString("en-IN", {
+    minimumFractionDigits: fractionDigits.min,
+    maximumFractionDigits: fractionDigits.max,
+  });
+}
+
+export function toMoney(value: unknown) {
+  return formatGroupedNumber(value, { min: 0, max: 2 });
+}
+
+export function formatCurrency(value: unknown) {
   return `${CURRENCY_SYMBOL}${toMoney(value)}`;
 }
 
 /** Invoice/estimate amounts always show two decimal places (₹0.00, ₹1,250.00). */
-export function formatDocumentCurrency(value: string | number) {
-  const amount = Number(value);
-  const n = Number.isFinite(amount) ? amount : 0;
-  return `${CURRENCY_SYMBOL}${n.toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+export function formatDocumentCurrency(value: unknown) {
+  return `${CURRENCY_SYMBOL}${formatGroupedNumber(value, { min: 2, max: 2 })}`;
+}
+
+/** Integer counts in tables, badges, and stat cards. */
+export function formatCount(value: unknown) {
+  const n = Math.round(parseAmount(value));
+  if (Math.abs(n) >= COMPACT_AMOUNT) return formatCompactAmount(n);
+  return n.toLocaleString("en-IN");
 }
 
 const ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
@@ -91,8 +139,8 @@ function wordsUnderThousand(n: number) {
 }
 
 /** Indian numbering (Rupees / Paise) for invoice totals. */
-export function formatAmountInWords(value: string | number) {
-  const amount = Math.max(0, Number(value) || 0);
+export function formatAmountInWords(value: unknown) {
+  const amount = Math.max(0, parseAmount(value));
   const rupees = Math.floor(amount + 1e-9);
   const paise = Math.round((amount - rupees) * 100);
   if (rupees === 0 && paise === 0) return "Zero Rupees Only";
@@ -111,10 +159,11 @@ export function formatAmountInWords(value: string | number) {
   return `${rupeeWords}${paiseWords} Only`;
 }
 
-export function formatCurrencyShort(amount: number) {
-  if (amount >= 1_000_000) return `${CURRENCY_SYMBOL}${(amount / 1_000_000).toFixed(1)}M`;
-  if (amount >= 1_000) return `${CURRENCY_SYMBOL}${(amount / 1_000).toFixed(1)}k`;
-  return `${CURRENCY_SYMBOL}${amount.toFixed(0)}`;
+export function formatCurrencyShort(amount: unknown) {
+  const n = parseAmount(amount);
+  if (Math.abs(n) >= 1_000_000) return `${CURRENCY_SYMBOL}${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `${CURRENCY_SYMBOL}${(n / 1_000).toFixed(1)}k`;
+  return `${CURRENCY_SYMBOL}${n.toFixed(0)}`;
 }
 
 export function defaultDatePlusDays(days: number) {

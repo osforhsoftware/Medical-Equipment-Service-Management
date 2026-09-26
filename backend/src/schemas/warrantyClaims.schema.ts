@@ -9,6 +9,7 @@ export const createWarrantyClaimSchema = z.object({
   customerId: z.preprocess(emptyToNull, z.string().optional().nullable()),
   customerName: z.string().trim().min(1, "Customer name required"),
   serviceRequestId: z.preprocess(emptyToNull, z.string().optional().nullable()),
+  originalJobId: z.preprocess(emptyToNull, z.string().optional().nullable()),
   underWarranty: z.boolean().optional().default(false),
   isPhysicalDamage: z.boolean().optional().default(false),
   componentCovered: z.boolean().optional().default(false),

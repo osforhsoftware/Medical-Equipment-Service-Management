@@ -60,6 +60,34 @@ export class CustomersController {
       res.json(success("Customer restored successfully", data));
     } catch (err) { next(err); }
   }
+
+  async listContacts(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await customersService.listContacts(req.params.id, req.tenantId!);
+      res.json(success("Customer contacts fetched", data));
+    } catch (err) { next(err); }
+  }
+
+  async createContact(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await customersService.createContact(req.params.id, req.tenantId!, req.body);
+      res.status(201).json(success("Contact added", data));
+    } catch (err) { next(err); }
+  }
+
+  async updateContact(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await customersService.updateContact(req.params.id, req.params.contactId, req.tenantId!, req.body);
+      res.json(success("Contact updated", data));
+    } catch (err) { next(err); }
+  }
+
+  async deleteContact(req: Request, res: Response, next: NextFunction) {
+    try {
+      await customersService.deleteContact(req.params.id, req.params.contactId, req.tenantId!);
+      res.status(204).send();
+    } catch (err) { next(err); }
+  }
 }
 
 export const customersController = new CustomersController();

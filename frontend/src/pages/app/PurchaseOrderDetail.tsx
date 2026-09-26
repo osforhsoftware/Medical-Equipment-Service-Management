@@ -66,9 +66,24 @@ export default function PurchaseOrderDetail() {
   const [returnReason, setReturnReason] = useState("");
   const [returnNotes, setReturnNotes] = useState("");
   const [returnQty, setReturnQty] = useState<Record<string, number>>({});
+  const [freightCost, setFreightCost] = useState("");
+  const [customsCost, setCustomsCost] = useState("");
+  const [insuranceCost, setInsuranceCost] = useState("");
+  const [supplierReference, setSupplierReference] = useState("");
+  const [currency, setCurrency] = useState("INR");
+  const [courier, setCourier] = useState("");
+  const [trackingNumber, setTrackingNumber] = useState("");
+  const [customsInfo, setCustomsInfo] = useState("");
+  const [etd, setEtd] = useState("");
+  const [eta, setEta] = useState("");
+  const [shipmentNotes, setShipmentNotes] = useState("");
+  const [savingLanded, setSavingLanded] = useState(false);
+  const [savingShipment, setSavingShipment] = useState(false);
   const tab = searchParams.get("tab") ?? "overview";
+  const stage = searchParams.get("stage");
   const receiveRef = useRef<HTMLDivElement>(null);
   const returnRef = useRef<HTMLDivElement>(null);
+  const stageOpenedRef = useRef<string | null>(null);
   const {
     errors,
     shouldShow,
@@ -93,7 +108,22 @@ export default function PurchaseOrderDetail() {
     setLoading(true);
     setError(null);
     try {
-      setOrder(await api.getPurchaseOrder(id));
+      const po = await api.getPurchaseOrder(id);
+      setOrder(po);
+      setFreightCost(po.freightCost != null ? String(po.freightCost) : "");
+      setCustomsCost(po.customsCost != null ? String(po.customsCost) : "");
+      setInsuranceCost(po.insuranceCost != null ? String(po.insuranceCost) : "");
+      setSupplierReference(po.supplierReference ?? "");
+      setCurrency(po.currency || "INR");
+      setCourier(po.shipment?.courier ?? "");
+      setTrackingNumber(po.shipment?.trackingNumber ?? "");
+      setCustomsInfo(po.shipment?.customsInfo ?? "");
+      setEtd(po.shipment?.etd ? po.shipment.etd.slice(0, 10) : "");
+      setEta(po.shipment?.eta ? po.shipment.eta.slice(0, 10) : "");
+      setShipmentNotes(po.shipment?.notes ?? "");
+      if (po.shipment?.freightCost != null) {
+        setFreightCost(String(po.shipment.freightCost));
+      }
     } catch (err) {
       setOrder(null);
       setError(err instanceof ApiError && err.status === 404 ? null : "Please try again.");
@@ -108,6 +138,26 @@ export default function PurchaseOrderDetail() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!order) return;
+    const key = `${order.id}:${stage ?? ""}`;
+    if (stageOpenedRef.current === key) return;
+    stageOpenedRef.current = key;
+    if (stage === "grn" && order.lineItems?.length && order.status !== "received" && order.status !== "cancelled") {
+      setReceiveOpen(true);
+    }
+    if (stage === "customs" || stage === "landed") {
+      window.requestAnimationFrame(() => {
+        document.getElementById("po-customs-cost")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+    if (stage === "shipment") {
+      window.requestAnimationFrame(() => {
+        document.getElementById("po-shipment")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }, [order, stage]);
 
   const receive = async () => {
     if (!order) return;
@@ -171,12 +221,70 @@ export default function PurchaseOrderDetail() {
 
   const canReceive = Boolean(order?.lineItems?.length && order.status !== "received" && order.status !== "cancelled");
   const canReturn = Boolean(order?.lineItems?.some((line) => returnableQty(line) > 0));
+  const canEditLanded = Boolean(order && order.status !== "received" && order.status !== "cancelled");
+
+  const saveShipment = async () => {
+    if (!order) return;
+    setSavingShipment(true);
+    try {
+      await api.upsertPurchaseShipment(order.id, {
+        courier: courier.trim() || null,
+        trackingNumber: trackingNumber.trim() || null,
+        freightCost: freightCost ? Number(freightCost) : null,
+        customsInfo: customsInfo.trim() || null,
+        etd: etd || null,
+        eta: eta || null,
+        notes: shipmentNotes.trim() || null,
+      });
+      toast({ title: "Shipment saved", description: "Freight is included in landed cost on GRN." });
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Failed to save shipment" });
+    } finally {
+      setSavingShipment(false);
+    }
+  };
+
+  const saveLandedCosts = async () => {
+    if (!order) return;
+    setSavingLanded(true);
+    try {
+      await api.updatePurchaseLandedCosts(order.id, {
+        freightCost: freightCost ? Number(freightCost) : null,
+        customsCost: customsCost ? Number(customsCost) : null,
+        insuranceCost: insuranceCost ? Number(insuranceCost) : null,
+        supplierReference: supplierReference.trim() || null,
+        currency: currency.trim() || "INR",
+      });
+      toast({ title: "Customs & import costs updated", description: "Landed cost applies when you post a goods receipt." });
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Failed to update landed costs" });
+    } finally {
+      setSavingLanded(false);
+    }
+  };
+
+  const stageBack =
+    stage === "grn" || stage === "shipment" || stage === "customs" || stage === "stock" || stage === "landed"
+      ? `/app/purchase-orders?stage=${stage === "landed" ? "customs" : stage}`
+      : "/app/purchase-orders";
+  const stageBackLabel =
+    stage === "grn"
+      ? "Back to GRN"
+      : stage === "shipment"
+        ? "Back to Shipment"
+        : stage === "customs" || stage === "landed"
+          ? "Back to Customs"
+          : stage === "stock"
+            ? "Back to Stock"
+            : "Back to Purchase";
 
   return (
     <RoleGuard roles={["admin", "inventory"]}>
       <RecordDetailLayout
-        backTo="/app/purchase-orders"
-        backLabel="Back to Purchase Orders"
+        backTo={stageBack}
+        backLabel={stageBackLabel}
         title={order?.reference ?? "Purchase order"}
         subtitle={order ? `${order.supplier} · Expected ${formatDate(order.expectedDate)}` : undefined}
         status={order?.status}
@@ -206,7 +314,12 @@ export default function PurchaseOrderDetail() {
           </div>
         ) : undefined}
         activeTab={tab}
-        onTabChange={(value) => setSearchParams(value === "overview" ? {} : { tab: value })}
+        onTabChange={(value) => {
+          const next = new URLSearchParams();
+          if (stage) next.set("stage", stage);
+          if (value !== "overview") next.set("tab", value);
+          setSearchParams(next);
+        }}
         tabs={order ? [
           {
             id: "overview",
@@ -217,13 +330,94 @@ export default function PurchaseOrderDetail() {
                   <DetailInfoGrid
                     items={[
                       { label: "Supplier", value: order.supplier },
+                      { label: "Supplier ref", value: order.supplierReference?.trim() || "—" },
+                      { label: "Currency", value: order.currency || "INR" },
                       { label: "Expected", value: formatDate(order.expectedDate) },
                       { label: "Status", value: order.status },
-                      { label: "Total", value: formatCurrency(order.total) },
+                      { label: "Merchandise total", value: formatCurrency(order.total) },
+                      { label: "Landed cost total", value: order.landedCostTotal != null ? formatCurrency(order.landedCostTotal) : "—" },
                       { label: "Created", value: formatDate(order.createdAt) },
                       { label: "Updated", value: formatDate(order.updatedAt) },
                     ]}
                   />
+                </DetailSection>
+
+                <DetailSection title="Shipment (freight · courier · tracking · ETD/ETA)">
+                  <div id="po-shipment" />
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    Track inbound logistics. Freight rolls into landed cost = purchase + freight + customs + other import costs.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-1">
+                      <Label htmlFor="po-courier">Courier</Label>
+                      <Input id="po-courier" value={courier} disabled={!canEditLanded} onChange={(e) => setCourier(e.target.value)} placeholder="DHL / FedEx / …" />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label htmlFor="po-tracking">Tracking number</Label>
+                      <Input id="po-tracking" value={trackingNumber} disabled={!canEditLanded} onChange={(e) => setTrackingNumber(e.target.value)} />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label htmlFor="po-etd">ETD</Label>
+                      <Input id="po-etd" type="date" value={etd} disabled={!canEditLanded} onChange={(e) => setEtd(e.target.value)} />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label htmlFor="po-eta">ETA</Label>
+                      <Input id="po-eta" type="date" value={eta} disabled={!canEditLanded} onChange={(e) => setEta(e.target.value)} />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label htmlFor="po-ship-freight">Freight cost</Label>
+                      <Input id="po-ship-freight" type="number" min={0} step="0.01" value={freightCost} disabled={!canEditLanded} onChange={(e) => setFreightCost(e.target.value)} />
+                    </div>
+                    <div className="grid gap-1 sm:col-span-2">
+                      <Label htmlFor="po-customs-info">Customs information</Label>
+                      <Textarea id="po-customs-info" rows={2} value={customsInfo} disabled={!canEditLanded} onChange={(e) => setCustomsInfo(e.target.value)} placeholder="HS code, clearance notes…" />
+                    </div>
+                    <div className="grid gap-1 sm:col-span-2">
+                      <Label htmlFor="po-ship-notes">Notes</Label>
+                      <Textarea id="po-ship-notes" rows={2} value={shipmentNotes} disabled={!canEditLanded} onChange={(e) => setShipmentNotes(e.target.value)} />
+                    </div>
+                  </div>
+                  {canEditLanded ? (
+                    <Button className="mt-3" size="sm" disabled={savingShipment} onClick={() => void saveShipment()}>
+                      {savingShipment ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Save shipment
+                    </Button>
+                  ) : null}
+                </DetailSection>
+
+                <DetailSection title="Customs & landed cost">
+                  <div id="po-customs-cost" />
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    Landed cost = purchase cost + freight + customs + other allocated import costs (insurance). On GRN, extras update inventory unit cost.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid gap-1">
+                      <Label htmlFor="po-supplier-ref">Supplier reference</Label>
+                      <Input id="po-supplier-ref" value={supplierReference} disabled={!canEditLanded} onChange={(e) => setSupplierReference(e.target.value)} placeholder="Supplier PO / invoice #" />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label htmlFor="po-currency">Currency</Label>
+                      <Input id="po-currency" value={currency} disabled={!canEditLanded} onChange={(e) => setCurrency(e.target.value.toUpperCase())} maxLength={10} />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label htmlFor="po-detail-freight">Freight</Label>
+                      <Input id="po-detail-freight" type="number" min={0} step="0.01" value={freightCost} disabled={!canEditLanded} onChange={(e) => setFreightCost(e.target.value)} />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label htmlFor="po-detail-customs">Customs</Label>
+                      <Input id="po-detail-customs" type="number" min={0} step="0.01" value={customsCost} disabled={!canEditLanded} onChange={(e) => setCustomsCost(e.target.value)} />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label htmlFor="po-detail-insurance">Other import (insurance)</Label>
+                      <Input id="po-detail-insurance" type="number" min={0} step="0.01" value={insuranceCost} disabled={!canEditLanded} onChange={(e) => setInsuranceCost(e.target.value)} />
+                    </div>
+                  </div>
+                  {canEditLanded ? (
+                    <Button className="mt-3" size="sm" disabled={savingLanded} onClick={() => void saveLandedCosts()}>
+                      {savingLanded ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Save customs & costs
+                    </Button>
+                  ) : null}
                 </DetailSection>
               </div>
             ),
@@ -305,7 +499,10 @@ export default function PurchaseOrderDetail() {
             <CardHeader className="pb-3"><CardTitle className="text-base">Summary</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Status</span><StatusBadge status={order.status} /></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Total</span><span className="font-semibold">{formatCurrency(order.total)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Merchandise</span><span className="font-semibold">{formatCurrency(order.total)}</span></div>
+              {order.landedCostTotal != null ? (
+                <div className="flex justify-between"><span className="text-muted-foreground">Landed total</span><span className="font-semibold">{formatCurrency(order.landedCostTotal)}</span></div>
+              ) : null}
               <div className="flex justify-between"><span className="text-muted-foreground">Lines</span><span>{order.items}</span></div>
             </CardContent>
           </Card>

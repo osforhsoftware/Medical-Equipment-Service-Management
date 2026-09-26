@@ -2,6 +2,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
+import { applyPriceCategory, assertCustomerCreditAllows, assertLineMargin } from "@/lib/commercialRules";
+import { assertOwnSalesRecord, salesOwnerFilter } from "@/lib/salesScope";
 
 const money = (value: Prisma.Decimal | number | string | null | undefined) =>
   new Prisma.Decimal(value ?? 0).toDecimalPlaces(2);
@@ -35,9 +37,21 @@ export class SalesService {
     return !estimate.serviceRequestId;
   }
 
-  async getDesk(tenantId: string) {
+  async getDesk(tenantId: string, actor?: { userId: string; role?: string }) {
     const today = startOfDay();
     const month = startOfMonth();
+    const owner = salesOwnerFilter(actor?.role, actor?.userId ?? "");
+    const saleOrderScope: Prisma.SalesOrderWhereInput = { tenantId, ...owner };
+    const saleInvoiceScope: Prisma.InvoiceWhereInput = {
+      tenantId,
+      salesOrderId: { not: null },
+      ...(owner.salespersonId ? { salesOrder: { salespersonId: owner.salespersonId } } : {}),
+    };
+    const quoteScope: Prisma.EstimateWhereInput = {
+      tenantId,
+      serviceRequestId: null,
+      ...owner,
+    };
 
     const [
       activeCustomers,
@@ -57,18 +71,18 @@ export class SalesService {
       prisma.customer.count({ where: { tenantId, status: "active" } }),
       prisma.estimate.groupBy({
         by: ["status"],
-        where: { tenantId, serviceRequestId: null },
+        where: quoteScope,
         _count: true,
         _sum: { total: true },
       }),
       prisma.invoice.aggregate({
-        where: { tenantId, status: { not: "closed" } },
+        where: { ...saleInvoiceScope, status: { not: "closed" } },
         _sum: { total: true, paidTotal: true, balanceDue: true },
         _count: { _all: true },
       }),
-      prisma.invoice.count({ where: { tenantId, status: "overdue" } }),
+      prisma.invoice.count({ where: { ...saleInvoiceScope, status: "overdue" } }),
       prisma.estimate.findMany({
-        where: { tenantId, serviceRequestId: null },
+        where: quoteScope,
         orderBy: { updatedAt: "desc" },
         take: 8,
         select: {
@@ -84,7 +98,7 @@ export class SalesService {
       }),
       prisma.invoice.findMany({
         where: {
-          tenantId,
+          ...saleInvoiceScope,
           status: { in: ["sent", "approved", "overdue"] },
           balanceDue: { gt: 0 },
         },
@@ -101,27 +115,27 @@ export class SalesService {
         },
       }),
       prisma.salesOrder.aggregate({
-        where: { tenantId, orderedAt: { gte: today }, status: { not: "cancelled" } },
+        where: { ...saleOrderScope, orderedAt: { gte: today }, status: { not: "cancelled" } },
         _sum: { total: true },
         _count: true,
       }),
       prisma.salesOrder.aggregate({
-        where: { tenantId, orderedAt: { gte: month }, status: { not: "cancelled" } },
+        where: { ...saleOrderScope, orderedAt: { gte: month }, status: { not: "cancelled" } },
         _sum: { total: true },
         _count: true,
       }),
-      prisma.salesOrder.count({ where: { tenantId, status: { not: "cancelled" } } }),
+      prisma.salesOrder.count({ where: { ...saleOrderScope, status: { not: "cancelled" } } }),
       prisma.salesOrder.count({
-        where: { tenantId, deliveryStatus: "pending", status: { not: "cancelled" } },
+        where: { ...saleOrderScope, deliveryStatus: "pending", status: { not: "cancelled" } },
       }),
       prisma.invoice.aggregate({
-        where: { tenantId, salesOrderId: { not: null }, balanceDue: { gt: 0 } },
+        where: { ...saleInvoiceScope, balanceDue: { gt: 0 } },
         _sum: { balanceDue: true },
         _count: true,
       }),
       prisma.salesOrderLine.groupBy({
         by: ["description"],
-        where: { salesOrder: { tenantId, status: { not: "cancelled" } } },
+        where: { salesOrder: { ...saleOrderScope, status: { not: "cancelled" } } },
         _sum: { quantity: true, lineTotal: true },
         orderBy: { _sum: { quantity: "desc" } },
         take: 5,
@@ -212,9 +226,11 @@ export class SalesService {
       from?: string;
       to?: string;
       search?: string;
+      salespersonId?: string;
     },
   ) {
     const where: Prisma.SalesOrderWhereInput = { tenantId };
+    if (params?.salespersonId) where.salespersonId = params.salespersonId;
     if (params?.customerId) where.customerId = params.customerId;
     if (params?.status && params.status !== "all") where.status = params.status;
     if (params?.deliveryStatus && params.deliveryStatus !== "all") where.deliveryStatus = params.deliveryStatus;
@@ -254,9 +270,9 @@ export class SalesService {
     return rows.map((row) => this.serializeOrder(row));
   }
 
-  async getOrder(tenantId: string, id: string) {
+  async getOrder(tenantId: string, id: string, actor?: { userId: string; role?: string }) {
     const order = await prisma.salesOrder.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId, ...salesOwnerFilter(actor?.role, actor?.userId ?? "") },
       include: orderInclude,
     });
     if (!order) throw new AppError("Sales order not found", 404);
@@ -287,9 +303,10 @@ export class SalesService {
       if (!customer) throw new AppError("Customer not found", 404);
       const user = await tx.user.findFirst({ where: { id: actor.userId, tenantId } });
       const salespersonName = user?.name ?? actor.name ?? "Sales";
-      const lines = await this.resolveSaleLines(tx, tenantId, input.lines);
+      const lines = await this.resolveSaleLines(tx, tenantId, input.lines, customer.priceCategory);
       await this.assertStockForLines(tx, tenantId, lines);
       const totals = this.totalsFromLines(lines);
+      await assertCustomerCreditAllows(tenantId, customer.id, Number(totals.total), tx);
       const reference = await generateReference(tenantId, "SO", "salesOrder", tx);
       const order = await tx.salesOrder.create({
         data: {
@@ -348,6 +365,7 @@ export class SalesService {
         taxRate?: number;
       }>;
     },
+    actor?: { userId: string; role?: string },
   ) {
     return prisma.$transaction(async (tx) => {
       const order = await tx.salesOrder.findFirst({
@@ -355,6 +373,7 @@ export class SalesService {
         include: { invoices: true, lines: true },
       });
       if (!order) throw new AppError("Sales order not found", 404);
+      assertOwnSalesRecord(actor?.role, actor?.userId ?? "", order.salespersonId, "Sales order not found");
       if (order.deliveryStatus === "delivered") {
         throw new AppError("Delivered sales cannot be edited", 409);
       }
@@ -363,8 +382,10 @@ export class SalesService {
       }
       const customer = await tx.customer.findFirst({ where: { id: input.customerId, tenantId } });
       if (!customer) throw new AppError("Customer not found", 404);
-      const lines = await this.resolveSaleLines(tx, tenantId, input.lines);
+      const lines = await this.resolveSaleLines(tx, tenantId, input.lines, customer.priceCategory);
       await this.assertStockForLines(tx, tenantId, lines);
+      const pendingTotals = this.totalsFromLines(lines);
+      await assertCustomerCreditAllows(tenantId, customer.id, Number(pendingTotals.total), tx);
       const totals = this.totalsFromLines(lines);
       await tx.salesOrderLine.deleteMany({ where: { salesOrderId: order.id } });
       const updated = await tx.salesOrder.update({
@@ -401,7 +422,7 @@ export class SalesService {
   async convertQuote(
     tenantId: string,
     estimateId: string,
-    actor: { userId: string; name?: string },
+    actor: { userId: string; name?: string; role?: string },
     input?: { commissionRate?: number; notes?: string },
   ) {
     return prisma.$transaction(async (tx) => {
@@ -410,6 +431,7 @@ export class SalesService {
         include: { lineItems: true, customer: true, reservations: true },
       });
       if (!estimate) throw new AppError("Quotation not found", 404);
+      assertOwnSalesRecord(actor.role, actor.userId, estimate.salespersonId, "Quotation not found");
       if (!this.isSalesQuote(estimate)) {
         throw new AppError("Service estimates stay on the service ticket workflow", 409);
       }
@@ -505,13 +527,14 @@ export class SalesService {
     }).then((order) => this.serializeOrder(order));
   }
 
-  async deliver(tenantId: string, id: string, actorId: string) {
+  async deliver(tenantId: string, id: string, actorId: string, actorRole?: string) {
     return prisma.$transaction(async (tx) => {
       const order = await tx.salesOrder.findFirst({
         where: { id, tenantId },
         include: { reservations: true, lines: true },
       });
       if (!order) throw new AppError("Sales order not found", 404);
+      assertOwnSalesRecord(actorRole, actorId, order.salespersonId, "Sales order not found");
       if (order.status === "cancelled") throw new AppError("Cancelled orders cannot be delivered", 409);
       if (order.deliveryStatus === "delivered") throw new AppError("Order is already delivered", 409);
 
@@ -591,18 +614,27 @@ export class SalesService {
     });
   }
 
-  async createInvoice(tenantId: string, id: string, input?: { dueAt?: string; commissionRate?: number }) {
+  async createInvoice(
+    tenantId: string,
+    id: string,
+    input?: { dueAt?: string; commissionRate?: number },
+    actor?: { userId: string; role?: string },
+  ) {
     return prisma.$transaction(async (tx) => {
       const order = await tx.salesOrder.findFirst({
         where: { id, tenantId },
         include: { lines: true, invoices: true, estimate: true },
       });
       if (!order) throw new AppError("Sales order not found", 404);
+      assertOwnSalesRecord(actor?.role, actor?.userId ?? "", order.salespersonId, "Sales order not found");
       if (order.invoices.some((inv) => inv.status !== "closed")) {
         throw new AppError("An open invoice already exists for this sales order", 409);
       }
 
       const dueAt = input?.dueAt ? new Date(input.dueAt) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+      if (order.customerId) {
+        await assertCustomerCreditAllows(tenantId, order.customerId, Number(order.total), tx);
+      }
       const invoice = await tx.invoice.create({
         data: {
           tenantId,
@@ -661,7 +693,10 @@ export class SalesService {
     });
   }
 
-  async getReports(tenantId: string, query?: { from?: string; to?: string }) {
+  async getReports(
+    tenantId: string,
+    query?: { from?: string; to?: string; salespersonId?: string },
+  ) {
     const month = startOfMonth();
     const today = startOfDay();
 
@@ -685,6 +720,7 @@ export class SalesService {
     const orderWhere: Prisma.SalesOrderWhereInput = {
       tenantId,
       status: { not: "cancelled" },
+      ...(query?.salespersonId ? { salespersonId: query.salespersonId } : {}),
     };
     if (fromDate || toDate) {
       orderWhere.orderedAt = {};
@@ -695,12 +731,24 @@ export class SalesService {
     const invoiceWhere: Prisma.InvoiceWhereInput = {
       tenantId,
       salesOrderId: { not: null },
+      ...(query?.salespersonId ? { salesOrder: { salespersonId: query.salespersonId } } : {}),
     };
     if (fromDate || toDate) {
       invoiceWhere.createdAt = {};
       if (fromDate) invoiceWhere.createdAt.gte = fromDate;
       if (toDate) invoiceWhere.createdAt.lte = toDate;
     }
+
+    const scopedOrderTotalsWhere: Prisma.SalesOrderWhereInput = {
+      tenantId,
+      status: { not: "cancelled" },
+      ...(query?.salespersonId ? { salespersonId: query.salespersonId } : {}),
+    };
+    const scopedInvoiceTotalsWhere: Prisma.InvoiceWhereInput = {
+      tenantId,
+      salesOrderId: { not: null },
+      ...(query?.salespersonId ? { salesOrder: { salespersonId: query.salespersonId } } : {}),
+    };
 
     const [orders, invoices, lines, allTenantOrders, allTenantInvoices] = await Promise.all([
       prisma.salesOrder.findMany({
@@ -749,11 +797,11 @@ export class SalesService {
         },
       }),
       prisma.salesOrder.findMany({
-        where: { tenantId, status: { not: "cancelled" } },
+        where: scopedOrderTotalsWhere,
         select: { total: true, orderedAt: true },
       }),
       prisma.invoice.findMany({
-        where: { tenantId, salesOrderId: { not: null } },
+        where: scopedInvoiceTotalsWhere,
         select: { total: true, paidTotal: true, balanceDue: true, status: true },
       }),
     ]);
@@ -860,6 +908,7 @@ export class SalesService {
       discount?: number;
       taxRate?: number;
     }>,
+    priceCategory?: string | null,
   ) {
     if (!lines.length) throw new AppError("Add at least one sold item", 422);
     const resolved: Array<{
@@ -896,7 +945,11 @@ export class SalesService {
       }
       if (!description) throw new AppError("Each sold item needs a name", 422);
       const quantity = Number(line.quantity);
-      const unitPrice = money(line.unitPrice);
+      const unitPrice = money(applyPriceCategory(Number(line.unitPrice), priceCategory));
+      if (inventoryItemId) {
+        const item = await tx.inventoryItem.findFirst({ where: { id: inventoryItemId, tenantId }, select: { unitCost: true } });
+        assertLineMargin(description, Number(unitPrice), item ? Number(item.unitCost) : null);
+      }
       const discount = money(line.discount ?? 0);
       const taxRate = money(line.taxRate ?? 0);
       if (!(quantity > 0)) throw new AppError(`Quantity must be greater than 0 for ${description}`, 422);

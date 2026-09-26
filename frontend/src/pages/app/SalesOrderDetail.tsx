@@ -9,6 +9,16 @@ import { SaleFormDialog } from "@/components/sales/SaleFormDialog";
 import { PackingListPrint } from "@/components/sales/PackingListPrint";
 import { downloadInvoicePdf } from "@/components/billing/billing-ui";
 import { SALES_BILL_ROLES, SALES_DESK_ROLES, SALES_WRITE_ROLES } from "@/config/roles";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -33,6 +43,7 @@ export default function SalesOrderDetail() {
   const [working, setWorking] = useState(false);
   const [editing, setEditing] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [confirmDeliver, setConfirmDeliver] = useState(false);
   const [payment, setPayment] = useState({ amount: "", method: "upi", reference: "", note: "" });
 
   const orderQuery = useQuery({
@@ -177,7 +188,7 @@ export default function SalesOrderDetail() {
                     <Printer className="mr-1 h-4 w-4" /> Print Packing List
                   </Button>
                   {canDeliver && order.deliveryStatus !== "delivered" ? (
-                    <Button variant="outline" disabled={working} onClick={() => void deliver()}>
+                    <Button variant="outline" disabled={working} onClick={() => setConfirmDeliver(true)}>
                       <Truck className="mr-1 h-4 w-4" /> Mark delivered
                     </Button>
                   ) : null}
@@ -458,6 +469,30 @@ export default function SalesOrderDetail() {
               companyAddress={settings?.companyAddress}
               companyPhone={settings?.companyPhone}
             />
+
+            <AlertDialog open={confirmDeliver} onOpenChange={setConfirmDeliver}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Mark this order as delivered?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Stock will be deducted from inventory. This cannot be undone from here.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={working}>No</AlertDialogCancel>
+                  <AlertDialogAction
+                    disabled={working}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setConfirmDeliver(false);
+                      void deliver();
+                    }}
+                  >
+                    Yes
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </>
         ) : null}
       </div>

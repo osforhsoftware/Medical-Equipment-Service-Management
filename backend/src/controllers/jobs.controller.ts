@@ -21,6 +21,7 @@ export class JobsController {
           engineerId: query.assignee || undefined,
           qaScope: query.qaScope,
           completedScope: parseCompletedScope(query.completedScope),
+          customerId: query.customerId,
           skip: query.skip,
           take: query.take,
           orderBy: query.orderBy,
@@ -46,6 +47,13 @@ export class JobsController {
     try {
       const data = await jobsService.create(req.tenantId!, req.body, req.user!.userId);
       res.status(201).json(success("Job created successfully", data));
+    } catch (err) { next(err); }
+  }
+
+  async createRework(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await jobsService.createRework(req.tenantId!, req.params.id, req.user!.userId, req.body?.note);
+      res.status(201).json(success("Rework job created", data));
     } catch (err) { next(err); }
   }
 
@@ -103,6 +111,7 @@ export class JobsController {
         req.user!.userId,
         req.user!.role,
         req.body.notes,
+        req.body.lines ?? [],
       );
       res.status(201).json(success("Parts request submitted", data));
     } catch (err) { next(err); }
@@ -130,8 +139,36 @@ export class JobsController {
         req.user!.role,
         req.body.inventoryItemId,
         req.body.quantity,
+        {
+          lineId: req.body.lineId,
+          batchNumber: req.body.batchNumber,
+          serialNumbers: req.body.serialNumbers,
+        },
       );
       res.status(201).json(success("Stock deducted successfully", data));
+    } catch (err) { next(err); }
+  }
+
+  async returnStock(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await jobsService.returnStock(
+        req.params.id,
+        req.tenantId!,
+        req.user!.userId,
+        req.user!.role,
+        req.body.inventoryItemId,
+        req.body.quantity,
+        {
+          disposition: req.body.disposition,
+          lineId: req.body.lineId,
+          batchNumber: req.body.batchNumber,
+          serialNumbers: req.body.serialNumbers,
+        },
+      );
+      res.status(201).json(success(
+        req.body.disposition === "scrap" ? "Unused parts scrapped" : "Unused parts returned",
+        data,
+      ));
     } catch (err) { next(err); }
   }
 

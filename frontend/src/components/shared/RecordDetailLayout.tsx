@@ -126,7 +126,7 @@ export function RecordDetailLayout({
   return (
     <div className={cn("space-y-6", className)}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           <Button asChild variant="ghost" size="sm" className="-ml-2 w-fit text-muted-foreground">
             <Link to={backTo}>
               <ArrowLeft className="mr-1 h-4 w-4" /> {backLabel}
@@ -134,7 +134,7 @@ export function RecordDetailLayout({
           </Button>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="page-title">{title}</h1>
+              <h1 className="page-title overflow-text" title={title}>{title}</h1>
               {status ? <StatusBadge status={status} label={statusLabel} /> : null}
             </div>
             {subtitle ? (
@@ -217,9 +217,11 @@ export function DetailInfoGrid({
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {items.map((item) => (
-        <div key={item.label} className="rounded-md border border-border bg-muted/30 p-3 text-sm">
-          <p className="text-xs text-muted-foreground">{item.label}</p>
-          <div className="mt-0.5 font-medium capitalize">{item.value ?? "—"}</div>
+        <div key={item.label} className="min-w-0 rounded-md border border-border bg-muted/30 p-3 text-sm">
+          <p className="overflow-text text-xs text-muted-foreground">{item.label}</p>
+          <div className="mt-0.5 min-w-0 overflow-text font-medium capitalize" title={typeof item.value === "string" || typeof item.value === "number" ? String(item.value) : undefined}>
+            {item.value ?? "—"}
+          </div>
         </div>
       ))}
     </div>

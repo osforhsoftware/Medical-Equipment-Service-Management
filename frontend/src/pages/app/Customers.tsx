@@ -73,6 +73,7 @@ const customerSchema = z
     priceCategory: fieldRules.optionalString(),
     deliveryAddress: fieldRules.optionalString(),
     note: z.string().trim().max(5000).optional(),
+    restrictions: z.string().trim().max(5000).optional(),
     status: z.string(),
   });
 
@@ -91,6 +92,7 @@ type FormState = {
   priceCategory: string;
   deliveryAddress: string;
   note: string;
+  restrictions: string;
   status: string;
   additionalFields: CustomerAdditionalField[];
 };
@@ -110,6 +112,7 @@ const emptyForm: FormState = {
   priceCategory: "",
   deliveryAddress: "",
   note: "",
+  restrictions: "",
   status: "active",
   additionalFields: [{ label: "", value: "" }],
 };
@@ -204,6 +207,7 @@ export default function Customers() {
       "creditLimit",
       "priceCategory",
       "note",
+      "restrictions",
     ],
     schema: customerSchema,
   });
@@ -251,6 +255,7 @@ export default function Customers() {
         deliveryAddress: form.address.trim() || null,
         additionalFields: sanitizeCustomerAdditionalFields(form.additionalFields),
         note: form.note.trim() || null,
+        restrictions: form.restrictions.trim() || null,
         status: form.status,
       });
       toast.success("Customer created successfully", {
@@ -751,6 +756,21 @@ export default function Customers() {
                 rows={3}
               />
               {shouldShow("note") && <FormFieldError field="note" message={errors.note} />}
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="customer-restrictions">Service restrictions</Label>
+              <Textarea
+                id="customer-restrictions"
+                value={form.restrictions}
+                onChange={(e) => {
+                  const next = { ...form, restrictions: e.target.value };
+                  setForm(next);
+                  handleChange("restrictions", next);
+                }}
+                onBlur={() => handleBlur("restrictions", form)}
+                placeholder="Site rules the technician must follow (optional)"
+                rows={3}
+              />
             </div>
           </div>
           <DialogFooter>

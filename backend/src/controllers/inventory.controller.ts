@@ -1,5 +1,6 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { inventoryService } from "@/services/inventory.service";
+import { jobPartsService } from "@/services/jobParts.service";
 import { parseInventoryListQuery, sendPaginatedList } from "@/utils/listQuery";
 import { success } from "@/utils/response";
 
@@ -12,6 +13,7 @@ export class InventoryController {
         itemClass: query.itemClass,
         stockStatus: query.stockStatus,
         supplierId: query.supplierId,
+        status: query.status,
         search: query.search,
         skip: query.skip,
         take: query.take,
@@ -51,8 +53,43 @@ export class InventoryController {
 
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      await inventoryService.delete(req.params.id, req.tenantId!);
-      res.status(204).send();
+      const data = await inventoryService.delete(req.params.id, req.tenantId!);
+      res.json(success("Inventory item moved to trash", data));
+    } catch (err) { next(err); }
+  }
+
+  async restore(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await inventoryService.restore(req.params.id, req.tenantId!);
+      res.json(success("Inventory item restored successfully", data));
+    } catch (err) { next(err); }
+  }
+
+  async listPartsRequests(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await jobPartsService.list(req.tenantId!, typeof req.query.status === "string" ? req.query.status : undefined);
+      res.json(success("Parts requests fetched", data));
+    } catch (err) { next(err); }
+  }
+
+  async approvePartsRequest(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await jobPartsService.approve(req.params.requestId, req.tenantId!, req.user!.userId, req.body.lines);
+      res.json(success("Parts request approved", data));
+    } catch (err) { next(err); }
+  }
+
+  async rejectPartsRequest(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await jobPartsService.reject(req.params.requestId, req.tenantId!, req.user!.userId, req.body.reason);
+      res.json(success("Parts request rejected", data));
+    } catch (err) { next(err); }
+  }
+
+  async issuePartsRequest(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await jobPartsService.issue(req.params.requestId, req.tenantId!, req.user!.userId, req.body.lines);
+      res.status(201).json(success("Parts issued", data));
     } catch (err) { next(err); }
   }
 

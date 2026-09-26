@@ -111,6 +111,7 @@ export function parseJobListQuery(req: Request) {
     overdue,
     qaScope: parseQaScope(req.query.qaScope),
     completedScope,
+    customerId: parseOptionalFilter(req.query.customerId),
     orderBy: toOrderBy(sort),
   };
 }
@@ -147,6 +148,8 @@ export function parseServiceRequestListQuery(req: Request) {
     completedScope,
     slaDueFrom: parseOptionalFilter(req.query.slaDueFrom),
     slaDueTo: parseOptionalFilter(req.query.slaDueTo),
+    customerId: parseOptionalFilter(req.query.customerId),
+    equipmentId: parseOptionalFilter(req.query.equipmentId),
     orderBy: toOrderBy(sort),
   };
 }
@@ -200,6 +203,7 @@ export function parseInventoryListQuery(req: Request) {
     itemClass: parseOptionalFilter(req.query.itemClass),
     stockStatus: parseOptionalFilter(req.query.stockStatus),
     supplierId: parseOptionalFilter(req.query.supplierId),
+    status: parseOptionalFilter(req.query.status),
     orderBy: toOrderBy(sort),
   };
 }

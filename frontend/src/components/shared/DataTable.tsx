@@ -233,7 +233,7 @@ export function DataTable<T extends { id: string }>({
                     {columns.map((c) => (
                       <TableCell
                         key={c.key}
-                        className={cn(compact && "px-2 py-1.5 align-top", c.className)}
+                        className={cn("min-w-0 overflow-hidden", compact && "px-2 py-1.5 align-top", c.className)}
                       >
                         {c.render(row)}
                       </TableCell>

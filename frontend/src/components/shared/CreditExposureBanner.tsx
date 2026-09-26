@@ -47,9 +47,9 @@ export function CreditExposureBanner({ customerId, currentTotal = 0 }: CreditExp
             <span className="font-bold tabular-nums">{formatCurrency(projectedExposure)}</span>.
           </>
         )}
-        {projectedOver && (
+        {(isOverLimit || projectedOver) && (
           <p className="mt-1 font-semibold text-destructive">
-            Warning: Saving or converting this quotation will breach approved credit limit boundaries.
+            Save is blocked until outstanding invoices are paid or the credit limit is increased.
           </p>
         )}
       </AlertDescription>

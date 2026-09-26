@@ -10,6 +10,7 @@ import {
   requestJobPartsSchema,
   captureJobSignatureSchema,
   deductJobStockSchema,
+  returnJobStockSchema,
 } from "@/schemas/jobActions.schema";
 
 const router = Router();
@@ -26,11 +27,13 @@ router.get("/:id/activities", canRead, jobsController.getActivities);
 router.post("/:id/activities", canLogActivity, jobsController.addActivity);
 router.get("/:id", canRead, jobsController.getById);
 router.post("/", requireRole("admin", "coordinator"), validate(createJobSchema), jobsController.create);
+router.post("/:id/rework", requireRole("admin", "coordinator"), jobsController.createRework);
 router.post("/:id/photos", canExecute, validate(uploadJobPhotosSchema), jobsController.uploadPhotos);
 router.put("/:id/work-report", canExecute, validate(saveJobWorkReportSchema), jobsController.saveWorkReport);
 router.post("/:id/parts-requests", canExecute, validate(requestJobPartsSchema), jobsController.requestParts);
 router.post("/:id/signature", canExecute, validate(captureJobSignatureSchema), jobsController.captureSignature);
 router.post("/:id/deduct-stock", canExecute, validate(deductJobStockSchema), jobsController.deductStock);
+router.post("/:id/return-stock", canExecute, validate(returnJobStockSchema), jobsController.returnStock);
 router.put("/:id", canUpdate, validate(updateJobSchema), jobsController.update);
 router.delete("/:id", requireRole("admin", "coordinator"), jobsController.delete);
 

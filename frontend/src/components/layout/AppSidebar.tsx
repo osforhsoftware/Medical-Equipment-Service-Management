@@ -98,7 +98,13 @@ function NavItemLink({
       </div>
       <CollapsibleContent className="space-y-0.5 pb-1 pl-3">
         {item.children!.map((child) => {
-          const active = pathMatches(child.to, pathname, search);
+          const [childPath, childQuery = ""] = child.to.split("?");
+          const querySiblingActive = item.children!.some(
+            (other) => other.to.includes("?") && pathMatches(other.to, pathname, search),
+          );
+          const active = childQuery
+            ? pathMatches(child.to, pathname, search)
+            : pathname === childPath && !querySiblingActive;
           return (
             <NavLink
               key={child.to}

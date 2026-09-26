@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
@@ -18,9 +19,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/AuthContext";
 import { api, ApiError, type BackendInventoryItem } from "@/lib/api";
-import { Eye, Package, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle } from "lucide-react";
+import { Eye, Package, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Pencil, Trash2, RotateCcw, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import { parseCustomerAdditionalFields, sanitizeCustomerAdditionalFields } from "@/lib/customerFields";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/format";
@@ -34,9 +36,11 @@ const adjustSchema = z.object({
 
 export default function InventoryDetail() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasRole } = useAuth();
-  const canAdjust = hasRole(["admin"]);
+  const canAdjust = hasRole(["admin", "inventory"]);
   const [item, setItem] = useState<BackendInventoryItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +50,14 @@ export default function InventoryDetail() {
   const [damagedQty, setDamagedQty] = useState("1");
   const [damagedReason, setDamagedReason] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+
+  const additionalFieldMap = useMemo(() => {
+    const fields = parseCustomerAdditionalFields(item?.additionalFields);
+    return Object.fromEntries(fields.map((f) => [f.label, f.value]));
+  }, [item?.additionalFields]);
 
   const damagedCount = useMemo(() => {
     if (!item?.additionalFields) return 0;
@@ -154,6 +166,39 @@ export default function InventoryDetail() {
     }
   };
 
+  const moveToTrash = async () => {
+    if (!item) return;
+    setDeleting(true);
+    try {
+      const updated = await api.deleteInventoryItem(item.id);
+      setItem(updated);
+      setDeleteOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      toast.success("Item moved to trash", {
+        description: `${item.name} is inactive. Stock history remains available.`,
+      });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to move item to trash" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const restoreFromTrash = async () => {
+    if (!item) return;
+    setRestoring(true);
+    try {
+      const updated = await api.restoreInventoryItem(item.id);
+      setItem(updated);
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      toast.success("Item restored", { description: `${item.name} is active again.` });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to restore item" });
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   return (
     <RoleGuard roles={["admin", "inventory", "engineer"]}>
       <RecordDetailLayout
@@ -191,7 +236,10 @@ export default function InventoryDetail() {
                       { label: "Manufacturer", value: item.manufacturer || "—" },
                       { label: "Compatible models", value: item.compatibleModels || "—" },
                       { label: "In stock", value: String(item.inStock) },
+                      { label: "Available", value: String(item.available ?? Math.max(0, item.inStock - item.reserved)) },
                       { label: "Reserved", value: String(item.reserved) },
+                      { label: "Issued", value: String(item.issued ?? 0) },
+                      { label: "Damaged", value: String(item.damaged ?? 0) },
                       { label: "Min/max level (min)", value: String(item.reorderLevel) },
                       { label: "Min/max level (max)", value: String(item.maxLevel ?? 0) },
                       { label: "Bin/location", value: item.binLocation || "—" },
@@ -201,7 +249,13 @@ export default function InventoryDetail() {
                       { label: "Delivery", value: `${formatCurrency(item.deliveryCharge ?? 0)} (${item.deliveryChargeType ?? "flat"})` },
                       { label: "Supplier", value: item.supplier },
                       { label: "Batch / serial tracking (batches)", value: item.trackBatches ? "Yes" : "No" },
+                      ...(item.trackBatches && additionalFieldMap["Batch numbers"]
+                        ? [{ label: "Batch numbers", value: additionalFieldMap["Batch numbers"] }]
+                        : []),
                       { label: "Batch / serial tracking (serials)", value: item.trackSerials ? "Yes" : "No" },
+                      ...(item.trackSerials && additionalFieldMap["Serial numbers"]
+                        ? [{ label: "Serial numbers", value: additionalFieldMap["Serial numbers"] }]
+                        : []),
                     ]}
                   />
                 </DetailSection>
@@ -266,6 +320,42 @@ export default function InventoryDetail() {
             <CardHeader className="pb-3"><CardTitle className="text-base">Actions</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               {canAdjust ? (
+                <div className="flex flex-col gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full justify-start"
+                    onClick={() => navigate(`/app/inventory?stage=parts&edit=${item.id}`)}
+                  >
+                    <Pencil className="mr-2 h-4 w-4" /> Edit product
+                  </Button>
+                  {item.status === "inactive" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start"
+                      disabled={restoring}
+                      onClick={() => void restoreFromTrash()}
+                    >
+                      {restoring ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                      Restore from trash
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start text-destructive hover:text-destructive"
+                      onClick={() => setDeleteOpen(true)}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" /> Move to trash
+                    </Button>
+                  )}
+                </div>
+              ) : null}
+              {canAdjust ? (
                 <form
                   noValidate
                   onSubmit={(e) => {
@@ -322,7 +412,7 @@ export default function InventoryDetail() {
                   </div>
                 </form>
               ) : (
-                <p className="text-sm text-muted-foreground">Stock adjustments require admin access.</p>
+                <p className="text-sm text-muted-foreground">Stock adjustments require inventory access.</p>
               )}
               {canAdjust && (
                 <div className="pt-2 border-t border-border space-y-2">
@@ -476,6 +566,27 @@ export default function InventoryDetail() {
           </DialogContent>
         </Dialog>
       ) : null}
+
+      <DeleteConfirmDialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (!deleting) setDeleteOpen(open);
+        }}
+        title="Move to trash?"
+        description={
+          <div className="space-y-2">
+            <p>
+              This soft-removes{" "}
+              <span className="font-medium text-foreground">{item?.name}</span>
+              {item?.sku ? ` (${item.sku})` : ""}. The product is marked inactive — not permanently erased.
+            </p>
+            <p>Stock history and linked documents remain. You can restore it later from Inventory → Status: Trash.</p>
+          </div>
+        }
+        confirmLabel="Move to trash"
+        loading={deleting}
+        onConfirm={() => void moveToTrash()}
+      />
     </RoleGuard>
   );
 }

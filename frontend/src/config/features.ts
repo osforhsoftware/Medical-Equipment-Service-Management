@@ -1,7 +1,8 @@
 /**
- * Feature flags for temporarily disabled product surfaces.
+ * Feature flags for product surfaces.
  *
- * Customer Portal is deferred (client PPT: “for future, Disable Now”).
- * Set CUSTOMER_PORTAL_ENABLED to true and follow docs/CUSTOMER_PORTAL.md to re-enable.
+ * Customer Portal is live. A customer user only sees their own service
+ * equipment, tickets, estimates, and documents — never other customers.
+ * Set CUSTOMER_PORTAL_ENABLED to false to disable login and /portal routes.
  */
-export const CUSTOMER_PORTAL_ENABLED = false;
+export const CUSTOMER_PORTAL_ENABLED = true;

@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 const LINE_GRID =
   "grid grid-cols-[minmax(0,1.5fr)_8.5rem_8rem_7rem_5.5rem_6.5rem_7.5rem_2.5rem] items-start gap-x-2";
 const numberInputClass =
-  "h-10 min-w-0 w-full px-2 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+  "h-10 min-w-0 w-full overflow-hidden px-2 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 const CUSTOM_CATALOG_VALUE = "__custom__";
 
 interface InvoiceLineEditorProps {
@@ -295,8 +295,10 @@ export function InvoiceLineEditor({
                         aria-label={`Line ${index + 1} discount`}
                       />
                     </div>
-                    <div className="flex h-10 items-center justify-end pr-2 text-sm font-semibold tabular-nums">
-                      {formatCurrency(lineAmount(line))}
+                    <div className="flex h-10 min-w-0 items-center justify-end overflow-hidden pr-2 text-sm font-semibold">
+                      <span className="overflow-num" title={formatCurrency(lineAmount(line))}>
+                        {formatCurrency(lineAmount(line))}
+                      </span>
                     </div>
                     <div className="flex h-10 items-center justify-center">
                       <Button

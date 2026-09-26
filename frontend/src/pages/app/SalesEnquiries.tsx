@@ -1,21 +1,37 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FileQuestion,
   Plus,
   Search,
   ArrowRight,
+  Check,
   CheckCircle2,
+  ChevronsUpDown,
   XCircle,
   Clock,
   Loader2,
+  User,
+  UserPlus,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { RoleGuard } from "@/components/auth/RoleGuard";
+import { RequiredMark } from "@/components/shared/RequiredMark";
+import { QuickAddCustomerDialog } from "@/components/sales/QuickAddCustomerDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +41,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -34,9 +51,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAuth } from "@/context/AuthContext";
-import { api, ApiError } from "@/lib/api";
+import { CUSTOMER_WRITE_ROLES } from "@/config/roles";
+import { api, ApiError, type BackendCustomer } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -58,6 +77,7 @@ export interface SalesEnquiry {
   notes: string;
   assignedTo: string;
   followUpDate: string | null;
+  convertedEstimateId?: string | null;
   createdAt: string;
 }
 
@@ -102,6 +122,8 @@ const BLANK = {
 };
 
 function EnquiryFormDialog({ open, onOpenChange, existing, onSuccess }: EnquiryFormDialogProps) {
+  const { hasRole } = useAuth();
+  const canAddClient = hasRole(CUSTOMER_WRITE_ROLES);
   const [form, setForm] = useState(
     existing
       ? {
@@ -123,6 +145,76 @@ function EnquiryFormDialog({ open, onOpenChange, existing, onSuccess }: EnquiryF
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [customerId, setCustomerId] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [customerOpen, setCustomerOpen] = useState(false);
+  const [addClientOpen, setAddClientOpen] = useState(false);
+  const [extraClients, setExtraClients] = useState<BackendCustomer[]>([]);
+  const [addClientSeed, setAddClientSeed] = useState("");
+
+  const openAddClient = (seed = customerSearch) => {
+    setAddClientSeed(seed.trim());
+    setCustomerOpen(false);
+    setAddClientOpen(true);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    setCustomerId("");
+    setCustomerSearch("");
+    setCustomerOpen(false);
+    setExtraClients([]);
+  }, [open, existing?.id]);
+
+  const clientsQuery = useQuery({
+    queryKey: ["customers", "sales-enquiry-form"],
+    queryFn: () =>
+      api.listCustomers({
+        status: "active",
+        limit: 200,
+        page: 1,
+      }),
+    enabled: open,
+  });
+
+  const clients = useMemo(() => {
+    const rows = [...(clientsQuery.data?.data ?? [])];
+    for (const extra of extraClients) {
+      if (!rows.some((row) => row.id === extra.id)) rows.unshift(extra);
+    }
+    return rows;
+  }, [clientsQuery.data?.data, extraClients]);
+
+  const selectedClient = useMemo(() => {
+    if (customerId) return clients.find((c) => c.id === customerId) ?? null;
+    if (!form.customerName.trim()) return null;
+    return clients.find((c) => c.name.toLowerCase() === form.customerName.trim().toLowerCase()) ?? null;
+  }, [clients, customerId, form.customerName]);
+
+  useEffect(() => {
+    if (!open || customerId || !existing?.customerName || !clients.length) return;
+    const match = clients.find(
+      (c) => c.name.toLowerCase() === existing.customerName.trim().toLowerCase(),
+    );
+    if (match) setCustomerId(match.id);
+  }, [open, existing?.customerName, clients, customerId]);
+
+  const applyClient = (client: BackendCustomer) => {
+    setCustomerId(client.id);
+    setForm((p) => ({
+      ...p,
+      customerName: client.name || "",
+      contactPerson: client.contactPerson || p.contactPerson,
+      phone: client.phone || p.phone,
+      email: client.email || p.email,
+    }));
+    setErrors((prev) => {
+      if (!prev.customerName) return prev;
+      const next = { ...prev };
+      delete next.customerName;
+      return next;
+    });
+  };
 
   const set =
     (field: keyof typeof BLANK) =>
@@ -131,7 +223,7 @@ function EnquiryFormDialog({ open, onOpenChange, existing, onSuccess }: EnquiryF
 
   const validate = () => {
     const errs: Record<string, string> = {};
-    if (!form.customerName.trim()) errs.customerName = "Customer name required";
+    if (!form.customerName.trim()) errs.customerName = "Client required";
     if (!form.productInterest.trim()) errs.productInterest = "Product / service interest required";
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -162,29 +254,151 @@ function EnquiryFormDialog({ open, onOpenChange, existing, onSuccess }: EnquiryF
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && addClientOpen) return;
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent
+        className="sm:max-w-2xl max-h-[90vh] overflow-y-auto"
+        onInteractOutside={(e) => {
+          if (addClientOpen || (e.target as HTMLElement | null)?.closest?.("[data-radix-popper-content-wrapper]")) {
+            e.preventDefault();
+          }
+        }}
+        onPointerDownOutside={(e) => {
+          if (addClientOpen || (e.target as HTMLElement | null)?.closest?.("[data-radix-popper-content-wrapper]")) {
+            e.preventDefault();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileQuestion className="h-5 w-5 text-primary" />
             {existing ? "Edit Sales Enquiry" : "New Sales Enquiry"}
           </DialogTitle>
           <DialogDescription>
-            Record a new inbound sales lead or enquiry from a prospective customer.
+            Record a new inbound sales lead or enquiry from a prospective client.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1">
-            <Label className={errors.customerName ? "text-destructive" : ""}>
-              Customer / Company Name <span className="text-destructive">*</span>
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label className={cn(errors.customerName ? "text-destructive" : "")}>
+              Client <RequiredMark />
             </Label>
-            <Input
-              value={form.customerName}
-              onChange={set("customerName")}
-              placeholder="Hospital or company name"
-              className={errors.customerName ? "border-destructive" : ""}
-            />
+            <Popover modal open={customerOpen} onOpenChange={setCustomerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={customerOpen}
+                  className={cn(
+                    "h-10 w-full justify-between font-normal",
+                    errors.customerName ? "border-destructive" : "",
+                  )}
+                >
+                  <span className="flex min-w-0 items-center gap-2 truncate">
+                    <User className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    {selectedClient ? (
+                      <span className="truncate font-medium text-foreground">{selectedClient.name}</span>
+                    ) : form.customerName ? (
+                      <span className="truncate font-medium text-foreground">{form.customerName}</span>
+                    ) : clientsQuery.isLoading ? (
+                      <span className="text-muted-foreground">Loading clients…</span>
+                    ) : (
+                      <span className="text-muted-foreground">Select or add a client…</span>
+                    )}
+                  </span>
+                  <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                className="z-[80] p-0"
+                align="start"
+                style={{ width: "var(--radix-popover-trigger-width)" }}
+              >
+                <Command>
+                  <CommandInput
+                    placeholder="Search client by name, phone or reference…"
+                    value={customerSearch}
+                    onValueChange={setCustomerSearch}
+                  />
+                  <CommandList className="max-h-60">
+                    <CommandEmpty>
+                      {clientsQuery.isLoading ? (
+                        "Loading clients…"
+                      ) : canAddClient ? (
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2 px-2 py-2.5 text-sm text-primary hover:bg-accent"
+                          onClick={() => openAddClient()}
+                        >
+                          <UserPlus className="h-4 w-4 shrink-0" />
+                          + Add new customer
+                          {customerSearch.trim() ? (
+                            <span className="truncate text-muted-foreground">“{customerSearch.trim()}”</span>
+                          ) : null}
+                        </button>
+                      ) : (
+                        "No client found."
+                      )}
+                    </CommandEmpty>
+                    {canAddClient ? (
+                      <>
+                        <CommandGroup>
+                          <CommandItem
+                            value="__add_new_customer__ add new customer"
+                            onSelect={() => openAddClient()}
+                            className="py-2.5 text-primary"
+                          >
+                            <UserPlus className="mr-2 h-4 w-4 shrink-0" />
+                            <span className="font-medium">+ Add new customer</span>
+                          </CommandItem>
+                        </CommandGroup>
+                        <CommandSeparator />
+                      </>
+                    ) : null}
+                    <CommandGroup heading={clients.length ? "Select customer" : undefined}>
+                      {clients.map((client) => (
+                        <CommandItem
+                          key={client.id}
+                          value={`${client.reference} ${client.name} ${client.phone} ${client.city} ${client.type}`}
+                          onSelect={() => {
+                            applyClient(client);
+                            setCustomerOpen(false);
+                            setCustomerSearch("");
+                          }}
+                          className="py-2.5"
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4 shrink-0",
+                              client.id === (selectedClient?.id ?? customerId) ? "opacity-100" : "opacity-0",
+                            )}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate font-medium">{client.name}</span>
+                              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] uppercase text-muted-foreground">
+                                {client.reference}
+                              </span>
+                            </div>
+                            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                              {client.phone || client.city || client.type || "Client"}
+                            </span>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            <p className="text-xs text-muted-foreground">Select an existing customer, or add a new one.</p>
             {errors.customerName && <p className="text-xs text-destructive">{errors.customerName}</p>}
           </div>
 
@@ -304,6 +518,23 @@ function EnquiryFormDialog({ open, onOpenChange, existing, onSuccess }: EnquiryF
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {canAddClient ? (
+        <QuickAddCustomerDialog
+          open={addClientOpen}
+          onOpenChange={(next) => {
+            setAddClientOpen(next);
+            if (!next) setAddClientSeed("");
+          }}
+          initialName={addClientSeed}
+          onCreated={(client) => {
+            setExtraClients((prev) => [client, ...prev.filter((row) => row.id !== client.id)]);
+            applyClient(client);
+            setCustomerSearch("");
+            setAddClientSeed("");
+          }}
+        />
+      ) : null}
     </Dialog>
   );
 }
@@ -312,9 +543,11 @@ function EnquiryFormDialog({ open, onOpenChange, existing, onSuccess }: EnquiryF
 
 export default function SalesEnquiries() {
   const { hasRole } = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const canCreate = hasRole(["admin", "sales", "coordinator"]);
   const [search, setSearch] = useState("");
+  const [convertingId, setConvertingId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<EnquiryStatus | "all">("all");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<SalesEnquiry | null>(null);
@@ -346,12 +579,30 @@ export default function SalesEnquiries() {
 
   const refetch = () => queryClient.invalidateQueries({ queryKey: ["sales-enquiries"] });
 
+  const convertToQuotation = async (enq: SalesEnquiry) => {
+    if (enq.convertedEstimateId) {
+      navigate(`/app/estimates/${enq.convertedEstimateId}`);
+      return;
+    }
+    setConvertingId(enq.id);
+    try {
+      const estimate = await api.convertSalesEnquiryToQuotation(enq.id);
+      toast({ title: "Sales quotation created", description: estimate.reference });
+      await refetch();
+      navigate(`/app/estimates/${estimate.id}`);
+    } catch (err) {
+      toast.apiError(err, { fallback: "Could not create quotation" });
+    } finally {
+      setConvertingId(null);
+    }
+  };
+
   return (
     <RoleGuard roles={["admin", "sales", "coordinator", "billing"]}>
       <div className="space-y-5">
         <PageHeader
-          title="Sales Enquiries"
-          subtitle="Track inbound leads and convert them to quotations or sales orders"
+          title="Enquiry"
+          subtitle="Inbound sales leads. Convert an enquiry to a quotation, then to a sales order."
           icon={<FileQuestion className="h-6 w-6" />}
           actions={
             canCreate ? (
@@ -475,6 +726,19 @@ export default function SalesEnquiries() {
                         )}
                         <p>Created: {formatDate(enq.createdAt)}</p>
                       </div>
+                      {canCreate && enq.status !== "lost" ? (
+                        <Button
+                          size="sm"
+                          variant={enq.convertedEstimateId ? "outline" : "default"}
+                          disabled={convertingId === enq.id}
+                          onClick={(ev) => { ev.stopPropagation(); void convertToQuotation(enq); }}
+                        >
+                          {convertingId === enq.id ? (
+                            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                          ) : null}
+                          {enq.convertedEstimateId ? "View quote" : "Create quotation"}
+                        </Button>
+                      ) : null}
                       <Button
                         size="sm"
                         variant="ghost"

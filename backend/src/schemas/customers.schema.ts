@@ -30,6 +30,7 @@ const customerFields = {
   country: z.string().trim().max(100).optional().default(""),
   licenseGst: z.string().trim().max(100).optional().nullable(),
   note: z.string().trim().max(5000).optional().nullable(),
+  restrictions: z.string().trim().max(5000).optional().nullable(),
   paymentTerms: z.string().trim().max(120).optional().nullable(),
   creditLimit: z
     .union([z.number(), z.string(), z.null()])
@@ -54,5 +55,15 @@ const customerFields = {
 export const createCustomerSchema = z.object(customerFields);
 
 export const updateCustomerSchema = z.object(customerFields).partial();
+
+export const customerContactSchema = z.object({
+  name: z.string().trim().min(2, "Contact name is required").max(120),
+  role: z.string().trim().max(80).optional().default(""),
+  email: z.string().trim().max(254).optional().default(""),
+  phone: z.string().trim().max(30).optional().default(""),
+  isPrimary: z.boolean().optional().default(false),
+});
+
+export const updateCustomerContactSchema = customerContactSchema.partial();
 
 export type CustomerAdditionalField = z.infer<typeof additionalFieldSchema>;

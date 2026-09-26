@@ -301,7 +301,12 @@ export class DashboardService {
         select: { type: true, createdAt: true, status: true, engineerId: true },
       }),
       prisma.invoice.findMany({
-        where: { tenantId },
+        where: {
+          tenantId,
+          ...(staffRole === "sales"
+            ? { salesOrderId: { not: null }, salesOrder: { salespersonId: userId } }
+            : {}),
+        },
         select: { total: true, issuedAt: true, status: true, salesOrderId: true, jobId: true, serviceRequestId: true },
       }),
       prisma.timelineEvent.findMany({
@@ -332,14 +337,18 @@ export class DashboardService {
         where: {
           tenantId,
           status: { in: ["draft", "sent"] },
-          ...(staffRole === "sales" ? { salesOrderId: { not: null } } : {}),
+          ...(staffRole === "sales"
+            ? { salesOrderId: { not: null }, salesOrder: { salespersonId: userId } }
+            : {}),
         },
       }),
       prisma.invoice.count({
         where: {
           tenantId,
           status: "overdue",
-          ...(staffRole === "sales" ? { salesOrderId: { not: null } } : {}),
+          ...(staffRole === "sales"
+            ? { salesOrderId: { not: null }, salesOrder: { salespersonId: userId } }
+            : {}),
         },
       }),
       prisma.purchaseOrder.count({
@@ -1033,6 +1042,7 @@ export class DashboardService {
         const orders = await prisma.salesOrder.findMany({
           where: {
             tenantId: input.tenantId,
+            salespersonId: input.userId,
             OR: [{ deliveryStatus: { not: "delivered" } }, { paymentStatus: { not: "paid" } }],
           },
           orderBy: { updatedAt: "desc" },

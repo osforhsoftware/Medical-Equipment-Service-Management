@@ -8,6 +8,7 @@ import { EstimateSummary } from "@/components/estimates/EstimateSummary";
 import { EstimateWorkflowSteps } from "@/components/estimates/EstimateWorkflowSteps";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { CreditExposureBanner } from "@/components/shared/CreditExposureBanner";
+import { creditBlocksSave, useCustomerCreditExposure } from "@/hooks/useCustomerCreditExposure";
 import { firstPositivePrice } from "@/components/shared/InventoryHelpers";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -99,6 +100,9 @@ export default function EstimateBuilder() {
   const [discount, setDiscount] = useState(0);
   const [terms, setTerms] = useState("Payment due as agreed. Parts are subject to availability.");
   const [notes, setNotes] = useState("");
+  const [currency, setCurrency] = useState("INR");
+  const [warranty, setWarranty] = useState("");
+  const [estimatedCompletion, setEstimatedCompletion] = useState("");
   const [lines, setLines] = useState<EstimateLineInput[]>([newEstimateLine(taxDefault)]);
   const formRef = useRef<HTMLDivElement>(null);
   const {
@@ -124,7 +128,7 @@ export default function EstimateBuilder() {
     try {
       const [services, stockResult] = await Promise.all([
         api.listServiceCatalog(),
-        api.listInventory({ limit: 100, page: 1 }),
+        api.listInventory({ limit: 100, page: 1, status: "active" }),
       ]);
       const stock = stockResult.data;
       setCatalog(services.filter((s) => s.isActive));
@@ -137,6 +141,7 @@ export default function EstimateBuilder() {
         ]);
         setTicket(null);
         setParty(customer);
+        if (customer.paymentTerms) setTerms(customer.paymentTerms);
         const matched = equipmentList.find((item) => item.id === equipmentIdParam);
         setEquipmentLabel(matched?.name ?? "Sales quotation");
         setEstimate(null);
@@ -148,7 +153,8 @@ export default function EstimateBuilder() {
         api.listEstimates({ limit: 100, page: 1 }),
       ]);
       setTicket(sr);
-      setParty(null);
+      const customer = sr.customerId ? await api.getCustomer(sr.customerId).catch(() => null) : null;
+      setParty(customer);
       const estimates = estimatesResult.data;
 
       const existing = estimates.find((e) => e.serviceRequestId === ticketId || e.requestRef === sr.reference);
@@ -162,8 +168,11 @@ export default function EstimateBuilder() {
         setEstimate(full);
         setValidUntil(full.validUntil?.slice(0, 10) || defaultDatePlusDays(14));
         setDiscount(Number(full.discount) || 0);
-        setTerms(full.terms || "Payment due as agreed. Parts are subject to availability.");
+        setTerms(full.terms || customer?.paymentTerms || "Payment due as agreed. Parts are subject to availability.");
         setNotes(full.notes || "");
+        setCurrency(full.currency || "INR");
+        setWarranty(full.warranty || "");
+        setEstimatedCompletion(full.estimatedCompletion?.slice(0, 10) || "");
         if (full.lineItems?.length) {
           setLines(
             full.lineItems.map((line) => ({
@@ -190,26 +199,35 @@ export default function EstimateBuilder() {
                 type: "part",
                 description: r.title,
                 inventoryItemId: r.inventoryItemId,
+                partNumber: item?.sku,
                 quantity: Number(r.quantity) || 1,
                 unitPrice:
-                  firstPositivePrice(item?.sellingPrice, r.estimatedCost, item?.unitCost) + delivery,
+                  priceForCategory(
+                    firstPositivePrice(item?.sellingPrice, r.estimatedCost, item?.unitCost),
+                    customer?.priceCategory,
+                  ) + delivery,
               });
             }),
           );
         }
       } else if (partsReqs.length) {
-        setLines(
-          partsReqs.map((r) => {
-            const item = stock.find((i) => i.id === r.inventoryItemId);
-            return newEstimateLine(taxDefault, {
-              type: "part",
-              description: r.title || item?.name || "Part",
-              inventoryItemId: r.inventoryItemId,
-              quantity: Number(r.quantity) || 1,
-              unitPrice: firstPositivePrice(item?.sellingPrice, r.estimatedCost, item?.unitCost),
-            });
-          }),
-        );
+          if (customer?.paymentTerms) setTerms(customer.paymentTerms);
+          setLines(
+            partsReqs.map((r) => {
+              const item = stock.find((i) => i.id === r.inventoryItemId);
+              return newEstimateLine(taxDefault, {
+                type: "part",
+                description: r.title || item?.name || "Part",
+                inventoryItemId: r.inventoryItemId,
+                partNumber: item?.sku,
+                quantity: Number(r.quantity) || 1,
+                unitPrice: priceForCategory(
+                  firstPositivePrice(item?.sellingPrice, r.estimatedCost, item?.unitCost),
+                  customer?.priceCategory,
+                ),
+              });
+            }),
+          );
       }
     } catch (err) {
       toast({
@@ -227,6 +245,8 @@ export default function EstimateBuilder() {
   }, [load]);
 
   const totals = useMemo(() => summarizeLines(lines, discount), [lines, discount]);
+  const credit = useCustomerCreditExposure(party?.id || ticket?.customerId);
+  const creditBlocked = creditBlocksSave(credit, totals.total);
   const marginAnalysis = useMemo(() => {
     const belowCost: { name: string; unitPrice: number; unitCost: number }[] = [];
     const lowMargin: { name: string; marginPct: number }[] = [];
@@ -249,6 +269,7 @@ export default function EstimateBuilder() {
 
     return { belowCost, lowMargin };
   }, [lines, inventory]);
+  const marginBlocked = marginAnalysis.belowCost.length > 0 || marginAnalysis.lowMargin.length > 0;
 
   const formValues = useMemo(() => ({ validUntil, lines }), [validUntil, lines]);
   const inspection = ticket?.inspectionReport;
@@ -258,6 +279,14 @@ export default function EstimateBuilder() {
   const persist = async (sendForApproval: boolean, thenPreview = false) => {
     if (!ticket && !party) return null;
     if (!validateAll(formValues, undefined, formRef.current)) return null;
+    if (marginBlocked) {
+      toast.error("Fix below-cost or low-margin lines before saving.");
+      return null;
+    }
+    if (sendForApproval && creditBlocked) {
+      toast.error("Credit limit exceeded. This quotation cannot be sent.");
+      return null;
+    }
     setSaving(true);
     try {
       const laborCost = lines.filter((l) => l.type !== "part").reduce((s, l) => s + l.quantity * l.unitPrice, 0);
@@ -279,6 +308,9 @@ export default function EstimateBuilder() {
         discount,
         terms,
         notes,
+        currency,
+        warranty: warranty.trim() || null,
+        estimatedCompletion: estimatedCompletion || null,
         sendForApproval,
         status: sendForApproval ? "pendingAdminApproval" : "draft",
       });
@@ -363,7 +395,7 @@ export default function EstimateBuilder() {
               >
                 Preview
               </Button>
-              <Button type="button" disabled={saving} onClick={() => setConfirmSend(true)}>
+              <Button type="button" disabled={saving || creditBlocked || marginBlocked} onClick={() => setConfirmSend(true)}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 Send quotation
               </Button>
@@ -419,6 +451,7 @@ export default function EstimateBuilder() {
             catalog={catalog}
             inventory={inventory}
             invalid={shouldShow("lines")}
+            adjustUnitPrice={(price) => priceForCategory(price, party?.priceCategory)}
             onChange={(next) => {
               setLines(next);
               handleChange("lines", { validUntil, lines: next });
@@ -490,12 +523,36 @@ export default function EstimateBuilder() {
                 />
                 {shouldShow("validUntil") && <FormFieldError field="validUntil" message={errors.validUntil} />}
               </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="currency">Currency</Label>
+                  <Input id="currency" value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} maxLength={10} />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="estimated-completion">Estimated completion</Label>
+                  <Input
+                    id="estimated-completion"
+                    type="date"
+                    value={estimatedCompletion}
+                    onChange={(e) => setEstimatedCompletion(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="warranty">Warranty</Label>
+                <Input
+                  id="warranty"
+                  value={warranty}
+                  onChange={(e) => setWarranty(e.target.value)}
+                  placeholder="e.g. 90 days parts and labour"
+                />
+              </div>
               <div className="grid gap-2">
                 <Label htmlFor="discount">Discount</Label>
                 <Input id="discount" type="number" min={0} value={discount} onChange={(e) => setDiscount(Number(e.target.value) || 0)} />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="terms">Payment terms</Label>
+                <Label htmlFor="terms">Payment terms / Terms & conditions</Label>
                 <Textarea id="terms" value={terms} onChange={(e) => setTerms(e.target.value)} rows={3} />
               </div>
               <div className="grid gap-2">
@@ -514,7 +571,7 @@ export default function EstimateBuilder() {
             <Button className="flex-1" variant="outline" disabled={saving} onClick={() => void persist(false)}>
               Save Draft
             </Button>
-            <Button className="flex-1" disabled={saving} onClick={() => setConfirmSend(true)}>
+            <Button className="flex-1" disabled={saving || creditBlocked || marginBlocked} onClick={() => setConfirmSend(true)}>
               Send for Approval
             </Button>
           </div>

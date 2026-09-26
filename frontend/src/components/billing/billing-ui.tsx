@@ -22,9 +22,11 @@ export function Section({ title, children }: { title: string; children: React.Re
 
 export function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-1 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-right font-medium">{value}</span>
+    <div className="flex min-w-0 items-start justify-between gap-4 py-1 text-sm">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className="overflow-text text-right font-medium" title={typeof value === "string" || typeof value === "number" ? String(value) : undefined}>
+        {value}
+      </span>
     </div>
   );
 }
@@ -43,9 +45,11 @@ export function ChargeBreakdown({
       {BILLING_CHARGE_GROUPS.map((group) => (
         <InfoRow key={group.key} label={group.label} value={formatCurrency(groups[group.key])} />
       ))}
-      <div className="flex items-start justify-between gap-4 border-t pt-2 text-sm">
-        <span className="font-semibold">{label}</span>
-        <span className="text-right text-base font-semibold">{formatCurrency(total)}</span>
+      <div className="flex min-w-0 items-start justify-between gap-4 border-t pt-2 text-sm">
+        <span className="shrink-0 font-semibold">{label}</span>
+        <span className="overflow-num text-right text-base font-semibold" title={formatCurrency(total)}>
+          {formatCurrency(total)}
+        </span>
       </div>
     </div>
   );

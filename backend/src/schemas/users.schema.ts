@@ -69,6 +69,13 @@ export const createUserSchema = z
         path: ["roles"],
       });
     }
+    if (roles.includes("customer") && !data.customerId?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Link this portal user to a customer record",
+        path: ["customerId"],
+      });
+    }
     if (roles.includes("admin") && data.permissions?.mode === "read") {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -123,6 +130,13 @@ export const updateUserSchema = z
         code: z.ZodIssueCode.custom,
         message: "Customer portal users cannot hold additional staff roles",
         path: ["roles"],
+      });
+    }
+    if (data.roles.includes("customer") && data.customerId === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Link this portal user to a customer record",
+        path: ["customerId"],
       });
     }
     if (data.roles.includes("admin") && data.permissions?.mode === "read") {

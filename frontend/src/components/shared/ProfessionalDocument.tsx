@@ -60,10 +60,7 @@ function termParagraphs(terms: string) {
 }
 
 function qtyDisplay(value: number) {
-  return Number(value).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  return formatDocumentCurrency(value).replace("₹", "");
 }
 
 function dominantTaxRate(lines: DocumentLine[]) {

@@ -12,9 +12,14 @@ export interface PurchaseOrderListFilters {
 }
 
 function buildWhere(tenantId: string, filters: Omit<PurchaseOrderListFilters, "skip" | "take" | "orderBy">): Prisma.PurchaseOrderWhereInput {
+  const openStatuses: PurchaseOrder["status"][] = ["draft", "sent", "partial"];
   const where: Prisma.PurchaseOrderWhereInput = {
     tenantId,
-    ...(filters.status ? { status: filters.status as PurchaseOrder["status"] } : {}),
+    ...(filters.status === "open"
+      ? { status: { in: openStatuses } }
+      : filters.status
+        ? { status: filters.status as PurchaseOrder["status"] }
+        : {}),
   };
 
   if (filters.search) {
@@ -50,8 +55,9 @@ export class PurchaseOrdersRepository {
   async findById(id: string, tenantId: string) {
     return prisma.purchaseOrder.findFirst({
       where: { id, tenantId },
-      include: {
+        include: {
         lineItems: true,
+        shipment: true,
         receipts: true,
         purchaseReturns: { include: { lines: true }, orderBy: { createdAt: "desc" } },
       },

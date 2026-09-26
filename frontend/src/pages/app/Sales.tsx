@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowUpDown,
+  ArrowRight,
   ChevronRight,
+  ClipboardList,
   Download,
   Eye,
+  FileQuestion,
   FileSpreadsheet,
-  Filter,
+  FileText,
   IndianRupee,
   Layers,
   Loader2,
@@ -18,6 +20,7 @@ import {
   Search,
   ShoppingBag,
   Sparkles,
+  Truck,
   TrendingUp,
   Wrench,
 } from "lucide-react";
@@ -67,12 +70,11 @@ import {
   api,
   ApiError,
   type BackendSalesOrder,
-  type SalesReportsData,
   type SalesReportDetailedLine,
 } from "@/lib/api";
 import { defaultDateRange } from "@/lib/charts";
 import { downloadSpreadsheet } from "@/lib/exportSpreadsheet";
-import { formatCurrency, formatCurrencyShort, formatDate, formatDateTime } from "@/lib/format";
+import { formatCurrency, formatCurrencyShort, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 function paymentLabel(order: BackendSalesOrder) {
@@ -80,6 +82,21 @@ function paymentLabel(order: BackendSalesOrder) {
   if (order.paymentStatus === "partial") return "Partially paid";
   return "Unpaid";
 }
+
+type SalesStage = "overview" | "orders" | "delivery" | "invoice";
+
+function resolveSalesStage(raw: string | null): SalesStage {
+  if (raw === "orders" || raw === "delivery" || raw === "invoice") return raw;
+  return "overview";
+}
+
+const FLOW_STEPS = [
+  { key: "enquiry", label: "Enquiry", to: "/app/sales-enquiries", icon: FileQuestion },
+  { key: "quotation", label: "Quotation", to: "/app/sales/quotations", icon: FileText },
+  { key: "orders", label: "SO", to: "/app/sales?stage=orders", icon: ShoppingBag },
+  { key: "delivery", label: "Delivery", to: "/app/sales?stage=delivery", icon: Truck },
+  { key: "invoice", label: "Invoice", to: "/app/sales?stage=invoice", icon: Receipt },
+] as const;
 
 export default function Sales() {
   const navigate = useNavigate();
@@ -89,9 +106,10 @@ export default function Sales() {
   const canBuild = hasRole(SALES_WRITE_ROLES);
   const canBill = hasRole(SALES_BILL_ROLES);
 
-  // Active tab state
-  const tabParam = searchParams.get("tab") || "orders";
+  const stage = resolveSalesStage(searchParams.get("stage"));
+  const tabParam = stage === "orders" ? (searchParams.get("tab") || "orders") : "orders";
   const [activeTab, setActiveTab] = useState<string>(tabParam);
+  const [deliveryFilter, setDeliveryFilter] = useState<"pending" | "delivered" | "all">("pending");
 
   // Date Range state for Reports and Order filtering
   const [dateRange, setDateRange] = useState<DateRangeValue>(() => defaultDateRange(29));
@@ -155,7 +173,51 @@ export default function Sales() {
   const desk = deskQuery.data;
   const kpis = desk?.kpis;
   const reports = reportsQuery.data;
-  const orders = ordersQuery.data ?? [];
+  const allOrders = ordersQuery.data ?? [];
+
+  const pendingDeliveryOrders = useMemo(
+    () => allOrders.filter((order) => order.deliveryStatus !== "delivered"),
+    [allOrders],
+  );
+  const deliveredOrders = useMemo(
+    () => allOrders.filter((order) => order.deliveryStatus === "delivered"),
+    [allOrders],
+  );
+  const invoiceQueueOrders = useMemo(
+    () =>
+      allOrders.filter(
+        (order) => (order.invoices?.length ?? 0) > 0 || order.paymentStatus !== "paid",
+      ),
+    [allOrders],
+  );
+
+  const orders = useMemo(() => {
+    if (stage === "delivery") {
+      if (deliveryFilter === "pending") return pendingDeliveryOrders;
+      if (deliveryFilter === "delivered") return deliveredOrders;
+      return allOrders;
+    }
+    if (stage === "invoice") return invoiceQueueOrders;
+    return allOrders;
+  }, [allOrders, stage, deliveryFilter, pendingDeliveryOrders, deliveredOrders, invoiceQueueOrders]);
+
+  const recentOrders = useMemo(() => allOrders.slice(0, 6), [allOrders]);
+
+  const pendingDeliveryValue = useMemo(
+    () => pendingDeliveryOrders.reduce((sum, o) => sum + Number(o.total || 0), 0),
+    [pendingDeliveryOrders],
+  );
+  const pendingDeliveryItems = useMemo(
+    () => pendingDeliveryOrders.reduce((sum, o) => sum + (o.lines?.length ?? 0), 0),
+    [pendingDeliveryOrders],
+  );
+
+  useEffect(() => {
+    if (stage === "orders") {
+      const tab = searchParams.get("tab") || "orders";
+      setActiveTab(tab);
+    }
+  }, [stage, searchParams]);
 
   const dateRangeLabel = `${formatDate(dateRange.from)} – ${formatDate(dateRange.to)}`;
 
@@ -337,8 +399,14 @@ export default function Sales() {
         const isPartial = order.paymentStatus === "partial";
         return (
           <Badge
-            variant={isPaid ? "success" : isPartial ? "warning" : "outline"}
-            className="text-xs font-normal capitalize"
+            variant="outline"
+            className={`text-xs font-normal capitalize ${
+              isPaid
+                ? "border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-400"
+                : isPartial
+                  ? "border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-400"
+                  : ""
+            }`}
           >
             {paymentLabel(order)}
           </Badge>
@@ -380,12 +448,31 @@ export default function Sales() {
     },
   ];
 
+  const pageMeta = {
+    overview: {
+      title: "Sales Overview",
+      description: "Your sales desk at a glance — counts, quick actions, and the sales flow.",
+    },
+    orders: {
+      title: "Sales Orders",
+      description: "All sales orders, reports, and inventory insights.",
+    },
+    delivery: {
+      title: "Delivery",
+      description: "Track pending and completed deliveries for your sales orders.",
+    },
+    invoice: {
+      title: "Invoice",
+      description: "Sale invoices and orders that still need billing or collection.",
+    },
+  }[stage];
+
   return (
     <RoleGuard roles={SALES_DESK_ROLES}>
       <div className="space-y-6">
         <PageHeader
-          title="Product Sales & Reports"
-          description="Manage product sales, track performance reports, filter records, and export comprehensive sales data."
+          title={pageMeta.title}
+          description={pageMeta.description}
           actions={
             <div className="flex flex-wrap items-center gap-2">
               <DropdownMenu>
@@ -423,27 +510,61 @@ export default function Sales() {
               </DropdownMenu>
 
               {canBuild ? (
-                <Button variant="brand" onClick={() => setSaleOpen(true)} className="gap-1.5">
-                  <Plus className="h-4 w-4" /> New sale
-                </Button>
+                <>
+                  {stage === "overview" ? (
+                    <Button variant="outline" asChild className="gap-1.5">
+                      <Link to="/app/sales-enquiries">
+                        <Plus className="h-4 w-4" /> New enquiry
+                      </Link>
+                    </Button>
+                  ) : null}
+                  <Button variant="brand" onClick={() => setSaleOpen(true)} className="gap-1.5">
+                    <Plus className="h-4 w-4" /> New sale
+                  </Button>
+                </>
               ) : null}
             </div>
           }
         />
 
-        {/* Sales Hero Banner */}
-        <div className="overflow-hidden rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50 via-card to-teal-50 p-4 dark:border-amber-900/40 dark:from-amber-950/20 dark:to-teal-950/20">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-amber-500 text-white shadow-sm">
-              <Sparkles className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="font-semibold text-foreground">Product sales desk & live reporting</p>
-              <p className="text-sm text-muted-foreground">
-                Sell spare parts, consumables, and equipment directly. Filter reports by date, see complete item breakdowns, and download Excel/PDF reports.
-              </p>
-            </div>
-          </div>
+        {/* Sales flow strip */}
+        <div className="flex flex-wrap items-center gap-1.5 rounded-xl border bg-muted/30 px-3 py-2.5">
+          <Link
+            to="/app/sales"
+            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              stage === "overview"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-background hover:text-foreground"
+            }`}
+          >
+            <ClipboardList className="h-3.5 w-3.5" />
+            Overview
+          </Link>
+          <span className="mx-0.5 h-4 w-px bg-border" />
+          <span className="mr-0.5 text-xs font-medium text-muted-foreground">Flow</span>
+          {FLOW_STEPS.map((step, index) => {
+            const active =
+              (step.key === "orders" && stage === "orders") ||
+              (step.key === "delivery" && stage === "delivery") ||
+              (step.key === "invoice" && stage === "invoice");
+            const Icon = step.icon;
+            return (
+              <div key={step.key} className="flex items-center gap-1.5">
+                {index > 0 ? <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/60" /> : null}
+                <Link
+                  to={step.to}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    active
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-background hover:text-foreground"
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {step.label}
+                </Link>
+              </div>
+            );
+          })}
         </div>
 
         {deskQuery.isLoading ? (
@@ -456,7 +577,344 @@ export default function Sales() {
           </p>
         ) : null}
 
-        {/* Overview KPI Cards */}
+        {stage === "overview" ? (
+          <>
+            <div className="overflow-hidden rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50 via-card to-teal-50 p-4 dark:border-amber-900/40 dark:from-amber-950/20 dark:to-teal-950/20">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-amber-500 text-white shadow-sm">
+                  <Sparkles className="h-5 w-5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-foreground">Product sales desk & live reporting</p>
+                  <p className="text-sm text-muted-foreground">
+                    Counts below are for your sales. Use the flow above to manage enquiry → quotation → SO → delivery → invoice.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="Today's sales" value={formatCurrencyShort(kpis?.todaySales ?? 0)} icon={IndianRupee} accent="success" />
+              <StatCard label="Monthly sales" value={formatCurrencyShort(kpis?.monthlySales ?? 0)} icon={Receipt} />
+              <StatCard
+                label={`Period sales (${dateRangeLabel})`}
+                value={formatCurrencyShort(reports?.rangeSales ?? kpis?.monthlySales ?? 0)}
+                icon={TrendingUp}
+                accent="accent"
+              />
+              <StatCard label="Total orders" value={String(kpis?.totalOrders ?? allOrders.length)} icon={ShoppingBag} />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="Pending deliveries" value={String(kpis?.pendingOrders ?? pendingDeliveryOrders.length)} icon={Package} accent="warning" />
+              <StatCard label="Pending payments" value={String(kpis?.pendingPayments ?? 0)} icon={IndianRupee} accent="warning" />
+              <StatCard label="Outstanding balance" value={formatCurrencyShort(reports?.outstandingTotal ?? kpis?.outstanding ?? 0)} icon={IndianRupee} accent="warning" />
+              <StatCard label="Total collected" value={formatCurrencyShort(reports?.collected ?? kpis?.collected ?? 0)} icon={Receipt} accent="success" />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                {
+                  title: "New sale",
+                  hint: "Record a product sale now",
+                  icon: Plus,
+                  action: () => setSaleOpen(true),
+                  show: canBuild,
+                },
+                {
+                  title: "New enquiry",
+                  hint: "Capture a customer lead",
+                  icon: FileQuestion,
+                  to: "/app/sales-enquiries",
+                  show: canBuild,
+                },
+                {
+                  title: "Pending delivery",
+                  hint: `${pendingDeliveryOrders.length} order(s) waiting`,
+                  icon: Truck,
+                  to: "/app/sales?stage=delivery",
+                  show: true,
+                },
+                {
+                  title: "Open invoices",
+                  hint: `${invoiceQueueOrders.length} need attention`,
+                  icon: Receipt,
+                  to: "/app/sales?stage=invoice",
+                  show: true,
+                },
+              ]
+                .filter((card) => card.show)
+                .map((card) => {
+                  const Icon = card.icon;
+                  const inner = (
+                    <>
+                      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0 flex-1 text-left">
+                        <p className="text-sm font-semibold text-foreground">{card.title}</p>
+                        <p className="text-xs text-muted-foreground">{card.hint}</p>
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                    </>
+                  );
+                  if (card.to) {
+                    return (
+                      <Link
+                        key={card.title}
+                        to={card.to}
+                        className="flex items-center gap-3 rounded-xl border bg-card p-4 transition-colors hover:bg-muted/40"
+                      >
+                        {inner}
+                      </Link>
+                    );
+                  }
+                  return (
+                    <button
+                      key={card.title}
+                      type="button"
+                      onClick={card.action}
+                      className="flex items-center gap-3 rounded-xl border bg-card p-4 text-left transition-colors hover:bg-muted/40"
+                    >
+                      {inner}
+                    </button>
+                  );
+                })}
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-5">
+              <Card className="lg:col-span-3">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                  <div>
+                    <CardTitle className="text-base">Recent sales orders</CardTitle>
+                    <CardDescription className="text-xs">Latest orders in your date range</CardDescription>
+                  </div>
+                  <Button variant="ghost" size="sm" asChild className="h-8 gap-1 text-xs text-primary">
+                    <Link to="/app/sales?stage=orders">
+                      View all <ChevronRight className="h-3.5 w-3.5" />
+                    </Link>
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {ordersQuery.isLoading ? (
+                    <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+                    </div>
+                  ) : recentOrders.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-muted-foreground">No sales orders yet. Record your first sale.</p>
+                  ) : (
+                    recentOrders.map((order) => (
+                      <button
+                        key={order.id}
+                        type="button"
+                        className="flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+                        onClick={() => navigate(`/app/sales/orders/${order.id}`)}
+                      >
+                        <div className="min-w-0">
+                          <p className="font-mono text-sm font-semibold text-primary">{order.reference}</p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {order.customerName} · {formatDate(order.orderedAt)}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="font-mono text-sm font-medium">{formatCurrency(order.total)}</p>
+                          <StatusBadge status={order.deliveryStatus} />
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="lg:col-span-2">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Period snapshot</CardTitle>
+                  <CardDescription className="text-xs">{dateRangeLabel}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <DateRangeFilter value={dateRange} onChange={setDateRange} dense />
+                  <div className="space-y-2 rounded-lg border bg-muted/20 p-3 text-sm">
+                    <div className="flex justify-between gap-2">
+                      <span className="text-muted-foreground">Orders</span>
+                      <span className="font-mono font-medium">{reports?.rangeOrdersCount ?? allOrders.length}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span className="text-muted-foreground">Sales</span>
+                      <span className="font-mono font-medium">{formatCurrency(reports?.rangeSales ?? 0)}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span className="text-muted-foreground">Collected</span>
+                      <span className="font-mono font-medium text-emerald-600">{formatCurrency(reports?.rangeCollected ?? 0)}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span className="text-muted-foreground">Outstanding</span>
+                      <span className="font-mono font-medium text-amber-600">{formatCurrency(reports?.outstandingTotal ?? 0)}</span>
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm" className="w-full gap-1.5" asChild>
+                    <Link to="/app/sales?stage=orders&tab=reports">
+                      <TrendingUp className="h-3.5 w-3.5" /> Open full sales reports
+                    </Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          </>
+        ) : null}
+
+        {stage === "delivery" ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="Pending deliveries" value={String(pendingDeliveryOrders.length)} icon={Truck} accent="warning" />
+              <StatCard label="Items to deliver" value={String(pendingDeliveryItems)} icon={Package} />
+              <StatCard label="Pending value" value={formatCurrencyShort(pendingDeliveryValue)} icon={IndianRupee} accent="warning" />
+              <StatCard label="Delivered (in range)" value={String(deliveredOrders.length)} icon={Package} accent="success" />
+            </div>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle className="text-base font-semibold">Delivery queue</CardTitle>
+                    <CardDescription className="text-xs">
+                      Orders waiting to ship, plus delivered history for the selected date range.
+                    </CardDescription>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="inline-flex rounded-lg border bg-muted/30 p-0.5">
+                      {(
+                        [
+                          { key: "pending", label: "Pending", count: pendingDeliveryOrders.length },
+                          { key: "delivered", label: "Delivered", count: deliveredOrders.length },
+                          { key: "all", label: "All", count: allOrders.length },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => setDeliveryFilter(opt.key)}
+                          className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                            deliveryFilter === opt.key
+                              ? "bg-background text-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {opt.label}
+                          <span className="ml-1 font-mono text-[11px] opacity-70">{opt.count}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => exportSalesOrders(orders)}
+                      disabled={orders.length === 0}
+                      className="h-8 gap-1.5 text-xs"
+                    >
+                      <Download className="h-3.5 w-3.5 text-emerald-600" />
+                      Export ({orders.length})
+                    </Button>
+                  </div>
+                </div>
+                <div className="pt-3">
+                  <DateRangeFilter value={dateRange} onChange={setDateRange} dense />
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {ordersQuery.isLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin" /> Loading deliveries…
+                  </div>
+                ) : (
+                  <DataTable
+                    data={orders}
+                    columns={orderColumns}
+                    searchKeys={["reference", "customerName", "salespersonName", "notes"]}
+                    searchPlaceholder="Search order, customer, sales rep…"
+                    emptyMessage={
+                      deliveryFilter === "pending"
+                        ? "No pending deliveries."
+                        : deliveryFilter === "delivered"
+                          ? "No delivered orders in this range."
+                          : "No sales orders found."
+                    }
+                    emptyHint="Adjust the date range or record a new sale."
+                    onRowClick={(row) => navigate(`/app/sales/orders/${row.id}`)}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          </>
+        ) : null}
+
+        {stage === "invoice" ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="Open invoice queue" value={String(invoiceQueueOrders.length)} icon={Receipt} accent="warning" />
+              <StatCard label="Pending payments" value={String(kpis?.pendingPayments ?? 0)} icon={IndianRupee} accent="warning" />
+              <StatCard label="Outstanding balance" value={formatCurrencyShort(reports?.outstandingTotal ?? kpis?.outstanding ?? 0)} icon={IndianRupee} accent="warning" />
+              <StatCard label="Total collected" value={formatCurrencyShort(reports?.collected ?? kpis?.collected ?? 0)} icon={Receipt} accent="success" />
+            </div>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle className="text-base font-semibold">Invoice & collection</CardTitle>
+                    <CardDescription className="text-xs">
+                      Orders with invoices or unpaid balances. Open an order to bill or record payment.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportSalesOrders(orders)}
+                    disabled={orders.length === 0}
+                    className="h-8 gap-1.5 text-xs"
+                  >
+                    <Download className="h-3.5 w-3.5 text-emerald-600" />
+                    Export ({orders.length})
+                  </Button>
+                </div>
+                <div className="pt-3">
+                  <DateRangeFilter value={dateRange} onChange={setDateRange} dense />
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {ordersQuery.isLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin" /> Loading invoices…
+                  </div>
+                ) : (
+                  <DataTable
+                    data={orders}
+                    columns={orderColumns}
+                    searchKeys={["reference", "customerName", "salespersonName", "notes"]}
+                    searchPlaceholder="Search order, customer, sales rep…"
+                    filters={[
+                      {
+                        label: "Payment",
+                        options: [
+                          { label: "All payment states", value: "all" },
+                          { label: "Paid", value: "paid" },
+                          { label: "Partially paid", value: "partial" },
+                          { label: "Unpaid", value: "unpaid" },
+                        ],
+                        predicate: (row, val) => (row as BackendSalesOrder).paymentStatus === val,
+                      },
+                    ]}
+                    emptyMessage="No invoices or unpaid orders in this range."
+                    emptyHint="Create an invoice from a delivered sales order."
+                    onRowClick={(row) => navigate(`/app/sales/orders/${row.id}`)}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          </>
+        ) : null}
+
+        {stage === "orders" ? (
+        <>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard label="Today's sales" value={formatCurrencyShort(kpis?.todaySales ?? 0)} icon={IndianRupee} accent="success" />
           <StatCard label="Monthly sales" value={formatCurrencyShort(kpis?.monthlySales ?? 0)} icon={Receipt} />
@@ -464,16 +922,9 @@ export default function Sales() {
             label={`Period sales (${dateRangeLabel})`}
             value={formatCurrencyShort(reports?.rangeSales ?? kpis?.monthlySales ?? 0)}
             icon={TrendingUp}
-            accent="brand"
+            accent="accent"
           />
           <StatCard label="Total orders" value={String(kpis?.totalOrders ?? orders.length)} icon={ShoppingBag} />
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Pending deliveries" value={String(kpis?.pendingOrders ?? 0)} icon={Package} accent="warning" />
-          <StatCard label="Pending payments" value={String(kpis?.pendingPayments ?? 0)} icon={IndianRupee} accent="warning" />
-          <StatCard label="Outstanding balance" value={formatCurrencyShort(reports?.outstandingTotal ?? kpis?.outstanding ?? 0)} icon={IndianRupee} accent="warning" />
-          <StatCard label="Total collected" value={formatCurrencyShort(reports?.collected ?? kpis?.collected ?? 0)} icon={Receipt} accent="success" />
         </div>
 
         {/* Tabs for Navigation */}
@@ -1086,6 +1537,8 @@ export default function Sales() {
             </div>
           </TabsContent>
         </Tabs>
+        </>
+        ) : null}
 
         {/* Dialogs */}
         <SaleFormDialog

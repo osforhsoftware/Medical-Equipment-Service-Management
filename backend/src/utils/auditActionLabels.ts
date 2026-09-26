@@ -50,6 +50,8 @@ const SUB_PATH_LABELS: Record<string, string> = {
   close: "Closed service ticket",
   photos: "Uploaded job photos",
   "parts-requests": "Requested job parts",
+  reject: "Rejected parts request",
+  issue: "Issued job parts",
   signature: "Captured job signature",
   "deduct-stock": "Deducted stock for job",
   "status-counts": "Viewed status counts",

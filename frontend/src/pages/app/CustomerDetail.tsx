@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CustomerAdditionalFieldsEditor } from "@/components/customers/CustomerAdditionalFieldsEditor";
+import { CustomerContactsPanel } from "@/components/customers/CustomerContactsPanel";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { CUSTOMER_WRITE_ROLES, ESTIMATE_WRITE_ROLES, SALES_WRITE_ROLES, SERVICE_BILLING_ROLES } from "@/config/roles";
@@ -64,6 +65,7 @@ const editSchema = z.object({
   priceCategory: fieldRules.optionalString(),
   deliveryAddress: fieldRules.optionalString(),
   note: z.string().trim().max(5000).optional(),
+  restrictions: z.string().trim().max(5000).optional(),
   status: z.string(),
 });
 
@@ -82,6 +84,7 @@ type EditForm = {
   priceCategory: string;
   deliveryAddress: string;
   note: string;
+  restrictions: string;
   status: string;
   additionalFields: CustomerAdditionalField[];
 };
@@ -103,6 +106,7 @@ function customerToForm(customer: BackendCustomer): EditForm {
     priceCategory: customer.priceCategory ?? "",
     deliveryAddress: customer.address?.trim() || customer.deliveryAddress?.trim() || "",
     note: customer.note ?? "",
+    restrictions: customer.restrictions ?? "",
     status: customer.status ?? "active",
     additionalFields: fields.length ? fields : [{ label: "", value: "" }],
   };
@@ -172,6 +176,7 @@ export default function CustomerDetail() {
       "creditLimit",
       "priceCategory",
       "note",
+      "restrictions",
     ],
     schema: editSchema,
   });
@@ -287,6 +292,7 @@ export default function CustomerDetail() {
         deliveryAddress: form.address.trim() || null,
         additionalFields: sanitizeCustomerAdditionalFields(form.additionalFields),
         note: form.note.trim() || null,
+        restrictions: form.restrictions.trim() || null,
         status: form.status,
       });
       setCustomer(updated);
@@ -409,6 +415,10 @@ export default function CustomerDetail() {
                         label: "Credit limit",
                         value: customer.creditLimit == null ? "—" : formatCurrency(customer.creditLimit),
                       },
+                      {
+                        label: "Outstanding",
+                        value: formatCurrency(customer.outstandingBalance ?? 0),
+                      },
                     ]}
                   />
                 </DetailSection>
@@ -420,6 +430,11 @@ export default function CustomerDetail() {
                         value: field.value || "—",
                       }))}
                     />
+                  </DetailSection>
+                ) : null}
+                {customer.restrictions?.trim() ? (
+                  <DetailSection title="Service restrictions">
+                    <p className="whitespace-pre-wrap text-sm">{customer.restrictions}</p>
                   </DetailSection>
                 ) : null}
                 {customer.note?.trim() ? (
@@ -438,6 +453,15 @@ export default function CustomerDetail() {
                   />
                 </DetailSection>
               </div>
+            ),
+          },
+          {
+            id: "contacts",
+            label: "Contacts",
+            content: (
+              <DetailSection title="Contacts">
+                <CustomerContactsPanel customerId={customer.id} canEdit={canEdit} />
+              </DetailSection>
             ),
           },
           {
@@ -748,6 +772,15 @@ export default function CustomerDetail() {
                   value={form.note}
                   onChange={(e) => setForm({ ...form, note: e.target.value })}
                   rows={3}
+                />
+              </div>
+              <div className="grid gap-2" data-field="restrictions">
+                <Label>Service restrictions</Label>
+                <Textarea
+                  value={form.restrictions}
+                  onChange={(e) => setForm({ ...form, restrictions: e.target.value })}
+                  rows={3}
+                  placeholder="Site rules the technician must follow"
                 />
               </div>
             </div>

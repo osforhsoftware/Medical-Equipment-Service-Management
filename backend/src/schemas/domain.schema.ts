@@ -21,6 +21,9 @@ export const estimateRevisionSchema = z.object({
   body: z.object({
     terms: z.string().max(10000).nullable().optional(),
     notes: z.string().max(10000).nullable().optional(),
+    currency: z.string().trim().min(3).max(10).optional(),
+    warranty: z.string().trim().max(500).nullable().optional(),
+    estimatedCompletion: z.string().nullable().optional(),
     discount: money.default(0),
     sendForApproval: z.boolean().optional(),
     status: z.enum(["draft", "pendingAdminApproval", "sent"]).optional(),
@@ -173,12 +176,21 @@ export const createStockTransferSchema = z.object({
   }),
 });
 
+const purchaseOrderLandedCostFields = {
+  freightCost: z.coerce.number().min(0).optional().nullable(),
+  customsCost: z.coerce.number().min(0).optional().nullable(),
+  insuranceCost: z.coerce.number().min(0).optional().nullable(),
+};
+
 export const createPurchaseOrderSchema = z.object({
   body: z.object({
     supplierId: z.string().cuid().nullable().optional(),
     supplier: z.string().trim().min(1).max(200),
+    supplierReference: z.string().trim().max(120).optional().nullable(),
+    currency: z.string().trim().min(3).max(10).optional().default("INR"),
     branchId: z.string().cuid().nullable().optional(),
     expectedDate: z.coerce.date(),
+    ...purchaseOrderLandedCostFields,
     lines: z.array(z.object({
       inventoryItemId: z.string().cuid().nullable().optional(),
       sku: z.string().trim().min(1).max(100),
@@ -187,6 +199,28 @@ export const createPurchaseOrderSchema = z.object({
       unitCost: money,
       taxRate: z.coerce.number().min(0).max(100).default(0),
     })).min(1),
+  }),
+});
+
+export const upsertPurchaseShipmentSchema = z.object({
+  body: z.object({
+    courier: z.string().trim().max(200).optional().nullable(),
+    trackingNumber: z.string().trim().max(200).optional().nullable(),
+    freightCost: z.coerce.number().min(0).optional().nullable(),
+    customsInfo: z.string().trim().max(5000).optional().nullable(),
+    etd: z.coerce.date().optional().nullable(),
+    eta: z.coerce.date().optional().nullable(),
+    notes: z.string().trim().max(5000).optional().nullable(),
+  }),
+});
+
+export const updatePurchaseLandedCostsSchema = z.object({
+  body: z.object({
+    freightCost: z.coerce.number().min(0).optional().nullable(),
+    customsCost: z.coerce.number().min(0).optional().nullable(),
+    insuranceCost: z.coerce.number().min(0).optional().nullable(),
+    supplierReference: z.string().trim().max(120).optional().nullable(),
+    currency: z.string().trim().min(3).max(10).optional(),
   }),
 });
 
@@ -326,5 +360,26 @@ export const roleAssignmentSchema = z.object({
     userId: z.string().cuid(),
     roleId: z.string().cuid(),
     branchId: z.string().cuid().nullable().optional(),
+  }),
+});
+
+export const portalServiceRequestSchema = z.object({
+  body: z.object({
+    equipmentId: z.string().min(1, "Select equipment"),
+    type: z.preprocess(
+      (value) => (value === "" || value == null ? undefined : value),
+      z.enum(["Repair", "Maintenance", "Calibration", "Inspection", "Installation", "Other"]).optional(),
+    ),
+    typeOther: z.string().trim().max(100).optional().nullable(),
+    priority: z.enum(["low", "medium", "high", "critical"]).default("medium"),
+    description: z.string().trim().min(1, "Describe the problem").max(500),
+  }).superRefine((data, ctx) => {
+    if (data.type === "Other" && !data.typeOther?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["typeOther"],
+        message: "Please specify the service type",
+      });
+    }
   }),
 });

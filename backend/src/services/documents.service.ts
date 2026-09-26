@@ -682,9 +682,16 @@ export class DocumentsService {
         customer?.phone || "",
         customer?.email || "",
       ].filter(Boolean);
+      const preparedBy = estimate.salespersonId
+        ? (await prisma.user.findFirst({
+            where: { id: estimate.salespersonId, tenantId },
+            select: { name: true },
+          }))?.name
+        : null;
       await this.header(doc, tenantId, "Estimate", reference, [
-        { label: "Estimate No", value: reference },
-        { label: "Date", value: fmtDate(estimate.createdAt) },
+        { label: "Quotation No", value: reference },
+        { label: "Revision", value: `Rev ${estimate.revision}` },
+        { label: "Date", value: fmtDate(estimate.sentAt ?? estimate.createdAt) },
         { label: "Project code", value: estimate.requestRef || "—" },
       ]);
       this.partyAndMeta(
@@ -695,12 +702,24 @@ export class DocumentsService {
         },
         [
           ...(estimate.equipmentName ? [{ label: "Equipment", value: estimate.equipmentName }] : []),
+          { label: "Currency", value: estimate.currency || "INR" },
           { label: "Valid until", value: fmtDate(estimate.validUntil) },
-          { label: "Status", value: estimate.status },
+          ...(estimate.estimatedCompletion
+            ? [{ label: "Est. completion", value: fmtDate(estimate.estimatedCompletion) }]
+            : []),
+          ...(estimate.warranty ? [{ label: "Warranty", value: estimate.warranty }] : []),
+          ...(preparedBy ? [{ label: "Prepared by", value: preparedBy }] : []),
+          { label: "Approval", value: estimate.status },
         ],
         { detailsHeading: "PROJECT DETAILS" },
       );
-      this.drawLines(doc, estimate.lineItems);
+      this.drawLines(
+        doc,
+        estimate.lineItems.map((line) => ({
+          ...line,
+          description: line.partNumber ? `${line.description} (${line.partNumber})` : line.description,
+        })),
+      );
       const taxRates = [...new Set(estimate.lineItems.map((line) => Number(line.taxRate ?? 0)))];
       const taxLabel = taxRates.length === 1 && taxRates[0] > 0 ? `GST (${taxRates[0]}%)` : "Tax";
       this.totals(doc, [

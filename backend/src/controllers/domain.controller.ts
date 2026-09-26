@@ -62,6 +62,24 @@ export class DomainController {
   purchaseOrder = async (req: Request, res: Response, next: NextFunction) => {
     try { send(res, "Purchase order created", await domainService.createPurchaseOrder(req.tenantId!, req.body), 201); } catch (e) { next(e); }
   };
+  upsertPurchaseShipment = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      send(
+        res,
+        "Purchase shipment saved",
+        await domainService.upsertPurchaseShipment(req.tenantId!, req.params.id, req.body),
+      );
+    } catch (e) { next(e); }
+  };
+  updatePurchaseLandedCosts = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      send(
+        res,
+        "Purchase landed costs updated",
+        await domainService.updatePurchaseLandedCosts(req.tenantId!, req.params.id, req.body),
+      );
+    } catch (e) { next(e); }
+  };
   receivePurchaseOrder = async (req: Request, res: Response, next: NextFunction) => {
     try { send(res, "Purchase order receipt posted", await domainService.receivePurchaseOrder(req.tenantId!, req.params.id, actor(req), req.body), 201); } catch (e) { next(e); }
   };
@@ -122,6 +140,16 @@ export class DomainController {
   };
   customerPortal = async (req: Request, res: Response, next: NextFunction) => {
     try { send(res, "Customer portal data fetched", await domainService.customerPortal(req.tenantId!, req.user!.userId)); } catch (e) { next(e); }
+  };
+  createPortalServiceRequest = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      send(
+        res,
+        "Service request created",
+        await domainService.createPortalServiceRequest(req.tenantId!, req.user!.userId, req.body),
+        201,
+      );
+    } catch (e) { next(e); }
   };
   qrScan = async (req: Request, res: Response, next: NextFunction) => {
     try {
