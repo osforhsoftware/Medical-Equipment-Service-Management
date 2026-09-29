@@ -50,7 +50,7 @@ router.post("/", canManage, validate(createRfqSchema), async (req: Request, res:
     const count = await prisma.supplierRFQ.count({ where: { tenantId } });
     const reference = `RFQ-${year}-${String(count + 1).padStart(4, "0")}`;
 
-    const { dueDate, ...rest } = req.body;
+    const { dueDate, validUntil, ...rest } = req.body;
     const created = await prisma.supplierRFQ.create({
       data: {
         ...rest,
@@ -58,6 +58,7 @@ router.post("/", canManage, validate(createRfqSchema), async (req: Request, res:
         reference,
         createdBy: req.user?.name || req.user?.userId || "System",
         dueDate: dueDate ? new Date(dueDate) : null,
+        validUntil: validUntil ? new Date(validUntil) : null,
       },
       include: { quotes: true, supplierRecord: true },
     });
@@ -77,12 +78,13 @@ router.put("/:id", canManage, validate(updateRfqSchema), async (req: Request, re
       return;
     }
 
-    const { dueDate, ...rest } = req.body;
+    const { dueDate, validUntil, ...rest } = req.body;
     const updated = await prisma.supplierRFQ.update({
       where: { id },
       data: {
         ...rest,
         dueDate: dueDate !== undefined ? (dueDate ? new Date(dueDate) : null) : undefined,
+        validUntil: validUntil !== undefined ? (validUntil ? new Date(validUntil) : null) : undefined,
       },
       include: { quotes: true, supplierRecord: true },
     });

@@ -53,6 +53,9 @@ export class DomainController {
   reservations = async (req: Request, res: Response, next: NextFunction) => {
     try { send(res, "Stock reservations fetched", await domainService.listReservations(req.tenantId!, req.query.status as string | undefined)); } catch (e) { next(e); }
   };
+  reservationCreate = async (req: Request, res: Response, next: NextFunction) => {
+    try { send(res, "Stock reserved", await domainService.createReservation(req.tenantId!, actor(req), req.body), 201); } catch (e) { next(e); }
+  };
   reservationAction = async (req: Request, res: Response, next: NextFunction) => {
     try { send(res, "Stock reservation updated", await domainService.actOnReservation(req.tenantId!, req.params.id, actor(req), req.body)); } catch (e) { next(e); }
   };

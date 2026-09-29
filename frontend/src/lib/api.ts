@@ -1249,6 +1249,34 @@ export interface BackendBranchOption {
   phone?: string | null;
 }
 
+export interface BackendStockReservation {
+  id: string;
+  inventoryItemId: string;
+  estimateId?: string | null;
+  salesOrderId?: string | null;
+  jobId?: string | null;
+  requestedQuantity: number;
+  shortageQuantity: number;
+  quantity: number;
+  consumed: number;
+  released: number;
+  status: string;
+  purpose?: string | null;
+  reservedBy: string;
+  createdAt: string;
+  inventoryItem?: {
+    id: string;
+    sku: string;
+    name: string;
+    inStock: number;
+    reserved: number;
+    unitOfMeasure?: string;
+  };
+  estimate?: { id: string; reference: string } | null;
+  salesOrder?: { id: string; reference: string } | null;
+  job?: { id: string; reference: string } | null;
+}
+
 export interface BackendStockMovement {
   id: string;
   inventoryItemId: string;
@@ -1299,6 +1327,8 @@ export interface BackendSettings {
   logoFileId?: string | null;
   logoUrl?: string | null;
   defaultTaxRate: number;
+  marginMode: "on" | "fixed" | "off";
+  minMarginPct: number;
   amcRenewalReminders: boolean;
   lowStockAlerts: boolean;
   autoReserveOnApproval: boolean;
@@ -1323,6 +1353,8 @@ export interface UpdateSettingsInput {
   companyWebsite?: string | null;
   logoFileId?: string | null;
   defaultTaxRate?: number;
+  marginMode?: "on" | "fixed" | "off";
+  minMarginPct?: number;
   amcRenewalReminders?: boolean;
   lowStockAlerts?: boolean;
   autoReserveOnApproval?: boolean;
@@ -1429,7 +1461,7 @@ export interface SalesDeskData {
     balanceDue: number;
     dueAt: string;
   }[];
-  topSellingProducts: { name: string; quantity: number; amount: number }[];
+  topSellingProducts: { name: string; quantity: number; amount: number; imageFileId?: string | null }[];
   lowStockProducts: {
     id: string;
     sku: string;
@@ -1439,6 +1471,7 @@ export interface SalesDeskData {
     reserved: number;
     reorderLevel: number;
     available: number;
+    imageFileId?: string | null;
   }[];
 }
 
@@ -1454,6 +1487,7 @@ export interface BackendSalesOrderLine {
   lineTotal: number;
   inventoryItemId?: string | null;
   catalogItemId?: string | null;
+  imageFileId?: string | null;
 }
 
 export interface BackendSalesOrder {
@@ -1496,6 +1530,7 @@ export interface SalesReportDetailedLine {
   discount: number;
   taxRate: number;
   lineTotal: number;
+  imageFileId?: string | null;
 }
 
 export interface SalesReportsData {
@@ -1508,14 +1543,14 @@ export interface SalesReportsData {
   invoiced?: number;
   collected?: number;
   outstandingTotal?: number;
-  productWise: { name: string; quantity: number; amount: number }[];
-  sparePartsSales: { name: string; quantity: number; amount: number }[];
-  consumablesSales?: { name: string; quantity: number; amount: number }[];
-  equipmentSales: { name: string; quantity: number; amount: number }[];
+  productWise: { name: string; quantity: number; amount: number; imageFileId?: string | null }[];
+  sparePartsSales: { name: string; quantity: number; amount: number; imageFileId?: string | null }[];
+  consumablesSales?: { name: string; quantity: number; amount: number; imageFileId?: string | null }[];
+  equipmentSales: { name: string; quantity: number; amount: number; imageFileId?: string | null }[];
   salespersonWise: { name: string; quantity: number; amount: number }[];
   customerWise: { name: string; quantity: number; amount: number }[];
   outstanding: { id: string; customerName: string; total: number; paidTotal: number; balanceDue: number; status: string }[];
-  topSelling: { name: string; quantity: number; amount: number }[];
+  topSelling: { name: string; quantity: number; amount: number; imageFileId?: string | null }[];
   detailedLines?: SalesReportDetailedLine[];
   period?: { from?: string; to?: string };
 }
@@ -1602,7 +1637,7 @@ export interface DashboardData {
     scheduledFor?: string;
   }[];
   recentActivity: { id: string; action: string; actor: string; at: string }[];
-  lowStock: { id: string; name: string; inStock: number; reorderLevel: number }[];
+  lowStock: { id: string; name: string; inStock: number; reorderLevel: number; imageFileId?: string | null }[];
   visibility: {
     showFinance: boolean;
     showCompanyOps: boolean;
@@ -2395,6 +2430,21 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  listStockReservations: (status?: string) =>
+    request<BackendStockReservation[]>(`/api/domain/stock/reservations${queryString({ status })}`),
+
+  createStockReservation: (data: { inventoryItemId: string; quantity: number; purpose: string }) =>
+    request<BackendStockReservation>("/api/domain/stock/reservations", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  actOnStockReservation: (id: string, data: { action: "consume" | "release"; quantity: number; reason?: string }) =>
+    request<BackendStockReservation>(`/api/domain/stock/reservations/${id}/action`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   listStockMovements: (inventoryItemId?: string) =>
     request<BackendStockMovement[]>(
       `/api/domain/stock/movements${queryString({ inventoryItemId })}`,
@@ -2467,6 +2517,33 @@ export const api = {
     request<BackendSalesOrder>(`/api/sales/orders/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    }),
+  updateSalesQuote: (
+    estimateId: string,
+    data: {
+      validUntil: string;
+      notes?: string | null;
+      lines: Array<{
+        inventoryItemId?: string | null;
+        catalogItemId?: string | null;
+        type?: string;
+        description: string;
+        sku?: string | null;
+        quantity: number;
+        unitPrice: number;
+        discount?: number;
+        taxRate?: number;
+      }>;
+    },
+  ) =>
+    request<BackendEstimate>(`/api/sales/quotes/${estimateId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  rejectSalesQuote: (estimateId: string, note?: string) =>
+    request<BackendEstimate>(`/api/sales/quotes/${estimateId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ note: note ?? null }),
     }),
   convertSalesQuote: (estimateId: string, data?: { commissionRate?: number; notes?: string }) =>
     request<BackendSalesOrder>(`/api/sales/quotes/${estimateId}/convert`, {

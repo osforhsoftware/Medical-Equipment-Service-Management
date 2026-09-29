@@ -12,7 +12,8 @@ import type { BackendCatalogItem, BackendInventoryItem, EstimateLineInput } from
 import { ESTIMATE_LINE_TYPES, formatLineType, lineTotal, newEstimateLine } from "@/lib/estimates";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { inventoryOriginUnitPrice, MarginWarningBadge } from "@/components/shared/InventoryHelpers";
+import { inventoryOriginUnitPrice, lineMarginMinimum, MarginWarningBadge } from "@/components/shared/InventoryHelpers";
+import { useSettings } from "@/context/SettingsContext";
 import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 
 const LINE_GRID =
@@ -44,6 +45,7 @@ export function EstimateItemsTable({
   adjustUnitPrice,
   onChange,
 }: EstimateItemsTableProps) {
+  const { settings } = useSettings();
   const editable = mode === "edit";
   const gridClass = editable ? LINE_GRID_EDIT : LINE_GRID;
 
@@ -248,7 +250,14 @@ export function EstimateItemsTable({
                             unitPrice={line.unitPrice}
                             unitCost={(line as EstimateLineInput & { costPrice?: number }).costPrice!}
                             quantity={line.quantity}
-                            minMarginPct={10}
+                            minMarginPct={lineMarginMinimum({
+                              mode: settings?.marginMode,
+                              minMarginPct: settings?.minMarginPct,
+                              unitCost: (line as EstimateLineInput & { costPrice?: number }).costPrice!,
+                              catalogUnitPrice: Number(
+                                inventory.find((item) => item.id === line.inventoryItemId)?.sellingPrice ?? 0,
+                              ),
+                            })}
                           />
                         )}
                       </div>

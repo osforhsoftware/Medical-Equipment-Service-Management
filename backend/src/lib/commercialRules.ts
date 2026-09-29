@@ -12,6 +12,51 @@ export const PRICE_CATEGORY_MULTIPLIER: Record<string, number> = {
 
 export const MIN_MARGIN_PCT = 20;
 
+export type MarginMode = "off" | "fixed" | "on";
+
+export type MarginRule = {
+  mode: MarginMode;
+  minMarginPct: number;
+};
+
+export const DEFAULT_MARGIN_RULE: MarginRule = { mode: "fixed", minMarginPct: MIN_MARGIN_PCT };
+
+export function normalizeMarginMode(value: unknown): MarginMode {
+  if (value === "off" || value === "on" || value === "fixed") return value;
+  return "fixed";
+}
+
+/** Minimum margin for a line. Null means the percent check is skipped. */
+export function requiredMarginPercent(
+  rule: MarginRule,
+  unitCost: number,
+  catalogUnitPrice?: number | null,
+): number | null {
+  if (rule.mode === "off") return null;
+  if (rule.mode === "fixed") {
+    const pct = Number(rule.minMarginPct);
+    if (!Number.isFinite(pct) || pct <= 0) return null;
+    return pct;
+  }
+  const catalogMargin = marginPercent(Number(catalogUnitPrice ?? 0), unitCost);
+  if (catalogMargin == null || catalogMargin <= 0) return null;
+  return catalogMargin;
+}
+
+export async function loadMarginRule(
+  tenantId: string,
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<MarginRule> {
+  const settings = await tx.tenantSettings.findUnique({
+    where: { tenantId },
+    select: { marginMode: true, minMarginPct: true },
+  });
+  return {
+    mode: normalizeMarginMode(settings?.marginMode),
+    minMarginPct: Number(settings?.minMarginPct ?? MIN_MARGIN_PCT),
+  };
+}
+
 const OPEN_INVOICE_STATUSES = ["draft", "pendingApproval", "approved", "sent", "overdue"] as const;
 
 export function applyPriceCategory(basePrice: number, category: string | null | undefined): number {
@@ -25,15 +70,24 @@ export function marginPercent(unitPrice: number, unitCost: number): number | nul
   return ((unitPrice - unitCost) / unitPrice) * 100;
 }
 
-export function assertLineMargin(description: string, unitPrice: number, unitCost: number | null | undefined) {
+export function assertLineMargin(
+  description: string,
+  unitPrice: number,
+  unitCost: number | null | undefined,
+  rule: MarginRule = DEFAULT_MARGIN_RULE,
+  catalogUnitPrice?: number | null,
+) {
   if (unitCost == null || !Number.isFinite(unitCost) || unitCost <= 0) return;
   if (unitPrice < unitCost) {
     throw new AppError(`Cannot save below cost: ${description}`, 409);
   }
+  const minimum = requiredMarginPercent(rule, unitCost, catalogUnitPrice);
+  if (minimum == null) return;
   const margin = marginPercent(unitPrice, unitCost);
-  if (margin != null && margin < MIN_MARGIN_PCT) {
+  if (margin != null && margin < minimum) {
+    const label = Number.isInteger(minimum) ? String(minimum) : minimum.toFixed(1);
     throw new AppError(
-      `Margin for ${description} is ${margin.toFixed(1)}% (minimum ${MIN_MARGIN_PCT}%). Increase the price before saving.`,
+      `Margin for ${description} is ${margin.toFixed(1)}% (minimum ${label}%). Increase the price before saving.`,
       409,
     );
   }

@@ -18,6 +18,7 @@ import {
   syncJobExtraStockRequest,
   upsertOpenStockPurchaseRequest,
 } from "@/lib/stockPurchaseRequest";
+import { inventoryItemMatchesExtraType } from "@/lib/inventoryItemClass";
 import {
   computeLandedCostTotal,
   computeLandedImportExtras,
@@ -25,7 +26,7 @@ import {
 } from "@/lib/landedCost";
 import { serviceRequestsService } from "@/services/serviceRequests.service";
 import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
-import { assertCustomerCreditAllows, assertLineMargin } from "@/lib/commercialRules";
+import { assertCustomerCreditAllows, assertLineMargin, loadMarginRule } from "@/lib/commercialRules";
 
 type Actor = { userId: string; role: string };
 type JsonObject = Record<string, unknown>;
@@ -194,13 +195,20 @@ export class DomainService {
       const discount = money(input.discount ?? 0);
       const total = money(Prisma.Decimal.max(0, subtotal.minus(discount)).plus(tax));
       if (estimate.customerId) {
+        const marginRule = await loadMarginRule(tenantId, tx);
         for (const line of input.lines as Array<{ description?: string; unitPrice?: number; inventoryItemId?: string | null }>) {
           if (!line.inventoryItemId) continue;
           const item = await tx.inventoryItem.findFirst({
             where: { id: line.inventoryItemId, tenantId },
-            select: { unitCost: true },
+            select: { unitCost: true, sellingPrice: true },
           });
-          assertLineMargin(String(line.description || "line"), Number(line.unitPrice ?? 0), item ? Number(item.unitCost) : null);
+          assertLineMargin(
+            String(line.description || "line"),
+            Number(line.unitPrice ?? 0),
+            item ? Number(item.unitCost) : null,
+            marginRule,
+            item ? Number(item.sellingPrice) : null,
+          );
         }
         if (input.sendForApproval === true || input.status === "pendingAdminApproval" || input.status === "sent") {
           await assertCustomerCreditAllows(tenantId, estimate.customerId, Number(total), tx);
@@ -619,6 +627,9 @@ export class DomainService {
     if (input.inventoryItemId) {
       const item = await prisma.inventoryItem.findFirst({ where: { id: input.inventoryItemId, tenantId } });
       if (!item) throw new AppError("Inventory item not found", 404);
+      if (!inventoryItemMatchesExtraType(item, input.type ?? "product")) {
+        throw new AppError("Selected product does not match the item type", 422);
+      }
     }
     const extra = await prisma.jobExtra.create({
       data: {
@@ -681,6 +692,9 @@ export class DomainService {
     if (input.inventoryItemId) {
       const item = await prisma.inventoryItem.findFirst({ where: { id: input.inventoryItemId, tenantId } });
       if (!item) throw new AppError("Inventory item not found", 404);
+      if (!inventoryItemMatchesExtraType(item, input.type ?? existing.type)) {
+        throw new AppError("Selected product does not match the item type", 422);
+      }
     }
     const extra = await prisma.jobExtra.update({
       where: { id },
@@ -728,28 +742,97 @@ export class DomainService {
   listReservations(tenantId: string, status?: string) {
     return prisma.stockReservation.findMany({
       where: { tenantId, ...(status ? { status } : {}) },
-      include: { inventoryItem: true },
+      include: {
+        inventoryItem: {
+          select: { id: true, sku: true, name: true, inStock: true, reserved: true, unitOfMeasure: true },
+        },
+        estimate: { select: { id: true, reference: true } },
+        salesOrder: { select: { id: true, reference: true } },
+        job: { select: { id: true, reference: true } },
+      },
       orderBy: { createdAt: "desc" },
+      take: 500,
     });
+  }
+
+  async createReservation(
+    tenantId: string,
+    actor: Actor,
+    input: { inventoryItemId: string; quantity: number; purpose: string },
+  ) {
+    return prisma.$transaction(async (tx) => {
+      const item = await tx.inventoryItem.findFirst({
+        where: { id: input.inventoryItemId, tenantId, status: "active" },
+      });
+      if (!item) throw new AppError("Inventory item not found", 404);
+      const available = item.inStock - item.reserved;
+      if (input.quantity > available) {
+        throw new AppError(
+          `Only ${Math.max(0, available)} available to reserve. On hand ${item.inStock}, already reserved ${item.reserved}.`,
+          409,
+        );
+      }
+      const reservation = await tx.stockReservation.create({
+        data: {
+          tenantId,
+          inventoryItemId: item.id,
+          requestedQuantity: input.quantity,
+          quantity: input.quantity,
+          purpose: input.purpose.trim(),
+          status: "active",
+          reservedBy: actor.userId,
+        },
+      });
+      const updated = await tx.inventoryItem.update({
+        where: { id: item.id },
+        data: { reserved: { increment: input.quantity } },
+      });
+      await tx.stockMovement.create({
+        data: {
+          tenantId,
+          inventoryItemId: item.id,
+          reservationId: reservation.id,
+          type: "reserve",
+          quantity: -input.quantity,
+          balanceAfter: updated.inStock,
+          referenceType: "reservation",
+          referenceId: reservation.id,
+          reason: input.purpose.trim(),
+          actorId: actor.userId,
+        },
+      });
+      return tx.stockReservation.findUniqueOrThrow({
+        where: { id: reservation.id },
+        include: {
+          inventoryItem: {
+            select: { id: true, sku: true, name: true, inStock: true, reserved: true, unitOfMeasure: true },
+          },
+        },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async actOnReservation(tenantId: string, id: string, actor: Actor, input: any) {
     return prisma.$transaction(async (tx) => {
       const reservation = await tx.stockReservation.findFirst({
-        where: { id, tenantId, status: "active" },
+        where: { id, tenantId, status: { in: ["active", "shortage"] } },
         include: { inventoryItem: true },
       });
-      if (!reservation) throw new AppError("Active reservation not found", 404);
+      if (!reservation) throw new AppError("Open reservation not found", 404);
       const remaining = reservation.quantity - reservation.consumed - reservation.released;
+      if (remaining <= 0) throw new AppError("This reservation has no quantity left", 409);
       if (input.quantity > remaining) throw new AppError("Quantity exceeds reservation remainder", 409);
 
       const consume = input.action === "consume";
       if (consume && reservation.inventoryItem.inStock < input.quantity) {
-        throw new AppError("Insufficient stock to consume reservation", 409);
+        throw new AppError("Insufficient on-hand stock to issue this reservation", 409);
+      }
+      if (reservation.inventoryItem.reserved < input.quantity) {
+        throw new AppError("Reserved balance is lower than this reservation", 409);
       }
       const consumed = reservation.consumed + (consume ? input.quantity : 0);
       const released = reservation.released + (consume ? 0 : input.quantity);
-      const done = consumed + released === reservation.quantity;
+      const done = consumed + released >= reservation.quantity;
       const item = await tx.inventoryItem.update({
         where: { id: reservation.inventoryItemId },
         data: {
@@ -757,9 +840,18 @@ export class DomainService {
           ...(consume ? { inStock: { decrement: input.quantity } } : {}),
         },
       });
+      const status = done
+        ? released === 0
+          ? "consumed"
+          : consumed === 0
+            ? "released"
+            : "closed"
+        : reservation.status === "shortage"
+          ? "shortage"
+          : "active";
       const updated = await tx.stockReservation.update({
         where: { id },
-        data: { consumed, released, status: done ? (consume && !released ? "consumed" : "closed") : "active" },
+        data: { consumed, released, status },
       });
       await tx.stockMovement.create({
         data: {
@@ -770,8 +862,16 @@ export class DomainService {
           type: consume ? "consume" : "release",
           quantity: consume ? -input.quantity : input.quantity,
           balanceAfter: item.inStock,
-          referenceType: reservation.jobId ? "job" : "estimate",
-          referenceId: reservation.jobId ?? reservation.estimateId,
+          referenceType: reservation.jobId
+            ? "job"
+            : reservation.estimateId
+              ? "estimate"
+              : reservation.salesOrderId
+                ? "sales_order"
+                : "reservation",
+          referenceId: reservation.jobId ?? reservation.estimateId ?? reservation.salesOrderId ?? reservation.id,
+          reason: (typeof input.reason === "string" && input.reason.trim())
+            || (consume ? "Issued reserved stock" : "Released reservation"),
           actorId: actor.userId,
         },
       });

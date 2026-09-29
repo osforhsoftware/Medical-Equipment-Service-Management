@@ -1,5 +1,8 @@
 import { FileText, Landmark, Package, PackageCheck, Receipt, RefreshCw, Ship, Truck } from "lucide-react";
 import { ModuleFlowStrip } from "@/components/shared/ModuleFlowStrip";
+import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
+import { userCanOpenPage } from "@/lib/userRoles";
 
 /** PDF Purchasing & Landed Cost: Request → RFQ → Quote → PO → Shipment → Customs → GRN → Stock */
 export const PURCHASE_STAGES = [
@@ -45,12 +48,15 @@ export function purchaseStageFromLocation(pathname: string, stageParam: string |
 }
 
 export function PurchaseStageNav({ stage }: { stage: PurchaseStage }) {
+  const { user } = useAuth();
+  const { rbacMatrix } = useSettings();
+  const steps = FLOW_STEPS.filter((step) => user && userCanOpenPage(user, step.to, rbacMatrix));
   return (
     <ModuleFlowStrip
       overviewTo="/app/rfqs"
       overviewActive={stage === "overview"}
       activeId={stage}
-      steps={[...FLOW_STEPS]}
+      steps={[...steps]}
       flowLabel="Buy"
     />
   );

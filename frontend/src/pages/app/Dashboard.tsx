@@ -26,6 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { ProductThumb } from "@/components/shared/ProductThumb";
 import { ImportantNotificationBanner } from "@/components/shared/ImportantNotificationBanner";
 import { StatCard } from "@/components/shared/StatCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -1012,10 +1013,13 @@ export default function Dashboard() {
                   <button
                     key={i.id}
                     type="button"
-                    className="flex w-full items-center justify-between text-sm hover:underline"
+                    className="flex w-full items-center justify-between gap-2 text-sm hover:underline"
                     onClick={() => navigate("/app/inventory")}
                   >
-                    <span className="truncate">{i.name}</span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <ProductThumb fileId={i.imageFileId} name={i.name} size="xs" />
+                      <span className="truncate">{i.name}</span>
+                    </span>
                     <span className="font-medium text-warning-foreground">
                       {i.inStock}/{i.reorderLevel}
                     </span>

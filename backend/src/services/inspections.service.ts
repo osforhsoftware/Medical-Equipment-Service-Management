@@ -11,6 +11,7 @@ import { ticketAssignmentService } from "@/services/ticketAssignment.service";
 import { normalizeAdditionalFields } from "@/lib/additionalFields";
 import { Prisma } from "@prisma/client";
 import { upsertOpenStockPurchaseRequest } from "@/lib/stockPurchaseRequest";
+import { APPROVED_IMAGE_TYPE_MESSAGE } from "@/services/fileStorage.service";
 
 type RecommendedPartInput = {
   inventoryItemId: string;
@@ -177,7 +178,7 @@ export class InspectionsService {
           },
         });
         if (validFiles !== fileIds.length) {
-          throw new AppError("Every inspection image must be a valid uploaded image", 422);
+          throw new AppError(APPROVED_IMAGE_TYPE_MESSAGE, 422);
         }
       }
 

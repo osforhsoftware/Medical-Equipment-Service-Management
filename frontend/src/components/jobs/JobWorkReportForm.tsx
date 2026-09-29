@@ -6,6 +6,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { InspectionSection } from "@/components/inspections/InspectionSection";
 import { api, type BackendJobPhoto, type BackendJobWorkLog, type BackendServiceJob } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { toast } from "@/lib/toast";
+import { APPROVED_IMAGE_ACCEPT, keepApprovedFiles } from "@/lib/uploadFileTypes";
 
 interface JobWorkReportFormProps {
   job: BackendServiceJob;
@@ -48,9 +50,11 @@ export function JobWorkReportForm({
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const appendFiles = (files: File[]) => {
-    if (!files.length) return;
-    setNewImages((prev) => [...prev, ...files]);
-    setImageCaptions((prev) => [...prev, ...files.map(() => "")]);
+    const { allowed, error } = keepApprovedFiles(files, true);
+    if (error) toast.error(error);
+    if (!allowed.length) return;
+    setNewImages((prev) => [...prev, ...allowed]);
+    setImageCaptions((prev) => [...prev, ...allowed.map(() => "")]);
   };
 
   const removeNewImage = (index: number) => {
@@ -145,7 +149,7 @@ export function JobWorkReportForm({
             <input
               ref={cameraInputRef}
               type="file"
-              accept="image/*"
+              accept={APPROVED_IMAGE_ACCEPT}
               capture="environment"
               className="hidden"
               onChange={(e) => {
@@ -156,7 +160,7 @@ export function JobWorkReportForm({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept={APPROVED_IMAGE_ACCEPT}
               multiple
               className="hidden"
               onChange={(e) => {

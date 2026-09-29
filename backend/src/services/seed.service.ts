@@ -492,6 +492,57 @@ export class SeedService {
       await tx.equipment.deleteMany({ where: { tenantId, assetTag: { startsWith: DEMO_PREFIX } } });
 
       if (demoCustomerIds.length > 0) {
+        // Prefix deletes miss records created later against demo customers.
+        // equipment, service_requests, and sales_orders all use ON DELETE RESTRICT.
+        await tx.equipment.updateMany({
+          where: { customerId: { in: demoCustomerIds } },
+          data: { customerId: null },
+        });
+
+        const linkedRequestIds = (
+          await tx.serviceRequest.findMany({
+            where: { customerId: { in: demoCustomerIds } },
+            select: { id: true },
+          })
+        ).map((request) => request.id);
+        if (linkedRequestIds.length > 0) {
+          await tx.serviceTicketChangeRequest.deleteMany({
+            where: { serviceRequestId: { in: linkedRequestIds } },
+          });
+          await tx.timelineEvent.deleteMany({ where: { requestId: { in: linkedRequestIds } } });
+          await tx.inspectionReport.deleteMany({
+            where: { serviceRequestId: { in: linkedRequestIds } },
+          });
+          await tx.serviceRequestEquipment.deleteMany({
+            where: { serviceRequestId: { in: linkedRequestIds } },
+          });
+          await tx.serviceRequest.deleteMany({ where: { id: { in: linkedRequestIds } } });
+        }
+
+        const linkedOrderIds = (
+          await tx.salesOrder.findMany({
+            where: { customerId: { in: demoCustomerIds } },
+            select: { id: true },
+          })
+        ).map((order) => order.id);
+        if (linkedOrderIds.length > 0) {
+          await tx.invoicePayment.deleteMany({
+            where: { invoice: { salesOrderId: { in: linkedOrderIds } } },
+          });
+          await tx.invoice.deleteMany({ where: { salesOrderId: { in: linkedOrderIds } } });
+          await tx.salesOrder.deleteMany({ where: { id: { in: linkedOrderIds } } });
+        }
+
+        await tx.invoicePayment.deleteMany({
+          where: { invoice: { customerId: { in: demoCustomerIds } } },
+        });
+        await tx.invoice.deleteMany({ where: { customerId: { in: demoCustomerIds } } });
+
+        await tx.user.updateMany({
+          where: { customerId: { in: demoCustomerIds } },
+          data: { customerId: null },
+        });
+
         await tx.customer.deleteMany({ where: { id: { in: demoCustomerIds } } });
       }
 
@@ -510,9 +561,32 @@ export class SeedService {
         },
       });
 
-      await tx.user.deleteMany({
-        where: { tenantId, username: { in: DEMO_USERNAMES } },
-      });
+      const demoUserIds = (
+        await tx.user.findMany({
+          where: { tenantId, username: { in: DEMO_USERNAMES } },
+          select: { id: true },
+        })
+      ).map((user) => user.id);
+
+      if (demoUserIds.length > 0) {
+        const keeper = await tx.user.findFirst({
+          where: { tenantId, id: { notIn: demoUserIds } },
+          orderBy: { createdAt: "asc" },
+          select: { id: true },
+        });
+        if (keeper) {
+          await tx.storedFile.updateMany({
+            where: { uploadedById: { in: demoUserIds } },
+            data: { uploadedById: keeper.id },
+          });
+        }
+
+        await tx.jobAssignment.deleteMany({ where: { userId: { in: demoUserIds } } });
+        await tx.jobWorkLog.deleteMany({ where: { userId: { in: demoUserIds } } });
+        await tx.passwordResetToken.deleteMany({ where: { userId: { in: demoUserIds } } });
+        await tx.userRoleAssignment.deleteMany({ where: { userId: { in: demoUserIds } } });
+        await tx.user.deleteMany({ where: { id: { in: demoUserIds } } });
+      }
 
       await tx.branch.deleteMany({
         where: { tenantId, name: { in: DEMO_BRANCH_NAMES } },

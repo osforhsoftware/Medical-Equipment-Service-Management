@@ -6,6 +6,7 @@ import { AlertTriangle, Loader2, ShoppingCart } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { ProductThumb, productImageFileId } from "@/components/shared/ProductThumb";
 import { InventoryStageNav } from "@/components/inventory/InventoryStageNav";
 import { PurchaseStageNav, purchaseStageFromLocation } from "@/components/purchase/PurchaseStageNav";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -165,11 +166,14 @@ export default function StockPurchaseRequests() {
             <div className="space-y-2">
               {(lowStockQuery.data?.data ?? []).slice(0, 8).map((item) => (
                 <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background px-3 py-2 text-sm">
-                  <div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <ProductThumb fileId={productImageFileId(item)} name={item.name} size="sm" />
+                    <div className="min-w-0">
                     <p className="font-medium">{item.name}</p>
                     <p className="text-xs text-muted-foreground">
                       {item.sku} · on hand {item.inStock} / min {item.reorderLevel}
                     </p>
+                    </div>
                   </div>
                   {canConvert ? (
                     <Button

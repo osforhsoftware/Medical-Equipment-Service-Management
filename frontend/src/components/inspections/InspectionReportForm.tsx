@@ -15,6 +15,8 @@ import {
 } from "@/lib/api";
 import type { CustomerAdditionalField } from "@/lib/customerFields";
 import { cn } from "@/lib/utils";
+import { toast } from "@/lib/toast";
+import { APPROVED_IMAGE_ACCEPT, keepApprovedFiles } from "@/lib/uploadFileTypes";
 import { InspectionSection } from "./InspectionSection";
 import type { RecommendedPartDraft } from "./useInspectionReportEditor";
 
@@ -112,13 +114,15 @@ export function InspectionReportForm({
   const hasNewPhotos = newImagePreviews.length > 0;
 
   const appendFiles = (files: File[]) => {
-    if (!files.length) return;
+    const { allowed, error } = keepApprovedFiles(files, true);
+    if (error) toast.error(error);
+    if (!allowed.length) return;
     setMachineImages((prev) => {
-      const next = [...prev, ...files];
+      const next = [...prev, ...allowed];
       setMachineImage(next[0] ?? null);
       return next;
     });
-    setImageCaptions((prev) => [...prev, ...files.map(() => "")]);
+    setImageCaptions((prev) => [...prev, ...allowed.map(() => "")]);
   };
 
   const removeNewImage = (index: number) => {
@@ -235,7 +239,7 @@ export function InspectionReportForm({
         <input
           ref={cameraInputRef}
           type="file"
-          accept="image/*"
+          accept={APPROVED_IMAGE_ACCEPT}
           capture="environment"
           multiple
           className="hidden"
@@ -247,7 +251,7 @@ export function InspectionReportForm({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          accept={APPROVED_IMAGE_ACCEPT}
           multiple
           className="hidden"
           onChange={(e) => {

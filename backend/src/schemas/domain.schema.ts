@@ -133,10 +133,19 @@ export const jobExtraSchema = z.object({
   }),
 });
 
+export const createReservationSchema = z.object({
+  body: z.object({
+    inventoryItemId: z.string().cuid(),
+    quantity: positiveInt,
+    purpose: z.string().trim().min(1).max(500),
+  }),
+});
+
 export const reservationActionSchema = z.object({
   body: z.object({
     action: z.enum(["consume", "release"]),
     quantity: positiveInt,
+    reason: z.string().trim().max(500).optional(),
   }),
 });
 

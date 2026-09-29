@@ -82,6 +82,9 @@ model TenantSettings {
   companyPhone          String?  @map("company_phone") @db.VarChar(40)
   companyWebsite        String?  @map("company_website") @db.VarChar(200)
   defaultTaxRate        Decimal  @default(8) @map("default_tax_rate") @db.Decimal(5, 2)
+  /// off = no minimum; fixed = minMarginPct on every line; on = each item's own selling-price margin
+  marginMode            String   @default("fixed") @map("margin_mode") @db.VarChar(16)
+  minMarginPct          Decimal  @default(20) @map("min_margin_pct") @db.Decimal(5, 2)
   amcRenewalReminders   Boolean  @default(true) @map("amc_renewal_reminders")
   lowStockAlerts        Boolean  @default(true) @map("low_stock_alerts")
   autoReserveOnApproval Boolean  @default(true) @map("auto_reserve_on_approval")
@@ -1193,6 +1196,7 @@ model StockReservation {
   consumed          Int       @default(0)
   released          Int       @default(0)
   status            String    @default("active")
+  purpose           String?   @db.Text
   reservedBy        String    @map("reserved_by")
   expiresAt         DateTime? @map("expires_at")
   createdAt         DateTime  @default(now()) @map("created_at")
@@ -1880,6 +1884,7 @@ model SalesEnquiry {
   phone               String    @default("")
   email               String    @default("")
   productInterest     String    @map("product_interest") @db.Text
+  interestLines       Json      @default("[]") @map("interest_lines")
   quantity            Decimal   @default(1) @db.Decimal(12, 3)
   estimatedBudget     Decimal?  @map("estimated_budget") @db.Decimal(12, 2)
   source              String    @default("")
@@ -1909,10 +1914,17 @@ model SupplierRFQ {
   supplierId   String?   @map("supplier_id")
   supplierName String    @map("supplier_name")
   status       String    @default("draft")
-  notes        String?   @db.Text
-  dueDate      DateTime? @map("due_date")
-  lines        Json      @default("[]")
-  createdBy    String    @map("created_by")
+  notes           String?   @db.Text
+  dueDate         DateTime? @map("due_date")
+  currency        String?   @default("INR") @db.VarChar(10)
+  warranty        String?   @db.VarChar(500)
+  incoterm        String?   @db.VarChar(100)
+  shippingTerms   String?   @map("shipping_terms") @db.VarChar(500)
+  paymentTerms    String?   @map("payment_terms") @db.VarChar(500)
+  countryOfOrigin String?   @map("country_of_origin") @db.VarChar(100)
+  validUntil      DateTime? @map("valid_until")
+  lines           Json      @default("[]")
+  createdBy       String    @map("created_by")
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 

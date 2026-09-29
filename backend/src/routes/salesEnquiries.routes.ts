@@ -4,7 +4,7 @@ import { authenticate, requireRole } from "@/middleware/auth";
 import { resolveTenant } from "@/middleware/tenant";
 import { validate } from "@/middleware/validate";
 import { createSalesEnquirySchema, updateSalesEnquirySchema } from "@/schemas/salesEnquiries.schema";
-import { convertSalesEnquiryToQuotation } from "@/services/salesEnquiries.service";
+import { convertSalesEnquiryToQuotation, normalizeEnquiryInterest } from "@/services/salesEnquiries.service";
 import { assertOwnSalesRecord, isSalesSelfScoped } from "@/lib/salesScope";
 import { success } from "@/utils/response";
 
@@ -53,11 +53,18 @@ router.post("/", canManage, validate(createSalesEnquirySchema), async (req: Requ
     const count = await prisma.salesEnquiry.count({ where: { tenantId } });
     const reference = `ENQ-${year}-${String(count + 1).padStart(4, "0")}`;
 
-    const { followUpDate, ...rest } = req.body;
+    const { followUpDate, interestLines, productInterest, quantity, estimatedBudget, ...rest } = req.body;
+    const interest = await normalizeEnquiryInterest(tenantId, {
+      interestLines,
+      productInterest,
+      quantity,
+      estimatedBudget,
+    });
     const actorName = req.user!.name?.trim() || "Sales";
     const created = await prisma.salesEnquiry.create({
       data: {
         ...rest,
+        ...interest,
         tenantId,
         reference,
         createdBy: req.user!.userId,
@@ -82,11 +89,21 @@ router.put("/:id", canManage, validate(updateSalesEnquirySchema), async (req: Re
     }
     assertOwnSalesRecord(req.user?.role, req.user!.userId, existing.createdBy, "Sales enquiry not found");
 
-    const { followUpDate, ...rest } = req.body;
+    const { followUpDate, interestLines, productInterest, quantity, estimatedBudget, ...rest } = req.body;
+    const interest =
+      interestLines !== undefined || productInterest !== undefined
+        ? await normalizeEnquiryInterest(tenantId, {
+            interestLines,
+            productInterest,
+            quantity,
+            estimatedBudget,
+          })
+        : {};
     const updated = await prisma.salesEnquiry.update({
       where: { id },
       data: {
         ...rest,
+        ...interest,
         followUpDate: followUpDate !== undefined ? (followUpDate ? new Date(followUpDate) : null) : undefined,
       },
     });

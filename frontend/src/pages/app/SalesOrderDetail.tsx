@@ -2,11 +2,11 @@ import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Loader2, Pencil, Printer, Truck } from "lucide-react";
 import { MesmsLogo } from "@/components/shared/MesmsLogo";
+import { ProductThumb } from "@/components/shared/ProductThumb";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { SaleFormDialog } from "@/components/sales/SaleFormDialog";
-import { PackingListPrint } from "@/components/sales/PackingListPrint";
 import { downloadInvoicePdf } from "@/components/billing/billing-ui";
 import { SALES_BILL_ROLES, SALES_DESK_ROLES, SALES_WRITE_ROLES } from "@/config/roles";
 import {
@@ -179,14 +179,11 @@ export default function SalesOrderDetail() {
                   ) : null}
                   {order.estimateId ? (
                     <Button variant="outline" asChild>
-                      <Link to={`/app/estimates/${order.estimateId}/preview`}>
-                        <Printer className="mr-1 h-4 w-4" /> Print quotation
+                      <Link to={`/app/sales/quotations/${order.estimateId}`}>
+                        <Printer className="mr-1 h-4 w-4" /> Open quotation
                       </Link>
                     </Button>
                   ) : null}
-                  <Button variant="outline" onClick={() => window.print()}>
-                    <Printer className="mr-1 h-4 w-4" /> Print Packing List
-                  </Button>
                   {canDeliver && order.deliveryStatus !== "delivered" ? (
                     <Button variant="outline" disabled={working} onClick={() => setConfirmDeliver(true)}>
                       <Truck className="mr-1 h-4 w-4" /> Mark delivered
@@ -336,10 +333,15 @@ export default function SalesOrderDetail() {
                           <tr key={line.id} className="border-b border-border last:border-0">
                             <td className="px-3 py-3 text-center text-muted-foreground">{index + 1}</td>
                             <td className="px-3 py-3">
-                              <p className="font-medium text-foreground">{line.description}</p>
-                              {line.sku ? (
-                                <p className="font-mono text-xs text-muted-foreground">{line.sku}</p>
-                              ) : null}
+                              <div className="flex min-w-0 items-center gap-2">
+                                <ProductThumb fileId={line.imageFileId} name={line.description} size="sm" />
+                                <div className="min-w-0">
+                                  <p className="font-medium text-foreground">{line.description}</p>
+                                  {line.sku ? (
+                                    <p className="font-mono text-xs text-muted-foreground">{line.sku}</p>
+                                  ) : null}
+                                </div>
+                              </div>
                             </td>
                             <td className="px-3 py-3 capitalize text-muted-foreground">{line.type}</td>
                             <td className="px-3 py-3 text-right tabular-nums">{formatCurrency(line.unitPrice)}</td>
@@ -460,15 +462,6 @@ export default function SalesOrderDetail() {
             <p className="text-xs text-muted-foreground">
               Sale billing lives on this order. Service-ticket estimates and job invoices stay under Estimates and Billing.
             </p>
-
-            <PackingListPrint
-              order={order}
-              customerAddress={customerAddress}
-              customerPhone={customer?.phone}
-              companyName={company}
-              companyAddress={settings?.companyAddress}
-              companyPhone={settings?.companyPhone}
-            />
 
             <AlertDialog open={confirmDeliver} onOpenChange={setConfirmDeliver}>
               <AlertDialogContent>

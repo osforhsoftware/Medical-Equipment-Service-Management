@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
-import { applyPriceCategory, assertCustomerCreditAllows, assertLineMargin } from "@/lib/commercialRules";
+import { applyPriceCategory, assertCustomerCreditAllows, assertLineMargin, loadMarginRule } from "@/lib/commercialRules";
 import { assertOwnSalesRecord, salesOwnerFilter } from "@/lib/salesScope";
 
 const money = (value: Prisma.Decimal | number | string | null | undefined) =>
@@ -26,8 +26,18 @@ function paymentLabel(balanceDue: number, total: number) {
   return "unpaid";
 }
 
+const primaryImageInclude = {
+  take: 1,
+  orderBy: { sortOrder: "asc" as const },
+  select: { fileId: true },
+};
+
 const orderInclude = {
-  lines: { include: { inventoryItem: true } },
+  lines: {
+    include: {
+      inventoryItem: { include: { images: primaryImageInclude } },
+    },
+  },
   invoices: { include: { payments: true } },
   estimate: { select: { id: true, reference: true, status: true } },
 } as const;
@@ -152,6 +162,7 @@ export class SalesService {
           inStock: true,
           reserved: true,
           reorderLevel: true,
+          images: primaryImageInclude,
         },
       }),
     ]);
@@ -168,9 +179,25 @@ export class SalesService {
       .filter((item) => item.inStock <= item.reorderLevel)
       .slice(0, 8)
       .map((item) => ({
-        ...item,
+        id: item.id,
+        sku: item.sku,
+        name: item.name,
+        category: item.category,
+        inStock: item.inStock,
+        reserved: item.reserved,
+        reorderLevel: item.reorderLevel,
         available: Math.max(0, item.inStock - item.reserved),
+        imageFileId: item.images[0]?.fileId ?? null,
       }));
+
+    const topNames = topLines.map((row) => row.description);
+    const topImages = topNames.length
+      ? await prisma.inventoryItem.findMany({
+          where: { tenantId, name: { in: topNames } },
+          select: { name: true, images: primaryImageInclude },
+        })
+      : [];
+    const imageByName = new Map(topImages.map((item) => [item.name, item.images[0]?.fileId ?? null]));
 
     return {
       process: [
@@ -211,6 +238,7 @@ export class SalesService {
         name: row.description,
         quantity: num(row._sum.quantity),
         amount: num(row._sum.lineTotal),
+        imageFileId: imageByName.get(row.description) ?? null,
       })),
       lowStockProducts,
     };
@@ -419,6 +447,167 @@ export class SalesService {
     });
   }
 
+  private quoteLineType(line: { type?: string; inventoryItemId?: string | null }) {
+    if (line.inventoryItemId) return "part";
+    const type = (line.type || "other").toLowerCase();
+    if (["labor", "part", "transport", "testing", "calibration", "service", "custom", "other"].includes(type)) {
+      return type;
+    }
+    return "other";
+  }
+
+  async updateQuote(
+    tenantId: string,
+    estimateId: string,
+    actor: { userId: string; role?: string },
+    input: {
+      notes?: string | null;
+      validUntil: string;
+      lines: Array<{
+        inventoryItemId?: string | null;
+        catalogItemId?: string | null;
+        type?: string;
+        description: string;
+        sku?: string | null;
+        quantity: number;
+        unitPrice: number;
+        discount?: number;
+        taxRate?: number;
+      }>;
+    },
+  ) {
+    return prisma.$transaction(async (tx) => {
+      const estimate = await tx.estimate.findFirst({ where: { id: estimateId, tenantId } });
+      if (!estimate) throw new AppError("Quotation not found", 404);
+      assertOwnSalesRecord(actor.role, actor.userId, estimate.salespersonId, "Quotation not found");
+      if (!this.isSalesQuote(estimate)) {
+        throw new AppError("Service estimates stay on the service ticket workflow", 409);
+      }
+      if (estimate.status === "converted" || estimate.status === "rejected") {
+        throw new AppError("This quotation can no longer be edited", 409);
+      }
+
+      const customer = estimate.customerId
+        ? await tx.customer.findFirst({ where: { id: estimate.customerId, tenantId } })
+        : null;
+      const lines = await this.resolveSaleLines(tx, tenantId, input.lines, customer?.priceCategory);
+      let subtotal = new Prisma.Decimal(0);
+      let tax = new Prisma.Decimal(0);
+      const priced = lines.map((line) => {
+        const gross = money(line.quantity).mul(money(line.unitPrice));
+        const net = Prisma.Decimal.max(0, gross.minus(money(line.discount)));
+        const lineTax = net.mul(money(line.taxRate).div(100));
+        const lineTotal = net.plus(lineTax);
+        subtotal = subtotal.plus(net);
+        tax = tax.plus(lineTax);
+        return { ...line, type: this.quoteLineType(line), lineTotal };
+      });
+      const total = subtotal.plus(tax);
+      const validUntil = new Date(input.validUntil);
+      if (Number.isNaN(validUntil.getTime())) throw new AppError("Valid until date is invalid", 422);
+
+      const revisionNumber = estimate.revision + 1;
+      await tx.estimateLineItem.deleteMany({ where: { estimateId } });
+      const revision = await tx.estimateRevision.create({
+        data: {
+          tenantId,
+          estimateId,
+          revision: revisionNumber,
+          subtotal,
+          discount: new Prisma.Decimal(0),
+          tax,
+          total,
+          notes: input.notes ?? null,
+          createdBy: actor.userId,
+          snapshot: {
+            lines: priced.map((line) => ({
+              description: line.description,
+              sku: line.sku,
+              quantity: line.quantity,
+              unitPrice: Number(line.unitPrice),
+              discount: Number(line.discount),
+              taxRate: Number(line.taxRate),
+            })),
+            notes: input.notes ?? null,
+          },
+        },
+      });
+      await tx.estimateLineItem.createMany({
+        data: priced.map((line) => ({
+          estimateId,
+          revisionId: revision.id,
+          catalogItemId: line.catalogItemId,
+          inventoryItemId: line.inventoryItemId,
+          type: line.type,
+          description: line.description,
+          partNumber: line.sku,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          taxRate: line.taxRate,
+          discount: line.discount,
+          lineTotal: line.lineTotal,
+        })),
+      });
+      const partsCost = priced
+        .filter((line) => line.inventoryItemId || line.type === "part")
+        .reduce((sum, line) => sum.plus(line.lineTotal), new Prisma.Decimal(0));
+      const laborCost = total.minus(partsCost);
+      return tx.estimate.update({
+        where: { id: estimateId },
+        data: {
+          revision: revisionNumber,
+          status: "draft",
+          subtotal,
+          discount: new Prisma.Decimal(0),
+          tax,
+          total,
+          partsCost,
+          laborCost: laborCost.greaterThan(0) ? laborCost : new Prisma.Decimal(0),
+          notes: input.notes ?? null,
+          validUntil,
+          equipmentName: priced.length === 1 ? priced[0].description : "Sales quotation",
+        },
+        include: { lineItems: true },
+      });
+    });
+  }
+
+  async rejectQuote(
+    tenantId: string,
+    estimateId: string,
+    actor: { userId: string; role?: string },
+    input?: { note?: string | null },
+  ) {
+    const estimate = await prisma.estimate.findFirst({ where: { id: estimateId, tenantId } });
+    if (!estimate) throw new AppError("Quotation not found", 404);
+    assertOwnSalesRecord(actor.role, actor.userId, estimate.salespersonId, "Quotation not found");
+    if (!this.isSalesQuote(estimate)) {
+      throw new AppError("Service estimates stay on the service ticket workflow", 409);
+    }
+    if (estimate.status === "converted") {
+      throw new AppError("A converted quotation cannot be rejected", 409);
+    }
+    if (estimate.status === "rejected") {
+      throw new AppError("This quotation is already rejected", 409);
+    }
+    const note = input?.note?.trim();
+    const notes = note
+      ? [estimate.notes?.trim(), `Customer rejected: ${note}`].filter(Boolean).join("\n")
+      : estimate.notes;
+    const [updated] = await prisma.$transaction([
+      prisma.estimate.update({
+        where: { id: estimate.id },
+        data: { status: "rejected", notes },
+        include: { lineItems: true },
+      }),
+      prisma.salesEnquiry.updateMany({
+        where: { tenantId, convertedEstimateId: estimate.id },
+        data: { status: "lost" },
+      }),
+    ]);
+    return updated;
+  }
+
   async convertQuote(
     tenantId: string,
     estimateId: string,
@@ -435,8 +624,11 @@ export class SalesService {
       if (!this.isSalesQuote(estimate)) {
         throw new AppError("Service estimates stay on the service ticket workflow", 409);
       }
-      if (estimate.status !== "approved") {
-        throw new AppError("Approve the quotation before converting to a sales order", 409);
+      if (estimate.status === "rejected") {
+        throw new AppError("A rejected quotation cannot be converted", 409);
+      }
+      if (estimate.status === "converted") {
+        throw new AppError("This quotation is already a sales order", 409);
       }
       if (!estimate.customerId) throw new AppError("Quotation is missing a customer", 422);
 
@@ -507,6 +699,10 @@ export class SalesService {
         where: { id: estimate.id },
         data: { status: "converted", salespersonId: actor.userId },
       });
+      await tx.salesEnquiry.updateMany({
+        where: { tenantId, convertedEstimateId: estimate.id },
+        data: { status: "converted" },
+      });
 
       const rate = Number(input?.commissionRate ?? 0);
       if (rate > 0) {
@@ -540,7 +736,7 @@ export class SalesService {
 
       const reservations = order.reservations.filter((r) => r.status === "active" || r.status === "shortage");
       for (const reservation of reservations) {
-        const remaining = reservation.quantity - reservation.consumed;
+        const remaining = reservation.quantity - reservation.consumed - reservation.released;
         if (remaining <= 0) continue;
         const item = await tx.inventoryItem.findFirst({ where: { id: reservation.inventoryItemId, tenantId } });
         if (!item) throw new AppError("Inventory item not found", 404);
@@ -555,7 +751,10 @@ export class SalesService {
         });
         await tx.stockReservation.update({
           where: { id: reservation.id },
-          data: { consumed: { increment: remaining }, status: "consumed" },
+          data: {
+            consumed: { increment: remaining },
+            status: reservation.released > 0 ? "closed" : "consumed",
+          },
         });
         await tx.stockMovement.create({
           data: {
@@ -782,7 +981,14 @@ export class SalesService {
           discount: true,
           taxRate: true,
           lineTotal: true,
-          inventoryItem: { select: { itemClass: true, sku: true, name: true } },
+          inventoryItem: {
+            select: {
+              itemClass: true,
+              sku: true,
+              name: true,
+              images: primaryImageInclude,
+            },
+          },
           salesOrder: {
             select: {
               id: true,
@@ -818,25 +1024,31 @@ export class SalesService {
     const rangeCollected = invoices.reduce((sum, inv) => sum + num(inv.paidTotal), 0);
     const rangeOrdersCount = orders.length;
 
-    const byKey = (key: (line: (typeof lines)[number]) => string) => {
-      const map = new Map<string, { name: string; quantity: number; amount: number }>();
+    const byKey = (key: (line: (typeof lines)[number]) => string, withImage = false) => {
+      const map = new Map<string, { name: string; quantity: number; amount: number; imageFileId: string | null }>();
       for (const line of lines) {
         const name = key(line);
         if (!name) continue;
-        const current = map.get(name) ?? { name, quantity: 0, amount: 0 };
+        const current = map.get(name) ?? { name, quantity: 0, amount: 0, imageFileId: null };
         current.quantity += num(line.quantity);
         current.amount += num(line.lineTotal);
+        if (withImage && !current.imageFileId) {
+          current.imageFileId = line.inventoryItem?.images?.[0]?.fileId ?? null;
+        }
         map.set(name, current);
       }
       return [...map.values()].sort((a, b) => b.amount - a.amount);
     };
 
-    const productWise = byKey((l) => l.description);
-    const sparePartsSales = byKey((l) =>
-      l.type === "part" && (l.inventoryItem?.itemClass ?? "spare_part") === "spare_part" ? l.description : "",
+    const productWise = byKey((l) => l.description, true);
+    const sparePartsSales = byKey(
+      (l) =>
+        l.type === "part" && (l.inventoryItem?.itemClass ?? "spare_part") === "spare_part" ? l.description : "",
+      true,
     );
-    const consumablesSales = byKey((l) =>
-      l.type === "part" && l.inventoryItem?.itemClass === "consumable" ? l.description : "",
+    const consumablesSales = byKey(
+      (l) => (l.type === "part" && l.inventoryItem?.itemClass === "consumable" ? l.description : ""),
+      true,
     );
     const equipmentSales = byKey((l) =>
       l.type === "service" || l.type === "labor" || l.type === "package" ? l.description : "",
@@ -857,6 +1069,7 @@ export class SalesService {
       description: l.description,
       sku: l.sku || l.inventoryItem?.sku || null,
       itemClass: l.inventoryItem?.itemClass ?? (l.type === "service" ? "service" : null),
+      imageFileId: l.inventoryItem?.images?.[0]?.fileId ?? null,
       quantity: num(l.quantity),
       unitPrice: num(l.unitPrice),
       discount: num(l.discount),
@@ -911,6 +1124,7 @@ export class SalesService {
     priceCategory?: string | null,
   ) {
     if (!lines.length) throw new AppError("Add at least one sold item", 422);
+    const marginRule = await loadMarginRule(tenantId, tx);
     const resolved: Array<{
       inventoryItemId: string | null;
       catalogItemId: string | null;
@@ -930,12 +1144,16 @@ export class SalesService {
       let description = line.description.trim();
       let sku = line.sku?.trim() || null;
       let type = line.type?.trim() || (inventoryItemId ? "part" : catalogItemId ? "service" : "other");
+      let inventoryCost: number | null = null;
+      let catalogUnitPrice: number | null = null;
       if (inventoryItemId) {
         const item = await tx.inventoryItem.findFirst({ where: { id: inventoryItemId, tenantId } });
         if (!item) throw new AppError(`Inventory item not found for ${description || "line"}`, 404);
         if (!description) description = item.name;
         if (!sku) sku = item.sku;
         if (!line.type) type = "part";
+        inventoryCost = Number(item.unitCost);
+        catalogUnitPrice = Number(item.sellingPrice);
       }
       if (catalogItemId) {
         const catalog = await tx.serviceCatalogItem.findFirst({ where: { id: catalogItemId, tenantId } });
@@ -947,8 +1165,7 @@ export class SalesService {
       const quantity = Number(line.quantity);
       const unitPrice = money(applyPriceCategory(Number(line.unitPrice), priceCategory));
       if (inventoryItemId) {
-        const item = await tx.inventoryItem.findFirst({ where: { id: inventoryItemId, tenantId }, select: { unitCost: true } });
-        assertLineMargin(description, Number(unitPrice), item ? Number(item.unitCost) : null);
+        assertLineMargin(description, Number(unitPrice), inventoryCost, marginRule, catalogUnitPrice);
       }
       const discount = money(line.discount ?? 0);
       const taxRate = money(line.taxRate ?? 0);
@@ -1071,14 +1288,18 @@ export class SalesService {
         paidTotal: num(inv.paidTotal),
         balanceDue: num(inv.balanceDue),
       })),
-      lines: (order.lines ?? []).map((line) => ({
-        ...line,
-        quantity: num(line.quantity),
-        unitPrice: num(line.unitPrice),
-        discount: num(line.discount),
-        taxRate: num(line.taxRate),
-        lineTotal: num(line.lineTotal),
-      })),
+      lines: (order.lines ?? []).map((line) => {
+        const inventoryItem = line.inventoryItem as { images?: { fileId: string }[] } | null | undefined;
+        return {
+          ...line,
+          quantity: num(line.quantity),
+          unitPrice: num(line.unitPrice),
+          discount: num(line.discount),
+          taxRate: num(line.taxRate),
+          lineTotal: num(line.lineTotal),
+          imageFileId: inventoryItem?.images?.[0]?.fileId ?? null,
+        };
+      }),
     };
   }
 }

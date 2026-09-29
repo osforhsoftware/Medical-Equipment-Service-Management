@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Eye, FileText, LayoutGrid, List, Loader2, Search, Table2 } from "lucide-react";
+import { ActivityHistoryTabs, isInActivity, SalesPipelineTabs } from "@/components/sales/SalesPipelineTabs";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -26,6 +27,7 @@ export default function SalesQuotations() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const viewMode = parseViewMode(searchParams.get("view"));
+  const board = searchParams.get("board") === "history" ? "history" : "activity";
 
   const setViewMode = (next: QuoteViewMode) => {
     const params = new URLSearchParams(searchParams);
@@ -40,17 +42,24 @@ export default function SalesQuotations() {
   });
 
   const quotes = quotesQuery.data?.data ?? [];
+  const boardQuotes = useMemo(
+    () =>
+      board === "history"
+        ? quotes
+        : quotes.filter((quote) => isInActivity(quote.status, quote.updatedAt, ["converted", "rejected"])),
+    [quotes, board],
+  );
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return quotes;
-    return quotes.filter((row) =>
+    if (!q) return boardQuotes;
+    return boardQuotes.filter((row) =>
       [row.reference, row.customerName, row.equipmentName, row.status].some((value) =>
         String(value ?? "").toLowerCase().includes(q),
       ),
     );
-  }, [quotes, search]);
+  }, [boardQuotes, search]);
 
-  const openQuote = (quote: BackendEstimate) => navigate(`/app/estimates/${quote.id}`);
+  const openQuote = (quote: BackendEstimate) => navigate(`/app/sales/quotations/${quote.id}`);
 
   const tableColumns: Column<BackendEstimate>[] = [
     {
@@ -106,7 +115,7 @@ export default function SalesQuotations() {
             openQuote(quote);
           }}
         >
-          <Eye className="h-3.5 w-3.5" /> View
+          <Eye className="h-3.5 w-3.5" /> Preview
         </Button>
       ),
     },
@@ -117,8 +126,28 @@ export default function SalesQuotations() {
       <div className="space-y-5">
         <PageHeader
           title="Quotation"
-          description="Sales quotations from enquiries. Open a quote to review or convert it to a sales order."
+          description="Quotation activity is current work. History lists every quote, converted and unconverted."
         />
+
+        <div className="flex flex-wrap items-center gap-2">
+          <SalesPipelineTabs current="quotation" />
+          <ActivityHistoryTabs
+            value={board}
+            activityLabel="Quotation activity"
+            onChange={(next) => {
+              const params = new URLSearchParams(searchParams);
+              if (next === "activity") params.delete("board");
+              else params.set("board", "history");
+              setSearchParams(params, { replace: true });
+            }}
+          />
+        </div>
+
+        <p className="text-sm text-muted-foreground">
+          {board === "history"
+            ? "Every quotation is listed here, converted and unconverted."
+            : "Open quotes, plus sales converted in the last 2 days."}
+        </p>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full max-w-md">
@@ -176,11 +205,17 @@ export default function SalesQuotations() {
           <Card>
             <CardContent className="py-16 text-center">
               <FileText className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
-              <p className="font-medium text-muted-foreground">No sales quotations yet</p>
-              <p className="mt-1 text-sm text-muted-foreground">Create one from Enquiry.</p>
-              <Button className="mt-4" onClick={() => navigate("/app/sales-enquiries")}>
-                Open Enquiry
-              </Button>
+              <p className="font-medium text-muted-foreground">
+                {board === "history" ? "No quotation history yet" : "No quotation activity"}
+              </p>
+              {board === "activity" ? (
+                <>
+                  <p className="mt-1 text-sm text-muted-foreground">Create one from Enquiry.</p>
+                  <Button className="mt-4" onClick={() => navigate("/app/sales-enquiries")}>
+                    Open Enquiry
+                  </Button>
+                </>
+              ) : null}
             </CardContent>
           </Card>
         ) : viewMode === "table" ? (

@@ -27,10 +27,13 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { Role } from "@/data/types";
+import { SALES_DESK_ROLES } from "@/config/roles";
 
 export interface NavChild {
   label: string;
   to: string;
+  /** When set, hide this link unless the signed-in staff has one of these roles. */
+  roles?: readonly Role[];
 }
 
 export interface NavItem {
@@ -83,12 +86,12 @@ export const navItems: NavItem[] = [
     roles: ["admin", "sales", "billing", "inventory", "coordinator"],
     group: "Sales",
     children: [
-      { label: "Overview", to: "/app/sales" },
-      { label: "Enquiry", to: "/app/sales-enquiries" },
-      { label: "Quotation", to: "/app/sales/quotations" },
-      { label: "SO", to: "/app/sales?stage=orders" },
-      { label: "Delivery", to: "/app/sales?stage=delivery" },
-      { label: "Invoice", to: "/app/sales?stage=invoice" },
+      { label: "Overview", to: "/app/sales", roles: SALES_DESK_ROLES },
+      { label: "Enquiry", to: "/app/sales-enquiries", roles: ["admin", "sales", "coordinator", "billing"] },
+      { label: "Quotation", to: "/app/sales/quotations", roles: ["admin", "sales", "coordinator", "billing"] },
+      { label: "SO", to: "/app/sales?stage=orders", roles: SALES_DESK_ROLES },
+      { label: "Delivery", to: "/app/sales?stage=delivery", roles: SALES_DESK_ROLES },
+      { label: "Invoice", to: "/app/sales?stage=invoice", roles: SALES_DESK_ROLES },
     ],
   },
   { label: "Customers", to: "/app/customers", icon: Users, roles: ["admin", "coordinator", "estimator", "sales", "billing"], group: "Sales" },
@@ -126,9 +129,10 @@ export const navItems: NavItem[] = [
     children: [
       { label: "Overview", to: "/app/inventory" },
       { label: "Parts", to: "/app/inventory?stage=parts" },
-      { label: "Stock issue", to: "/app/stock-ledger" },
-      { label: "Locations", to: "/app/stock-transfers" },
-      { label: "Reorder", to: "/app/stock-purchase-requests" },
+      { label: "Reserve", to: "/app/stock-reservations", roles: ["admin", "inventory"] },
+      { label: "Stock issue", to: "/app/stock-ledger", roles: ["admin", "inventory"] },
+      { label: "Locations", to: "/app/stock-transfers", roles: ["admin", "inventory"] },
+      { label: "Reorder", to: "/app/stock-purchase-requests", roles: ["admin", "inventory", "engineer"] },
       { label: "Cost", to: "/app/inventory?stage=cost" },
     ],
   },
@@ -141,14 +145,14 @@ export const navItems: NavItem[] = [
     group: "Supply Chain",
     children: [
       { label: "Overview", to: "/app/rfqs" },
-      { label: "Purchase request", to: "/app/stock-purchase-requests?desk=purchase" },
+      { label: "Purchase request", to: "/app/stock-purchase-requests?desk=purchase", roles: ["admin", "inventory", "engineer"] },
       { label: "RFQ", to: "/app/rfqs?stage=rfq" },
       { label: "Supplier quote", to: "/app/rfqs?stage=quotes" },
-      { label: "PO", to: "/app/purchase-orders" },
-      { label: "Shipment", to: "/app/purchase-orders?stage=shipment" },
-      { label: "Customs", to: "/app/purchase-orders?stage=customs" },
-      { label: "GRN", to: "/app/purchase-orders?stage=grn" },
-      { label: "Stock", to: "/app/purchase-orders?stage=stock" },
+      { label: "PO", to: "/app/purchase-orders", roles: ["admin", "inventory"] },
+      { label: "Shipment", to: "/app/purchase-orders?stage=shipment", roles: ["admin", "inventory"] },
+      { label: "Customs", to: "/app/purchase-orders?stage=customs", roles: ["admin", "inventory"] },
+      { label: "GRN", to: "/app/purchase-orders?stage=grn", roles: ["admin", "inventory"] },
+      { label: "Stock", to: "/app/purchase-orders?stage=stock", roles: ["admin", "inventory"] },
     ],
   },
   { label: "Purchase Returns", to: "/app/purchase-returns", icon: Undo2, roles: ["admin", "inventory"], group: "Supply Chain" },
@@ -211,6 +215,7 @@ export function navModuleForPath(pathname: string): string | undefined {
   }
   if (
     pathname.startsWith("/app/inventory") ||
+    pathname.startsWith("/app/stock-reservations") ||
     pathname.startsWith("/app/stock-ledger") ||
     pathname.startsWith("/app/stock-transfers") ||
     pathname.startsWith("/app/stock-locations") ||

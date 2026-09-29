@@ -36,6 +36,7 @@ import SalesNew from "./pages/app/SalesNew.tsx";
 import SalesOrderDetail from "./pages/app/SalesOrderDetail.tsx";
 import SalesEnquiries from "./pages/app/SalesEnquiries.tsx";
 import SalesQuotations from "./pages/app/SalesQuotations.tsx";
+import SalesQuotationDetail from "./pages/app/SalesQuotationDetail.tsx";
 import Jobs from "./pages/app/Jobs.tsx";
 import JobDetail from "./pages/app/JobDetail.tsx";
 import Inventory from "./pages/app/Inventory.tsx";
@@ -48,6 +49,7 @@ import PurchaseOrderDetail from "./pages/app/PurchaseOrderDetail.tsx";
 import PurchaseReturns from "./pages/app/PurchaseReturns.tsx";
 import PurchaseReturnDetail from "./pages/app/PurchaseReturnDetail.tsx";
 
+import StockReservations from "./pages/app/StockReservations.tsx";
 import StockLedger from "./pages/app/StockLedger.tsx";
 import StockLocations from "./pages/app/StockLocations.tsx";
 import Billing from "./pages/app/BillingProfessional.tsx";
@@ -116,6 +118,7 @@ const App = () => (
               <Route path="sales/new" element={<ModuleGuard module="Sales"><SalesNew /></ModuleGuard>} />
               <Route path="sales/orders/:id" element={<ModuleGuard module="Sales"><SalesOrderDetail /></ModuleGuard>} />
               <Route path="sales/quotations" element={<ModuleGuard module="Sales" orModules={["Sales Enquiries"]}><SalesQuotations /></ModuleGuard>} />
+              <Route path="sales/quotations/:id" element={<ModuleGuard module="Sales" orModules={["Sales Enquiries"]}><SalesQuotationDetail /></ModuleGuard>} />
               <Route path="sales-enquiries" element={<ModuleGuard module="Sales" orModules={["Sales Enquiries"]}><SalesEnquiries /></ModuleGuard>} />
               <Route path="sales/enquiry" element={<Navigate to="/app/sales-enquiries" replace />} />
               <Route path="equipment" element={<ModuleGuard module="Equipment"><Equipment /></ModuleGuard>} />
@@ -150,6 +153,7 @@ const App = () => (
               <Route path="purchase-returns" element={<ModuleGuard module="Purchase Returns"><PurchaseReturns /></ModuleGuard>} />
               <Route path="purchase-returns/:id" element={<ModuleGuard module="Purchase Returns"><PurchaseReturnDetail /></ModuleGuard>} />
 
+              <Route path="stock-reservations" element={<ModuleGuard module="Inventory" orModules={["Stock Reservations"]}><StockReservations /></ModuleGuard>} />
               <Route path="stock-ledger" element={<ModuleGuard module="Inventory" orModules={["Stock Ledger"]}><StockLedger /></ModuleGuard>} />
               <Route path="stock-transfers" element={<ModuleGuard module="Inventory" orModules={["Stock Locations", "Stock Transfers"]}><StockLocations /></ModuleGuard>} />
               <Route path="stock-locations" element={<Navigate to="/app/stock-transfers" replace />} />

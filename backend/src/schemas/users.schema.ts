@@ -50,7 +50,7 @@ export const createUserSchema = z
     isActive: z.boolean().optional().default(true),
     branchId: z.string().optional(),
     avatarColor: z.string().optional(),
-    customerId: z.string().optional(),
+    customerId: z.string().nullish(),
     permissions: userPermissionsSchema,
   })
   .superRefine((data, ctx) => {

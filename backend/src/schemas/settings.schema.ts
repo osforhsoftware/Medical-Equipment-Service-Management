@@ -11,6 +11,8 @@ export const updateSettingsSchema = z.object({
   companyPhone: z.string().max(40).nullable().optional(),
   companyWebsite: z.string().max(200).nullable().optional(),
   defaultTaxRate: z.coerce.number().min(0).max(100).optional(),
+  marginMode: z.enum(["on", "fixed", "off"]).optional(),
+  minMarginPct: z.coerce.number().min(0).max(100).optional(),
   amcRenewalReminders: z.boolean().optional(),
   lowStockAlerts: z.boolean().optional(),
   autoReserveOnApproval: z.boolean().optional(),

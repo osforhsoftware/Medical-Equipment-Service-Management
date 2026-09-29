@@ -39,3 +39,38 @@ export function userCanAccessPath(
   const fallbackRoles = navItems.find((item) => item.label === module)?.roles;
   return userCanAccessModule(user, module, rbacMatrix, fallbackRoles);
 }
+
+/** Roles required to open a sidebar child or in-page tab. Undefined means the parent module is enough. */
+export function rolesRequiredForTarget(to: string): readonly Role[] | undefined {
+  const [path, query = ""] = to.split("?");
+  const matches: { roles?: readonly Role[] }[] = [];
+  for (const item of navItems) {
+    for (const child of item.children ?? []) {
+      const [childPath, childQuery = ""] = child.to.split("?");
+      if (childPath !== path) continue;
+      if (query) {
+        if (childQuery === query) matches.push(child);
+      } else if (!childQuery) {
+        matches.push(child);
+      }
+    }
+  }
+  return matches.find((child) => child.roles?.length)?.roles;
+}
+
+/** True when this staff member is allowed to open the link (page role list, when one exists). */
+export function userCanOpenNavTarget(user: AppUser, to: string): boolean {
+  const roles = rolesRequiredForTarget(to);
+  if (!roles?.length) return true;
+  return userHasAnyRole(user, roles);
+}
+
+/** Module access plus any stricter page role list (sidebar children, stage tabs, shortcuts). */
+export function userCanOpenPage(
+  user: AppUser,
+  to: string,
+  rbacMatrix: Record<string, Role[]>,
+): boolean {
+  if (!userCanOpenNavTarget(user, to)) return false;
+  return userCanAccessPath(user, to.split("?")[0], rbacMatrix);
+}

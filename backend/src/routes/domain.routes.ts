@@ -32,6 +32,7 @@ import {
   qrScanSchema,
   receivePurchaseOrderSchema,
   referralSchema,
+  createReservationSchema,
   reservationActionSchema,
   roleAssignmentSchema,
   roleSchema,
@@ -84,6 +85,7 @@ router.patch("/job-extras/:id", requireRole("admin", "coordinator", "engineer"),
 router.delete("/job-extras/:id", requireRole("admin", "coordinator", "engineer"), c.deleteJobExtra);
 
 router.get("/stock/reservations", inventory, c.reservations);
+router.post("/stock/reservations", inventory, validate(createReservationSchema), c.reservationCreate);
 router.post("/stock/reservations/:id/action", inventory, validate(reservationActionSchema), c.reservationAction);
 router.get("/stock/movements", inventory, c.movements);
 router.get("/branches", inventory, c.branches);

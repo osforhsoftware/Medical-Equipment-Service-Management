@@ -55,7 +55,7 @@ export class UsersService {
       isActive?: boolean;
       branchId?: string;
       avatarColor?: string;
-      customerId?: string;
+      customerId?: string | null;
       permissions?: unknown;
     },
   ) {
@@ -93,7 +93,7 @@ export class UsersService {
       isActive: data.isActive ?? true,
       branchId: data.branchId,
       avatarColor: data.avatarColor,
-      customerId: data.customerId,
+      customerId: data.customerId || undefined,
       permissions,
     });
 

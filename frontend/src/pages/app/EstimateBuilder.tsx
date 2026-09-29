@@ -9,7 +9,7 @@ import { EstimateWorkflowSteps } from "@/components/estimates/EstimateWorkflowSt
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { CreditExposureBanner } from "@/components/shared/CreditExposureBanner";
 import { creditBlocksSave, useCustomerCreditExposure } from "@/hooks/useCustomerCreditExposure";
-import { firstPositivePrice } from "@/components/shared/InventoryHelpers";
+import { firstPositivePrice, lineMarginMinimum } from "@/components/shared/InventoryHelpers";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -249,7 +249,7 @@ export default function EstimateBuilder() {
   const creditBlocked = creditBlocksSave(credit, totals.total);
   const marginAnalysis = useMemo(() => {
     const belowCost: { name: string; unitPrice: number; unitCost: number }[] = [];
-    const lowMargin: { name: string; marginPct: number }[] = [];
+    const lowMargin: { name: string; marginPct: number; minimum: number }[] = [];
 
     lines.forEach((line) => {
       if (!line.inventoryItemId) return;
@@ -260,15 +260,26 @@ export default function EstimateBuilder() {
       if (price < cost) {
         belowCost.push({ name: line.description || item.name, unitPrice: price, unitCost: cost });
       } else if (price > 0 && cost > 0) {
+        const minimum = lineMarginMinimum({
+          mode: settings?.marginMode,
+          minMarginPct: settings?.minMarginPct,
+          unitCost: cost,
+          catalogUnitPrice: Number(item.sellingPrice ?? 0),
+        });
+        if (minimum == null) return;
         const margin = ((price - cost) / price) * 100;
-        if (margin < 20) {
-          lowMargin.push({ name: line.description || item.name, marginPct: Math.round(margin) });
+        if (margin < minimum) {
+          lowMargin.push({
+            name: line.description || item.name,
+            marginPct: Math.round(margin),
+            minimum: Math.round(minimum * 10) / 10,
+          });
         }
       }
     });
 
     return { belowCost, lowMargin };
-  }, [lines, inventory]);
+  }, [lines, inventory, settings?.marginMode, settings?.minMarginPct]);
   const marginBlocked = marginAnalysis.belowCost.length > 0 || marginAnalysis.lowMargin.length > 0;
 
   const formValues = useMemo(() => ({ validUntil, lines }), [validUntil, lines]);
@@ -479,13 +490,13 @@ export default function EstimateBuilder() {
         {marginAnalysis.lowMargin.length > 0 && marginAnalysis.belowCost.length === 0 && (
           <Alert className="mt-3 border-amber-500/50 bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200 [&>svg]:text-amber-600">
             <TrendingDown className="h-4 w-4" />
-            <AlertTitle className="font-semibold">Low Margin Alert (&lt; 20%)</AlertTitle>
+            <AlertTitle className="font-semibold">Low margin alert</AlertTitle>
             <AlertDescription>
-              The following item(s) have profit margin under 20%:
+              The following item(s) are under the minimum margin:
               <ul className="mt-1 list-disc pl-5 text-xs">
                 {marginAnalysis.lowMargin.map((item, idx) => (
                   <li key={idx}>
-                    <strong>{item.name}</strong>: Margin {item.marginPct}%
+                    <strong>{item.name}</strong>: Margin {item.marginPct}% (minimum {item.minimum}%)
                   </li>
                 ))}
               </ul>

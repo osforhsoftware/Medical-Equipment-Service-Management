@@ -48,10 +48,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
+import { userCanOpenPage } from "@/lib/userRoles";
 import { api, type BackendInventoryItem, type BackendSupplier } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { formatInventoryItemClass } from "@/lib/inventoryItemClass";
 import { toast } from "@/lib/toast";
+
+const QUOTE_CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "CNY"] as const;
+const INCOTERMS = ["EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAP", "DPU", "DDP"] as const;
 
 export interface RFQLine {
   description: string;
@@ -59,10 +64,18 @@ export interface RFQLine {
   unitCostEstimate?: number;
   /** UI-only: optional inventory link used to prefill description / estimate */
   inventoryItemId?: string;
+  moq?: number | "";
+  /** Lead time in days */
+  deliveryDays?: number | "";
 }
 
 function blankRfqLine(): RFQLine {
-  return { description: "", quantity: 1, unitCostEstimate: 0, inventoryItemId: "" };
+  return { description: "", quantity: 1, unitCostEstimate: 0, inventoryItemId: "", moq: "", deliveryDays: "" };
+}
+
+function dateInputValue(value?: string | null) {
+  if (!value) return "";
+  return value.slice(0, 10);
 }
 
 export interface SupplierQuoteLine {
@@ -99,6 +112,13 @@ export interface SupplierRFQData {
   status: "draft" | "sent" | "quoted" | "closed" | "cancelled";
   notes?: string | null;
   dueDate?: string | null;
+  currency?: string | null;
+  warranty?: string | null;
+  incoterm?: string | null;
+  shippingTerms?: string | null;
+  paymentTerms?: string | null;
+  countryOfOrigin?: string | null;
+  validUntil?: string | null;
   lines: RFQLine[];
   createdBy: string;
   createdAt: string;
@@ -106,7 +126,8 @@ export interface SupplierRFQData {
 }
 
 export default function RFQs() {
-  const { hasRole } = useAuth();
+  const { user, hasRole } = useAuth();
+  const { rbacMatrix } = useSettings();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -129,6 +150,13 @@ export default function RFQs() {
     supplierName: "",
     dueDate: "",
     notes: "",
+    currency: "INR",
+    warranty: "",
+    incoterm: "",
+    shippingTerms: "",
+    paymentTerms: "",
+    countryOfOrigin: "",
+    validUntil: "",
     lines: [blankRfqLine()],
   });
 
@@ -196,6 +224,13 @@ export default function RFQs() {
       supplierName: "",
       dueDate: "",
       notes: "",
+      currency: "INR",
+      warranty: "",
+      incoterm: "",
+      shippingTerms: "",
+      paymentTerms: "",
+      countryOfOrigin: "",
+      validUntil: "",
       lines: [blankRfqLine()],
     });
   };
@@ -245,11 +280,20 @@ export default function RFQs() {
         supplierName: rfqForm.supplierName,
         dueDate: rfqForm.dueDate || null,
         notes: rfqForm.notes || null,
-        lines: rfqForm.lines.map(({ description, quantity, unitCostEstimate, inventoryItemId }) => ({
+        currency: rfqForm.currency.trim() || null,
+        warranty: rfqForm.warranty.trim() || null,
+        incoterm: rfqForm.incoterm.trim() || null,
+        shippingTerms: rfqForm.shippingTerms.trim() || null,
+        paymentTerms: rfqForm.paymentTerms.trim() || null,
+        countryOfOrigin: rfqForm.countryOfOrigin.trim() || null,
+        validUntil: rfqForm.validUntil || null,
+        lines: rfqForm.lines.map(({ description, quantity, unitCostEstimate, inventoryItemId, moq, deliveryDays }) => ({
           description: description.trim(),
           quantity: Number(quantity) || 1,
           unitCostEstimate: Number(unitCostEstimate) || 0,
           inventoryItemId: inventoryItemId || undefined,
+          moq: moq === "" || moq == null ? null : Number(moq),
+          deliveryDays: deliveryDays === "" || deliveryDays == null ? null : Number(deliveryDays),
         })),
       });
       toast.success("RFQ created successfully");
@@ -268,18 +312,18 @@ export default function RFQs() {
       description: l.description,
       quantity: l.quantity,
       unitPrice: l.unitCostEstimate || 0,
-      moq: l.quantity || 1,
-      deliveryDays: 0,
+      moq: Number(l.moq) > 0 ? Number(l.moq) : l.quantity || 1,
+      deliveryDays: l.deliveryDays === "" || l.deliveryDays == null ? 0 : Number(l.deliveryDays),
       notes: "",
     }));
     setQuoteForm({
-      currency: "INR",
-      warranty: "",
-      incoterm: "",
-      shippingTerms: "",
-      paymentTerms: "",
-      countryOfOrigin: "",
-      validUntil: "",
+      currency: rfq.currency || "INR",
+      warranty: rfq.warranty || "",
+      incoterm: rfq.incoterm || "",
+      shippingTerms: rfq.shippingTerms || "",
+      paymentTerms: rfq.paymentTerms || "",
+      countryOfOrigin: rfq.countryOfOrigin || "",
+      validUntil: dateInputValue(rfq.validUntil),
       notes: "",
       lines: initialLines,
     });
@@ -441,19 +485,33 @@ export default function RFQs() {
               {canManage ? (
                 <ModuleQuickAction title="New RFQ" hint="Request supplier pricing" icon={Plus} onClick={() => setCreateOpen(true)} />
               ) : null}
-              <ModuleQuickAction title="Purchase requests" hint="Reorder / parts need" icon={PackageCheck} to="/app/stock-purchase-requests?desk=purchase" />
+              {user && userCanOpenPage(user, "/app/stock-purchase-requests?desk=purchase", rbacMatrix) ? (
+                <ModuleQuickAction title="Purchase requests" hint="Reorder / parts need" icon={PackageCheck} to="/app/stock-purchase-requests?desk=purchase" />
+              ) : null}
               <ModuleQuickAction title="RFQ list" hint={`${stats.total} request(s)`} icon={FileText} to="/app/rfqs?stage=rfq" />
               <ModuleQuickAction title="Supplier quotes" hint="Compare offers" icon={Truck} to="/app/rfqs?stage=quotes" />
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <ModuleQuickAction title="Purchase orders" hint="Ordered qty · price · ETA" icon={ShoppingCart} to="/app/purchase-orders" />
-              <ModuleQuickAction title="Shipment" hint="Freight · courier · tracking" icon={Truck} to="/app/purchase-orders?stage=shipment" />
-              <ModuleQuickAction title="Customs" hint="Duty & import costs" icon={Landmark} to="/app/purchase-orders?stage=customs" />
-              <ModuleQuickAction title="GRN → Stock" hint="Receive & value inventory" icon={PackageCheck} to="/app/purchase-orders?stage=grn" />
+              {user && userCanOpenPage(user, "/app/purchase-orders", rbacMatrix) ? (
+                <ModuleQuickAction title="Purchase orders" hint="Ordered qty · price · ETA" icon={ShoppingCart} to="/app/purchase-orders" />
+              ) : null}
+              {user && userCanOpenPage(user, "/app/purchase-orders?stage=shipment", rbacMatrix) ? (
+                <ModuleQuickAction title="Shipment" hint="Freight · courier · tracking" icon={Truck} to="/app/purchase-orders?stage=shipment" />
+              ) : null}
+              {user && userCanOpenPage(user, "/app/purchase-orders?stage=customs", rbacMatrix) ? (
+                <ModuleQuickAction title="Customs" hint="Duty & import costs" icon={Landmark} to="/app/purchase-orders?stage=customs" />
+              ) : null}
+              {user && userCanOpenPage(user, "/app/purchase-orders?stage=grn", rbacMatrix) ? (
+                <ModuleQuickAction title="GRN → Stock" hint="Receive & value inventory" icon={PackageCheck} to="/app/purchase-orders?stage=grn" />
+              ) : null}
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <ModuleQuickAction title="Stock (received)" hint="Landed-cost valued POs" icon={PackageCheck} to="/app/purchase-orders?stage=stock" />
-              <ModuleQuickAction title="Purchase returns" hint="Return to supplier" icon={Undo2} to="/app/purchase-returns" />
+              {user && userCanOpenPage(user, "/app/purchase-orders?stage=stock", rbacMatrix) ? (
+                <ModuleQuickAction title="Stock (received)" hint="Landed-cost valued POs" icon={PackageCheck} to="/app/purchase-orders?stage=stock" />
+              ) : null}
+              {user && userCanOpenPage(user, "/app/purchase-returns", rbacMatrix) ? (
+                <ModuleQuickAction title="Purchase returns" hint="Return to supplier" icon={Undo2} to="/app/purchase-returns" />
+              ) : null}
             </div>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
@@ -610,7 +668,9 @@ export default function RFQs() {
                               <tr>
                                 <th className="p-2">Description</th>
                                 <th className="p-2 text-right">Qty</th>
-                                <th className="p-2 text-right">Est. Unit Cost</th>
+                                <th className="p-2 text-right">Unit price</th>
+                                <th className="p-2 text-right">MOQ</th>
+                                <th className="p-2 text-right">Lead time</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -619,10 +679,25 @@ export default function RFQs() {
                                   <td className="p-2">{l.description}</td>
                                   <td className="p-2 text-right tabular-nums">{l.quantity}</td>
                                   <td className="p-2 text-right tabular-nums">{l.unitCostEstimate ? formatCurrency(l.unitCostEstimate) : "—"}</td>
+                                  <td className="p-2 text-right tabular-nums">{l.moq ? l.moq : "—"}</td>
+                                  <td className="p-2 text-right tabular-nums">{l.deliveryDays !== "" && l.deliveryDays != null ? `${l.deliveryDays}d` : "—"}</td>
                                 </tr>
                               ))}
                             </tbody>
                           </table>
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Ask suppliers for</p>
+                        <div className="grid gap-1 text-xs sm:grid-cols-2">
+                          <span><span className="text-muted-foreground">Currency:</span> {rfq.currency || "—"}</span>
+                          <span><span className="text-muted-foreground">Validity of quotation:</span> {rfq.validUntil ? formatDate(rfq.validUntil) : "—"}</span>
+                          <span><span className="text-muted-foreground">Incoterm:</span> {rfq.incoterm || "—"}</span>
+                          <span><span className="text-muted-foreground">Country of origin:</span> {rfq.countryOfOrigin || "—"}</span>
+                          <span><span className="text-muted-foreground">Warranty:</span> {rfq.warranty || "—"}</span>
+                          <span><span className="text-muted-foreground">Payment terms:</span> {rfq.paymentTerms || "—"}</span>
+                          <span className="sm:col-span-2"><span className="text-muted-foreground">Shipping terms:</span> {rfq.shippingTerms || "—"}</span>
                         </div>
                       </div>
 
@@ -839,8 +914,8 @@ export default function RFQs() {
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
-                    <div className="grid gap-2 sm:grid-cols-[1fr_5.5rem_7.5rem]">
-                      <div className="space-y-1">
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="space-y-1 sm:col-span-2 lg:col-span-4">
                         <Label className="text-xs text-muted-foreground">Description</Label>
                         <Input
                           placeholder="Item description"
@@ -872,7 +947,7 @@ export default function RFQs() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Est. Unit Cost</Label>
+                        <Label className="text-xs text-muted-foreground">Unit price</Label>
                         <Input
                           type="number"
                           min={0}
@@ -883,6 +958,40 @@ export default function RFQs() {
                             updateLines((current) =>
                               current.map((row, i) =>
                                 i === idx ? { ...row, unitCostEstimate: val } : row,
+                              ),
+                            );
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">MOQ</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          placeholder="1"
+                          value={line.moq ?? ""}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            updateLines((current) =>
+                              current.map((row, i) =>
+                                i === idx ? { ...row, moq: raw === "" ? "" : Number(raw) } : row,
+                              ),
+                            );
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Lead time (days)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          placeholder="0"
+                          value={line.deliveryDays ?? ""}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            updateLines((current) =>
+                              current.map((row, i) =>
+                                i === idx ? { ...row, deliveryDays: raw === "" ? "" : Number(raw) } : row,
                               ),
                             );
                           }}
@@ -902,10 +1011,88 @@ export default function RFQs() {
                 </div>
               </div>
 
+              <div className="space-y-3">
+                <Label>Ask suppliers for</Label>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Currency</Label>
+                    <Select
+                      value={rfqForm.currency}
+                      onValueChange={(value) => setRfqForm((p) => ({ ...p, currency: value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select currency" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {QUOTE_CURRENCIES.map((code) => (
+                          <SelectItem key={code} value={code}>{code}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Validity of quotation</Label>
+                    <Input
+                      type="date"
+                      value={rfqForm.validUntil}
+                      onChange={(e) => setRfqForm((p) => ({ ...p, validUntil: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Incoterm</Label>
+                    <Select
+                      value={rfqForm.incoterm || undefined}
+                      onValueChange={(value) => setRfqForm((p) => ({ ...p, incoterm: value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select Incoterm" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {INCOTERMS.map((term) => (
+                          <SelectItem key={term} value={term}>{term}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Country of origin</Label>
+                    <Input
+                      placeholder="e.g. India, China, Germany"
+                      value={rfqForm.countryOfOrigin}
+                      onChange={(e) => setRfqForm((p) => ({ ...p, countryOfOrigin: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Warranty</Label>
+                    <Input
+                      placeholder="e.g. 12 months from delivery"
+                      value={rfqForm.warranty}
+                      onChange={(e) => setRfqForm((p) => ({ ...p, warranty: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Payment terms</Label>
+                    <Input
+                      placeholder="e.g. Net 30, 50% advance"
+                      value={rfqForm.paymentTerms}
+                      onChange={(e) => setRfqForm((p) => ({ ...p, paymentTerms: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label className="text-xs text-muted-foreground">Shipping terms</Label>
+                    <Input
+                      placeholder="e.g. Door delivery, freight collect"
+                      value={rfqForm.shippingTerms}
+                      onChange={(e) => setRfqForm((p) => ({ ...p, shippingTerms: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-1">
                 <Label>Notes / Specifications</Label>
                 <Textarea
-                  placeholder="Payment terms, delivery requirements..."
+                  placeholder="Other requirements for the supplier..."
                   value={rfqForm.notes}
                   onChange={(e) => setRfqForm((p) => ({ ...p, notes: e.target.value }))}
                 />
@@ -935,7 +1122,9 @@ export default function RFQs() {
             </DialogHeader>
 
             <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-3">
+                <Label>Ask suppliers for</Label>
+                <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
                   <Label>
                     Currency <RequiredMark />
@@ -948,12 +1137,9 @@ export default function RFQs() {
                       <SelectValue placeholder="Select currency" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="INR">INR</SelectItem>
-                      <SelectItem value="USD">USD</SelectItem>
-                      <SelectItem value="EUR">EUR</SelectItem>
-                      <SelectItem value="GBP">GBP</SelectItem>
-                      <SelectItem value="AED">AED</SelectItem>
-                      <SelectItem value="CNY">CNY</SelectItem>
+                      {QUOTE_CURRENCIES.map((code) => (
+                        <SelectItem key={code} value={code}>{code}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -979,16 +1165,9 @@ export default function RFQs() {
                       <SelectValue placeholder="Select Incoterm" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="EXW">EXW</SelectItem>
-                      <SelectItem value="FCA">FCA</SelectItem>
-                      <SelectItem value="FOB">FOB</SelectItem>
-                      <SelectItem value="CFR">CFR</SelectItem>
-                      <SelectItem value="CIF">CIF</SelectItem>
-                      <SelectItem value="CPT">CPT</SelectItem>
-                      <SelectItem value="CIP">CIP</SelectItem>
-                      <SelectItem value="DAP">DAP</SelectItem>
-                      <SelectItem value="DPU">DPU</SelectItem>
-                      <SelectItem value="DDP">DDP</SelectItem>
+                      {INCOTERMS.map((term) => (
+                        <SelectItem key={term} value={term}>{term}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1108,6 +1287,7 @@ export default function RFQs() {
                   onChange={(e) => setQuoteForm((p) => ({ ...p, notes: e.target.value }))}
                 />
               </div>
+            </div>
             </div>
 
             <DialogFooter>

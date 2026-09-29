@@ -1,11 +1,27 @@
 import { z } from "zod";
 
+const optionalText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .optional()
+    .nullable()
+    .transform((value) => (value ? value : null));
+
+const optionalNumber = z.preprocess(
+  (value) => (value === "" || value === undefined ? null : value),
+  z.union([z.null(), z.coerce.number()]),
+);
+
 export const rfqLineSchema = z.object({
   description: z.string().trim().min(1, "Item description required"),
   quantity: z.coerce.number().positive("Quantity must be positive"),
   unitCostEstimate: z.coerce.number().min(0).optional().default(0),
   inventoryItemId: z.string().cuid().optional().nullable(),
   sku: z.string().trim().max(100).optional().nullable(),
+  moq: optionalNumber.refine((value) => value == null || value > 0, "MOQ must be at least 1"),
+  deliveryDays: optionalNumber.refine((value) => value == null || value >= 0, "Lead time cannot be negative"),
 });
 
 export const createRfqSchema = z.object({
@@ -13,6 +29,13 @@ export const createRfqSchema = z.object({
   supplierName: z.string().trim().min(1, "Supplier name required"),
   dueDate: z.string().optional().nullable(),
   notes: z.string().max(5000).optional().nullable(),
+  currency: optionalText(10),
+  warranty: optionalText(500),
+  incoterm: optionalText(100),
+  shippingTerms: optionalText(500),
+  paymentTerms: optionalText(500),
+  countryOfOrigin: optionalText(100),
+  validUntil: optionalText(40),
   lines: z.array(rfqLineSchema).min(1, "At least one item line is required"),
 });
 

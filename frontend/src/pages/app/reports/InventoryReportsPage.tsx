@@ -5,6 +5,7 @@ import { AlertTriangle, Boxes, ShoppingCart, Wrench } from "lucide-react";
 import { ReportCategoryLayout } from "@/components/reports/ReportCategoryLayout";
 import { ReportSection } from "@/components/reports/ReportSection";
 import { ReportTable } from "@/components/reports/ReportTable";
+import { ProductThumb, productImageFileId } from "@/components/shared/ProductThumb";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import {
   Select,
@@ -259,7 +260,16 @@ export default function InventoryReportsPage() {
             onRowClick={(item) => navigate(`/app/inventory/${item.id}`)}
             columns={[
               { key: "sku", header: "SKU", render: (item) => item.sku },
-              { key: "name", header: "Item", render: (item) => item.name },
+              {
+                key: "name",
+                header: "Item",
+                render: (item) => (
+                  <span className="flex min-w-0 items-center gap-2">
+                    <ProductThumb fileId={productImageFileId(item)} name={item.name} size="xs" />
+                    <span className="truncate">{item.name}</span>
+                  </span>
+                ),
+              },
               { key: "qty", header: "On hand", className: "text-right", render: (item) => item.inStock },
               { key: "cost", header: "Unit cost", className: "text-right", render: (item) => formatCurrency(asNumber(item.unitCost)) },
               { key: "value", header: "Value", className: "text-right", render: (item) => formatCurrency(item.value) },
@@ -380,7 +390,16 @@ export default function InventoryReportsPage() {
             onRowClick={(item) => navigate(`/app/inventory/${item.id}`)}
             columns={[
               { key: "sku", header: "SKU", render: (item) => item.sku },
-              { key: "name", header: "Item", render: (item) => item.name },
+              {
+                key: "name",
+                header: "Item",
+                render: (item) => (
+                  <span className="flex min-w-0 items-center gap-2">
+                    <ProductThumb fileId={productImageFileId(item)} name={item.name} size="xs" />
+                    <span className="truncate">{item.name}</span>
+                  </span>
+                ),
+              },
               { key: "stock", header: "On hand", className: "text-right", render: (item) => item.inStock },
               { key: "reorder", header: "Reorder at", className: "text-right", render: (item) => item.reorderLevel },
               { key: "supplier", header: "Supplier", render: (item) => item.supplier || "—" },

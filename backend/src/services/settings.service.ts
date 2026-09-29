@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
 import { ensureSystemRoles, findActiveStaffWithRole } from "@/utils/userRoles";
+import { APPROVED_IMAGE_TYPE_MESSAGE } from "@/services/fileStorage.service";
 
 type UpdateSettingsData = {
   companyName?: string;
@@ -13,6 +14,8 @@ type UpdateSettingsData = {
   companyPhone?: string | null;
   companyWebsite?: string | null;
   defaultTaxRate?: number;
+  marginMode?: "on" | "fixed" | "off";
+  minMarginPct?: number;
   amcRenewalReminders?: boolean;
   lowStockAlerts?: boolean;
   autoReserveOnApproval?: boolean;
@@ -112,6 +115,8 @@ export class SettingsService {
       companyPhone: settings.companyPhone,
       companyWebsite: settings.companyWebsite,
       defaultTaxRate: Number(settings.defaultTaxRate),
+      marginMode: settings.marginMode === "on" || settings.marginMode === "off" ? settings.marginMode : "fixed",
+      minMarginPct: Number(settings.minMarginPct),
       amcRenewalReminders: settings.amcRenewalReminders,
       lowStockAlerts: settings.lowStockAlerts,
       autoReserveOnApproval: settings.autoReserveOnApproval,
@@ -142,13 +147,12 @@ export class SettingsService {
         updatePayload.logoFile = { disconnect: true };
       } else {
         const logo = await prisma.storedFile.findFirst({
-          where: {
-            id: data.logoFileId,
-            tenantId,
-            mimeType: { in: ["image/jpeg", "image/png", "image/webp"] },
-          },
+          where: { id: data.logoFileId, tenantId },
         });
         if (!logo) throw new AppError("Uploaded logo image not found", 404);
+        if (!["image/jpeg", "image/png", "image/webp"].includes(logo.mimeType)) {
+          throw new AppError(APPROVED_IMAGE_TYPE_MESSAGE, 422);
+        }
         updatePayload.logoFile = { connect: { id: logo.id } };
       }
     }
@@ -157,6 +161,8 @@ export class SettingsService {
     if (data.companyPhone !== undefined) updatePayload.companyPhone = data.companyPhone;
     if (data.companyWebsite !== undefined) updatePayload.companyWebsite = data.companyWebsite;
     if (data.defaultTaxRate !== undefined) updatePayload.defaultTaxRate = data.defaultTaxRate;
+    if (data.marginMode !== undefined) updatePayload.marginMode = data.marginMode;
+    if (data.minMarginPct !== undefined) updatePayload.minMarginPct = data.minMarginPct;
     if (data.amcRenewalReminders !== undefined) updatePayload.amcRenewalReminders = data.amcRenewalReminders;
     if (data.lowStockAlerts !== undefined) updatePayload.lowStockAlerts = data.lowStockAlerts;
     if (data.autoReserveOnApproval !== undefined) updatePayload.autoReserveOnApproval = data.autoReserveOnApproval;

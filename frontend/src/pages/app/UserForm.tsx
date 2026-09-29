@@ -385,6 +385,7 @@ export default function UserFormPage() {
         await api.createUser({
           ...payload,
           phone: form.phone || undefined,
+          customerId: isCustomerOnly ? form.customerId || undefined : undefined,
           password: form.password,
         });
         toast.success("User added successfully", {

@@ -49,6 +49,24 @@ export class SalesController {
     }
   }
 
+  async updateQuote(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await salesService.updateQuote(req.tenantId!, req.params.estimateId, actor(req), req.body);
+      res.json(success("Sales quotation updated", data));
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async rejectQuote(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await salesService.rejectQuote(req.tenantId!, req.params.estimateId, actor(req), req.body);
+      res.json(success("Sales quotation rejected", data));
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async convertQuote(req: Request, res: Response, next: NextFunction) {
     try {
       const data = await salesService.convertQuote(req.tenantId!, req.params.estimateId, actor(req), req.body);

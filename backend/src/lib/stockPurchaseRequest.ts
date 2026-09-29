@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { requestableQuantity } from "@/lib/inventoryItemClass";
 
 type Db = Prisma.TransactionClient | PrismaClient;
 
@@ -132,10 +133,12 @@ export async function syncJobExtraStockRequest(
       status: { in: ["pending", "approved"] },
     },
   });
-  const quantity = extras.reduce(
+  const requested = extras.reduce(
     (sum, extra) => sum + Math.max(0, Math.ceil(Number(extra.quantity) || 0)),
     0,
   );
+  // Buy only what cannot be covered without touching reserved stock or the reorder minimum.
+  const quantity = Math.max(0, requested - requestableQuantity(item));
 
   const { request, created } = await upsertOpenStockPurchaseRequest(db, {
     tenantId: params.tenantId,
@@ -146,7 +149,7 @@ export async function syncJobExtraStockRequest(
     jobId: params.jobId,
     note:
       params.note?.trim() ||
-      `Requested ${quantity} × ${item.name} for ${params.jobReference ?? "job"}`,
+      `Purchase ${quantity} × ${item.name} for ${params.jobReference ?? "job"} (minimum stock and reserved stock held back)`,
   });
 
   if (created && request) {

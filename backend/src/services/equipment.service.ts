@@ -4,6 +4,7 @@ import { taxonomyService } from "@/services/taxonomy.service";
 import { AppError } from "@/middleware/errorHandler";
 import { prisma } from "@/db/prisma";
 import { getDefaultBranchId } from "@/utils/defaultBranch";
+import { equipmentTicketLabel, syncEquipmentNameSnapshots } from "@/lib/equipmentLabel";
 import type { PaginatedResult } from "@/types";
 import type { Equipment } from "@prisma/client";
 
@@ -229,6 +230,13 @@ export class EquipmentService {
     }
 
     const updated = await equipmentRepository.update(id, tenantId, next);
+
+    if (
+      equipmentTicketLabel(updated) !== equipmentTicketLabel(existing) ||
+      updated.assetTag !== existing.assetTag
+    ) {
+      await syncEquipmentNameSnapshots(tenantId, updated.id, updated);
+    }
 
     if ("customerId" in data) {
       const nextCustomerId = updated.customerId;

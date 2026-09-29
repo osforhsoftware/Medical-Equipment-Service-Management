@@ -25,6 +25,7 @@ export const DEFAULT_RBAC_MATRIX: Record<string, string[]> = {
   "Stock Transfers": ["admin", "inventory"],
   "Stock Locations": ["admin", "inventory"],
   "Stock Ledger": ["admin", "inventory"],
+  "Stock Reservations": ["admin", "inventory"],
   Billing: ["admin", "billing"],
   Finance: ["admin", "billing"],
   "Expenses & Commissions": ["admin", "billing"],

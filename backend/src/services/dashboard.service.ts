@@ -267,7 +267,13 @@ export class DashboardService {
       }),
       prisma.inventoryItem.findMany({
         where: inventoryWhere,
-        select: { id: true, name: true, inStock: true, reorderLevel: true },
+        select: {
+          id: true,
+          name: true,
+          inStock: true,
+          reorderLevel: true,
+          images: { take: 1, orderBy: { sortOrder: "asc" }, select: { fileId: true } },
+        },
       }),
       prisma.amcContract.count({
         where: {
@@ -760,6 +766,7 @@ export class DashboardService {
             name: i.name,
             inStock: i.inStock,
             reorderLevel: i.reorderLevel,
+            imageFileId: i.images[0]?.fileId ?? null,
           }))
         : [],
       visibility: {

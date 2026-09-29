@@ -6,7 +6,7 @@ interface MarginWarningBadgeProps {
   unitPrice: number;
   unitCost: number;
   quantity?: number;
-  minMarginPct?: number; // Minimum acceptable margin %, default 10
+  minMarginPct?: number | null; // Minimum acceptable margin %. Null skips the percent warning.
   className?: string;
 }
 
@@ -35,11 +35,32 @@ export function computeMarginPct(unitPrice: number, unitCost: number): number | 
   return ((unitPrice - unitCost) / unitPrice) * 100;
 }
 
+export type MarginMode = "off" | "fixed" | "on";
+
+/** Minimum margin for a line. Null means the percent check is skipped. */
+export function lineMarginMinimum(input: {
+  mode?: MarginMode | string | null;
+  minMarginPct?: number | null;
+  unitCost: number;
+  catalogUnitPrice?: number | null;
+}): number | null {
+  const mode: MarginMode = input.mode === "off" || input.mode === "on" || input.mode === "fixed" ? input.mode : "fixed";
+  if (mode === "off") return null;
+  if (mode === "fixed") {
+    const pct = Number(input.minMarginPct ?? 20);
+    if (!Number.isFinite(pct) || pct <= 0) return null;
+    return pct;
+  }
+  const catalogMargin = computeMarginPct(Number(input.catalogUnitPrice ?? 0), input.unitCost);
+  if (catalogMargin == null || catalogMargin <= 0) return null;
+  return catalogMargin;
+}
+
 export function MarginWarningBadge({
   unitPrice,
   unitCost,
   quantity = 1,
-  minMarginPct = 10,
+  minMarginPct = null,
   className,
 }: MarginWarningBadgeProps) {
   if (unitCost <= 0 || unitPrice <= 0) return null;
@@ -49,9 +70,9 @@ export function MarginWarningBadge({
 
   const profit = (unitPrice - unitCost) * quantity;
   const isBelowCost = unitPrice < unitCost;
-  const isBelowMinMargin = marginPct < minMarginPct;
+  const isBelowMinMargin = minMarginPct != null && minMarginPct > 0 && marginPct < minMarginPct;
 
-  if (!isBelowMinMargin && marginPct >= minMarginPct) return null;
+  if (!isBelowCost && !isBelowMinMargin) return null;
 
   return (
     <div
@@ -76,7 +97,7 @@ export function MarginWarningBadge({
         ) : (
           <>
             <span className="font-semibold">Low margin warning. </span>
-            Margin: {marginPct.toFixed(1)}% (min {minMarginPct}%).
+            Margin: {marginPct.toFixed(1)}% (min {minMarginPct ?? 0}%).
             <span className="ml-1 opacity-75">
               Profit: {formatCurrency(profit)} · Cost: {formatCurrency(unitCost)}
             </span>

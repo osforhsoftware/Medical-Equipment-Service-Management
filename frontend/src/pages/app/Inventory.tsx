@@ -7,6 +7,7 @@ import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { ProductThumb, productImageFileId } from "@/components/shared/ProductThumb";
 import { InventoryStageNav, inventoryStageFromLocation } from "@/components/inventory/InventoryStageNav";
 import { ModuleQuickAction } from "@/components/shared/ModuleFlowStrip";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -43,7 +44,7 @@ import { useFormValidation } from "@/hooks/useFormValidation";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useListingUrlState } from "@/hooks/useListingUrlState";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
-import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
+import { fieldAria, fieldErrorClass, fieldRules, type FieldErrors } from "@/lib/formValidation";
 import { formatCurrency, formatCurrencyShort } from "@/lib/format";
 import { EMPTY_PAGINATION_META } from "@/lib/listing";
 import { navItems } from "@/config/nav";
@@ -57,8 +58,9 @@ import {
   inferItemClassFromCategory,
   type InventoryItemClass,
 } from "@/lib/inventoryItemClass";
-import { userCanAccessModule } from "@/lib/userRoles";
+import { userCanAccessModule, userCanOpenPage } from "@/lib/userRoles";
 import { toast } from "@/lib/toast";
+import { APPROVED_IMAGE_ACCEPT, keepApprovedFiles } from "@/lib/uploadFileTypes";
 
 const UOM = ["pcs", "box", "meter", "set", "kit"];
 const ADD_OPTION = "__add__";
@@ -91,6 +93,8 @@ const inventorySchema = z
     unitOfMeasure: z.string(),
     supplierId: z.string(),
     supplierOther: z.string().optional(),
+    reserveQuantity: z.string().optional(),
+    reservePurpose: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     if (!data.itemClass) {
@@ -147,7 +151,26 @@ const emptyForm = {
   unitOfMeasure: "pcs",
   supplierId: "",
   supplierOther: "",
+  reserveQuantity: "",
+  reservePurpose: "",
 };
+
+function reserveFieldErrors(form: typeof emptyForm, alreadyReserved: number): FieldErrors {
+  const qtyRaw = form.reserveQuantity.trim();
+  const purpose = form.reservePurpose.trim();
+  if (!qtyRaw && !purpose) return {};
+  const errors: FieldErrors = {};
+  const qty = Number(qtyRaw);
+  const available = Math.max(0, (Number(form.inStock) || 0) - alreadyReserved);
+  if (!qtyRaw || !Number.isInteger(qty) || qty <= 0) {
+    errors.reserveQuantity = "Quantity must be a whole number greater than 0";
+  } else if (qty > available) {
+    errors.reserveQuantity = `Only ${available} available to reserve`;
+  }
+  if (!purpose) errors.reservePurpose = "Enter what this stock is reserved for";
+  else if (purpose.length > 500) errors.reservePurpose = "Purpose must be 500 characters or fewer.";
+  return errors;
+}
 
 function buildTrackingAdditionalFields(
   form: typeof emptyForm,
@@ -194,6 +217,8 @@ function formFromItem(item: BackendInventoryItem): typeof emptyForm {
     unitOfMeasure: item.unitOfMeasure ?? "pcs",
     supplierId: item.supplierId ?? "",
     supplierOther: "",
+    reserveQuantity: "",
+    reservePurpose: "",
   };
 }
 
@@ -365,6 +390,8 @@ export default function Inventory() {
       "sellingPrice",
       "deliveryCharge",
       "supplierOther",
+      "reserveQuantity",
+      "reservePurpose",
     ],
     schema: inventorySchema,
   });
@@ -545,8 +572,12 @@ export default function Inventory() {
   };
 
   const saveItem = async () => {
-    if (!validateAll(form, undefined, dialogRef.current)) return;
+    const reserveErrors = reserveFieldErrors(form, editingItem?.reserved ?? 0);
+    if (!validateAll(form, reserveErrors, dialogRef.current)) return;
     const supplier = suppliers.find((row) => row.id === form.supplierId);
+    const reserveQty = Number(form.reserveQuantity);
+    const reservePurpose = form.reservePurpose.trim();
+    const shouldReserve = Boolean(form.reserveQuantity.trim()) && reserveQty > 0 && Boolean(reservePurpose);
 
     setSaving(true);
     try {
@@ -580,15 +611,33 @@ export default function Inventory() {
         imageFileIds,
         additionalFields: buildTrackingAdditionalFields(form, editingItem?.additionalFields),
       };
-      if (editingItem) {
-        await api.updateInventoryItem(editingItem.id, payload);
-        toast({ title: "Inventory item updated", description: form.name.trim() });
-      } else {
-        await api.createInventoryItem(payload);
-        toast({ title: "Inventory item added", description: form.name.trim() });
+      const saved = editingItem
+        ? await api.updateInventoryItem(editingItem.id, payload)
+        : await api.createInventoryItem(payload);
+      let reserved = false;
+      if (shouldReserve) {
+        try {
+          await api.createStockReservation({
+            inventoryItemId: saved.id,
+            quantity: reserveQty,
+            purpose: reservePurpose,
+          });
+          reserved = true;
+        } catch (reserveError) {
+          toast.apiError(reserveError, { fallback: "Item was saved, but stock could not be reserved." });
+        }
       }
+      toast({
+        title: editingItem ? "Inventory item updated" : "Inventory item added",
+        description: reserved
+          ? `${form.name.trim()} · ${reserveQty} reserved for ${reservePurpose}. On-hand stock is unchanged.`
+          : form.name.trim(),
+      });
       closeDialog();
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      if (reserved) {
+        await queryClient.invalidateQueries({ queryKey: ["stock-reservations"] });
+      }
     } catch (err) {
       if (!applyApiErrors(err, dialogRef.current)) {
         toast.apiError(err, { fallback: editingItem ? "Unable to update item" : "Unable to save item" });
@@ -849,8 +898,15 @@ export default function Inventory() {
               {canManage ? (
                 <ModuleQuickAction title="Add item" hint="Create a catalog SKU" icon={Plus} onClick={openCreate} />
               ) : null}
-              <ModuleQuickAction title="Stock issue" hint="Approve & issue movements" icon={PackageMinus} to="/app/stock-ledger" />
-              <ModuleQuickAction title="Locations" hint="Bins & transfers" icon={MapPin} to="/app/stock-transfers" />
+              {user && userCanOpenPage(user, "/app/stock-reservations", rbacMatrix) ? (
+                <ModuleQuickAction title="Reserve" hint="Hold stock for an order" icon={Lock} to="/app/stock-reservations" />
+              ) : null}
+              {user && userCanOpenPage(user, "/app/stock-ledger", rbacMatrix) ? (
+                <ModuleQuickAction title="Stock issue" hint="Approve & issue movements" icon={PackageMinus} to="/app/stock-ledger" />
+              ) : null}
+              {user && userCanOpenPage(user, "/app/stock-transfers", rbacMatrix) ? (
+                <ModuleQuickAction title="Locations" hint="Bins & transfers" icon={MapPin} to="/app/stock-transfers" />
+              ) : null}
               <ModuleQuickAction
                 title="Reorder"
                 hint={lowStock > 0 ? `${lowStock} low-stock SKU(s)` : "Purchase requests"}
@@ -903,9 +959,12 @@ export default function Inventory() {
                       className="flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left text-sm hover:bg-muted/40"
                       onClick={() => navigate(`/app/inventory/${item.id}`)}
                     >
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{item.name}</p>
-                        <p className="font-mono text-xs text-muted-foreground">{item.sku}</p>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <ProductThumb fileId={productImageFileId(item)} name={item.name} size="sm" />
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{item.name}</p>
+                          <p className="font-mono text-xs text-muted-foreground">{item.sku}</p>
+                        </div>
                       </div>
                       <span className="shrink-0 font-mono text-xs">{item.inStock} on hand</span>
                     </button>
@@ -995,9 +1054,13 @@ export default function Inventory() {
                 <Input
                   id="inventory-images"
                   type="file"
-                  accept="image/*"
+                  accept={APPROVED_IMAGE_ACCEPT}
                   multiple
-                  onChange={(e) => setImageFiles(Array.from(e.target.files ?? []))}
+                  onChange={(e) => {
+                    const { allowed, error } = keepApprovedFiles(Array.from(e.target.files ?? []), true);
+                    if (error) toast.error(error);
+                    setImageFiles(allowed);
+                  }}
                 />
                 {existingImageFileIds.length > 0 ? (
                   <div className="flex flex-wrap gap-2 pt-1">
@@ -1287,6 +1350,79 @@ export default function Inventory() {
                     {...fieldAria("maxLevel", shouldShow("maxLevel") ? errors.maxLevel : null)}
                   />
                   {shouldShow("maxLevel") && <FormFieldError field="maxLevel" message={errors.maxLevel} />}
+                </div>
+              </div>
+              <div className="space-y-3 rounded-lg border border-border p-3">
+                <div>
+                  <p className="text-sm font-medium">Reserve stock</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Optional. Holds units so they cannot be sold elsewhere. On-hand quantity does not change. Leave blank to skip.
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 gap-2 rounded-lg border px-3 py-2 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">On hand</p>
+                    <p className="font-semibold">{Number(form.inStock) || 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Reserved</p>
+                    <p className="font-semibold">{editingItem?.reserved ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Available</p>
+                    <p className="font-semibold">{Math.max(0, (Number(form.inStock) || 0) - (editingItem?.reserved ?? 0))}</p>
+                  </div>
+                </div>
+                <div className="grid gap-2" data-field="reserveQuantity">
+                  <Label
+                    htmlFor="inventory-reserve-qty"
+                    className={shouldShow("reserveQuantity") ? "text-destructive" : undefined}
+                  >
+                    Quantity to reserve
+                  </Label>
+                  <Input
+                    id="inventory-reserve-qty"
+                    type="number"
+                    min={0}
+                    value={form.reserveQuantity}
+                    placeholder="e.g. 20"
+                    onChange={(e) => {
+                      const next = { ...form, reserveQuantity: e.target.value };
+                      setForm(next);
+                      handleChange("reserveQuantity", next);
+                    }}
+                    onBlur={() => handleBlur("reserveQuantity", form)}
+                    className={fieldErrorClass(shouldShow("reserveQuantity"))}
+                    {...fieldAria("reserveQuantity", shouldShow("reserveQuantity") ? errors.reserveQuantity : null)}
+                  />
+                  {shouldShow("reserveQuantity") && (
+                    <FormFieldError field="reserveQuantity" message={errors.reserveQuantity} />
+                  )}
+                </div>
+                <div className="grid gap-2" data-field="reservePurpose">
+                  <Label
+                    htmlFor="inventory-reserve-purpose"
+                    className={shouldShow("reservePurpose") ? "text-destructive" : undefined}
+                  >
+                    Purpose
+                  </Label>
+                  <Textarea
+                    id="inventory-reserve-purpose"
+                    value={form.reservePurpose}
+                    rows={3}
+                    placeholder="Customer order, job, or other allocation"
+                    onChange={(e) => {
+                      const next = { ...form, reservePurpose: e.target.value };
+                      setForm(next);
+                      handleChange("reservePurpose", next);
+                    }}
+                    onBlur={() => handleBlur("reservePurpose", form)}
+                    className={fieldErrorClass(shouldShow("reservePurpose"))}
+                    {...fieldAria("reservePurpose", shouldShow("reservePurpose") ? errors.reservePurpose : null)}
+                  />
+                  {shouldShow("reservePurpose") && (
+                    <FormFieldError field="reservePurpose" message={errors.reservePurpose} />
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">

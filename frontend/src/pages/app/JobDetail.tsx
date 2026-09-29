@@ -21,6 +21,7 @@ import { JobWorkbenchContextSection } from "@/components/jobs/JobWorkbenchContex
 import { pickWorkReportLog, useJobWorkReportEditor } from "@/components/jobs/useJobWorkReportEditor";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
+import { ProductThumb, productImageFileId } from "@/components/shared/ProductThumb";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -53,7 +54,7 @@ import {
 import { ENGINEER_EXTRA_TYPES, billingLineTypeLabel, extraLineTotal } from "@/lib/billingCharges";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
 import { defaultDatePlusDays, formatCurrency, formatDate, formatDateTime, formatJobStatus } from "@/lib/format";
-import { formatInventoryItemClass, INVENTORY_ITEM_CLASS_OPTIONS, type InventoryItemClass } from "@/lib/inventoryItemClass";
+import { formatInventoryItemClass, INVENTORY_ITEM_CLASS_OPTIONS, inventoryMatchesExtraType, requestableStock, type InventoryItemClass } from "@/lib/inventoryItemClass";
 import {
   DELIVERY_METHOD_OPTIONS,
   JOB_WORKFLOW_STAGES,
@@ -64,6 +65,7 @@ import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
 import { downloadServiceReportPdf } from "@/lib/serviceReport";
 import { toast } from "@/lib/toast";
+import { APPROVED_IMAGE_ACCEPT, keepApprovedFiles } from "@/lib/uploadFileTypes";
 import { cn } from "@/lib/utils";
 
 const JOB_STATUS_OPTIONS = [
@@ -693,7 +695,18 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
 
     setActionSaving(true);
     try {
-      const selectedItem = inventory.find((item) => item.id === partsItemId);
+      const catalogType = extraType === "custom" || extraType === "other" ? null : extraType;
+      const selectedItem = catalogType
+        ? inventory.find((item) => item.id === partsItemId && inventoryMatchesExtraType(item, catalogType))
+        : undefined;
+      if (partsItemId && catalogType && !selectedItem) {
+        scopeValidation.validateAll(values, { partsItemId: "Choose a product that matches the item type." }, scopeDialogRef.current);
+        setActionSaving(false);
+        return;
+      }
+      const requestable = selectedItem ? requestableStock(selectedItem) : 0;
+      const issueQty = selectedItem ? Math.min(partsQty, requestable) : 0;
+      const purchaseQty = selectedItem ? Math.max(0, partsQty - requestable) : 0;
       const payload = {
         inventoryItemId: selectedItem?.id ?? null,
         description: selectedItem?.name ?? partsNote.trim().slice(0, 120),
@@ -709,19 +722,25 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
         toast({
           title: "Parts / scope request updated",
           description: selectedItem
-            ? "Stock purchase request quantity and item were updated."
+            ? purchaseQty > 0
+              ? `Purchase request covers ${purchaseQty}. Minimum stock and reserved stock stay in the warehouse.`
+              : "Covered from stock above the minimum. Reserved stock was not included."
             : undefined,
         });
       } else {
         await api.addJobExtra(job.id, payload);
-        await api.requestJobParts(job.id, {
-          notes: partsNote.trim(),
-          lines: selectedItem ? [{ inventoryItemId: selectedItem.id, quantity: partsQty }] : [],
-        });
+        if (selectedItem && issueQty > 0) {
+          await api.requestJobParts(job.id, {
+            notes: partsNote.trim(),
+            lines: [{ inventoryItemId: selectedItem.id, quantity: issueQty }],
+          });
+        }
         toast({
           title: "Parts / scope request submitted",
           description: selectedItem
-            ? "Sent to inventory for approve → issue. Coordinator also reviews extra scope."
+            ? purchaseQty > 0
+              ? `${issueQty > 0 ? `${issueQty} sent to inventory. ` : ""}${purchaseQty} will be purchased. Minimum stock and reserved stock stay in the warehouse.`
+              : "Sent to inventory for approve → issue. Minimum stock and reserved stock stay in the warehouse."
             : "Sent to the service coordinator for approval.",
         });
       }
@@ -806,6 +825,13 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
       setInventory([]);
     }
   };
+
+  const extraInventoryOptions = useMemo(
+    () => inventory.filter((item) => inventoryMatchesExtraType(item, extraType)),
+    [inventory, extraType],
+  );
+  const selectedExtraItem = extraInventoryOptions.find((item) => item.id === partsItemId) ?? null;
+  const selectedRequestable = selectedExtraItem ? requestableStock(selectedExtraItem) : 0;
 
   const stockInventoryOptions = useMemo(
     () =>
@@ -1557,7 +1583,10 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                               const unused = line.unusedIssued ?? line.issuedRemaining ?? Math.max(0, line.qtyIssued - line.qtyConsumed - line.qtyReturned - line.qtyScrapped);
                               return (
                                 <div key={line.id} className="rounded-md bg-muted/40 p-2">
-                                  <p className="font-medium">{line.itemName}</p>
+                                  <div className="flex items-center gap-2">
+                                    <ProductThumb fileId={productImageFileId(line.inventoryItem)} name={line.itemName} size="sm" />
+                                    <p className="font-medium">{line.itemName}</p>
+                                  </div>
                                   <p className="text-xs text-muted-foreground">
                                     {line.sku} · Req {line.qtyRequested} · Appr {line.qtyApproved} · Issued {line.qtyIssued} · Used {line.qtyConsumed} · Ret {line.qtyReturned} · Scrap {line.qtyScrapped}
                                   </p>
@@ -1901,8 +1930,9 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
               <p className="text-sm text-muted-foreground">
                 Attach before/after photos. Each image has a time or note field.
               </p>
-              <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => {
-                const files = Array.from(e.target.files ?? []);
+              <input ref={photoInputRef} type="file" accept={APPROVED_IMAGE_ACCEPT} multiple className="hidden" onChange={(e) => {
+                const { allowed: files, error } = keepApprovedFiles(Array.from(e.target.files ?? []), true);
+                if (error) toast.error(error);
                 setPhotoFiles(files);
                 setPhotoCaptions(files.map(() => ""));
                 photosValidation.clearError("photos");
@@ -1978,7 +2008,13 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
             <div className="grid gap-4 py-2">
               <div className="grid gap-2">
                 <Label>Item type</Label>
-                <Select value={extraType} onValueChange={(value) => setExtraType(value as typeof extraType)}>
+                <Select
+                  value={extraType}
+                  onValueChange={(value) => {
+                    setExtraType(value as typeof extraType);
+                    setPartsItemId("");
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -1989,18 +2025,38 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                   </SelectContent>
                 </Select>
               </div>
+              {extraType === "custom" || extraType === "other" ? null : (
               <div className="grid gap-2" data-field="partsItemId">
                 <Label>Inventory product (optional)</Label>
                 <InventoryProductSelect
-                  items={inventory}
+                  items={extraInventoryOptions}
                   value={partsItemId}
-                  onValueChange={(id) => setPartsItemId(id)}
-                  placeholder="Select a product, if required"
+                  onValueChange={(id) => {
+                    setPartsItemId(id);
+                    scopeValidation.clearError("partsItemId");
+                  }}
+                  placeholder={`Select a ${extraType} product, if required`}
+                  emptyText={
+                    extraType === "product"
+                      ? "No spare parts or consumables in inventory."
+                      : extraType === "machine"
+                        ? "No machine products in inventory."
+                        : "No equipment products in inventory."
+                  }
                   getOptionLabel={(item) =>
-                    `${item.name} (${item.sku}) — ${Math.max(0, item.inStock - item.reserved)} available`
+                    `${item.name} (${item.sku}) — ${requestableStock(item)} available`
                   }
                 />
+                <p className="text-xs text-muted-foreground">
+                  {selectedExtraItem
+                    ? `${selectedRequestable} can be requested. Minimum stock (${selectedExtraItem.reorderLevel}) and reserved (${selectedExtraItem.reserved}) stay in the warehouse.`
+                    : `Only ${extraType} products are listed. Available quantity excludes minimum stock and reserved stock.`}
+                </p>
+                {scopeValidation.shouldShow("partsItemId") ? (
+                  <FormFieldError field="partsItemId" message={scopeValidation.errors.partsItemId} />
+                ) : null}
               </div>
+              )}
               <div className="grid gap-2" data-field="partsQty">
                 <Label htmlFor="parts-qty">Quantity</Label>
                 <Input
@@ -2014,6 +2070,11 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                     scopeValidation.clearError("partsQty");
                   }}
                 />
+                {selectedExtraItem && partsQty > selectedRequestable ? (
+                  <p className="text-xs text-muted-foreground">
+                    {partsQty - selectedRequestable} will be purchased. The request will not use minimum stock or reserved stock.
+                  </p>
+                ) : null}
                 {scopeValidation.shouldShow("partsQty") ? (
                   <FormFieldError field="partsQty" message={scopeValidation.errors.partsQty} />
                 ) : null}

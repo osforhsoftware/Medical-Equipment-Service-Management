@@ -22,6 +22,7 @@ import { QuickAddCustomerDialog } from "@/components/sales/QuickAddCustomerDialo
 import { CreditExposureBanner } from "@/components/shared/CreditExposureBanner";
 import { creditBlocksSave, useCustomerCreditExposure } from "@/hooks/useCustomerCreditExposure";
 import { inventoryOriginUnitPrice } from "@/components/shared/InventoryHelpers";
+import { ProductThumb, productImageFileId } from "@/components/shared/ProductThumb";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -709,6 +710,7 @@ export function SaleFormDialog({
                                       selected ? "opacity-100" : "opacity-0",
                                     )}
                                   />
+                                  <ProductThumb fileId={productImageFileId(item)} name={item.name} size="sm" className="mr-2" />
                                   <div className="min-w-0 flex-1">
                                     <span className="block truncate font-medium">{item.name}</span>
                                     <span className="block truncate text-xs text-muted-foreground mt-0.5">

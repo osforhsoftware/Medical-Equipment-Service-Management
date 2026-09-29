@@ -69,6 +69,7 @@ const SUB_PATH_LABELS: Record<string, string> = {
   extras: "Added job extra charge",
   approve: "Approved job extra charge",
   action: "Updated stock reservation",
+  reservations: "Reserved stock",
   convert: "Converted stock purchase request",
   dispatch: "Dispatched stock transfer",
   receive: "Received stock transfer",

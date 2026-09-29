@@ -5,6 +5,7 @@ import { prisma } from "@/db/prisma";
 import { Prisma } from "@prisma/client";
 import { normalizeAdditionalFields } from "@/lib/additionalFields";
 import { getDefaultBranchId } from "@/utils/defaultBranch";
+import { APPROVED_IMAGE_TYPE_MESSAGE } from "@/services/fileStorage.service";
 import {
   inferItemClassFromCategory,
   isInventoryItemClass,
@@ -158,7 +159,7 @@ export class InventoryService {
         const valid = await tx.storedFile.count({
           where: { tenantId, id: { in: imageFileIds }, mimeType: { startsWith: "image/" } },
         });
-        if (valid !== imageFileIds.length) throw new AppError("Every product image must be a valid uploaded image", 422);
+        if (valid !== imageFileIds.length) throw new AppError(APPROVED_IMAGE_TYPE_MESSAGE, 422);
         await tx.inventoryItemImage.createMany({
           data: imageFileIds.map((fileId, index) => ({
             inventoryItemId: item.id,
@@ -240,7 +241,7 @@ export class InventoryService {
           const valid = await tx.storedFile.count({
             where: { tenantId, id: { in: imageFileIds }, mimeType: { startsWith: "image/" } },
           });
-          if (valid !== imageFileIds.length) throw new AppError("Every product image must be a valid uploaded image", 422);
+          if (valid !== imageFileIds.length) throw new AppError(APPROVED_IMAGE_TYPE_MESSAGE, 422);
           await tx.inventoryItemImage.createMany({
             data: imageFileIds.map((fileId, index) => ({
               inventoryItemId: id,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FileQuestion,
@@ -12,6 +12,10 @@ import {
   XCircle,
   Clock,
   Loader2,
+  AlertTriangle,
+  Minus,
+  Package,
+  Trash2,
   User,
   UserPlus,
 } from "lucide-react";
@@ -19,6 +23,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { QuickAddCustomerDialog } from "@/components/sales/QuickAddCustomerDialog";
+import { ActivityHistoryTabs, isInActivity, SalesPipelineTabs } from "@/components/sales/SalesPipelineTabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -52,14 +57,26 @@ import {
 } from "@/components/ui/select";
 import { useAuth } from "@/context/AuthContext";
 import { CUSTOMER_WRITE_ROLES } from "@/config/roles";
-import { api, ApiError, type BackendCustomer } from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import { inventoryOriginUnitPrice } from "@/components/shared/InventoryHelpers";
+import { ProductThumb, productImageFileId } from "@/components/shared/ProductThumb";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { api, ApiError, type BackendCustomer, type BackendInventoryItem } from "@/lib/api";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type EnquiryStatus = "open" | "quoted" | "converted" | "lost";
+
+export interface EnquiryInterestLine {
+  source: "inventory" | "custom";
+  inventoryItemId?: string | null;
+  description: string;
+  sku?: string | null;
+  quantity: number;
+  unitPrice: number;
+}
 
 export interface SalesEnquiry {
   id: string;
@@ -69,6 +86,7 @@ export interface SalesEnquiry {
   phone: string;
   email: string;
   productInterest: string;
+  interestLines?: EnquiryInterestLine[] | null;
   quantity: number;
   estimatedBudget: string | number | null;
   source: string;
@@ -79,6 +97,7 @@ export interface SalesEnquiry {
   followUpDate: string | null;
   convertedEstimateId?: string | null;
   createdAt: string;
+  updatedAt?: string;
 }
 
 // ── Status helpers ────────────────────────────────────────────────────────────
@@ -94,6 +113,53 @@ function statusBadge(status: EnquiryStatus) {
     case "lost":
       return <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" />Lost</Badge>;
   }
+}
+
+type InterestDraft = EnquiryInterestLine & { key: string; saleRate?: number };
+
+function inventorySalePrice(item: BackendInventoryItem) {
+  const selling = Number(item.sellingPrice);
+  if (Number.isFinite(selling) && selling > 0) return selling;
+  return inventoryOriginUnitPrice(item);
+}
+
+function newLineKey() {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function linesFromEnquiry(existing?: SalesEnquiry | null): InterestDraft[] {
+  const stored = Array.isArray(existing?.interestLines) ? existing.interestLines : [];
+  if (stored.length) {
+    return stored.map((line) => ({
+      key: newLineKey(),
+      source: line.source === "inventory" ? "inventory" : "custom",
+      inventoryItemId: line.inventoryItemId ?? null,
+      description: line.description || "",
+      sku: line.sku ?? null,
+      quantity: Number(line.quantity) > 0 ? Number(line.quantity) : 1,
+      unitPrice: Number(line.unitPrice) >= 0 ? Number(line.unitPrice) : 0,
+    }));
+  }
+  if (!existing?.productInterest?.trim()) return [];
+  const quantity = Number(existing.quantity) > 0 ? Number(existing.quantity) : 1;
+  const budget = Number(existing.estimatedBudget) || 0;
+  return [
+    {
+      key: newLineKey(),
+      source: "custom",
+      inventoryItemId: null,
+      description: existing.productInterest.trim(),
+      sku: null,
+      quantity,
+      unitPrice: budget > 0 ? budget / quantity : 0,
+    },
+  ];
+}
+
+function lineAmount(line: InterestDraft) {
+  return Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0);
 }
 
 // ── Create / Edit Form ────────────────────────────────────────────────────────
@@ -143,8 +209,15 @@ function EnquiryFormDialog({ open, onOpenChange, existing, onSuccess }: EnquiryF
         }
       : { ...BLANK },
   );
+  const [lines, setLines] = useState<InterestDraft[]>(() => linesFromEnquiry(existing));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [itemOpen, setItemOpen] = useState(false);
+  const [itemSearch, setItemSearch] = useState("");
+  const [customName, setCustomName] = useState("");
+  const [customQty, setCustomQty] = useState(1);
+  const [customPrice, setCustomPrice] = useState("");
+  const debouncedItemSearch = useDebouncedValue(itemSearch);
   const [customerId, setCustomerId] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerOpen, setCustomerOpen] = useState(false);
@@ -165,6 +238,85 @@ function EnquiryFormDialog({ open, onOpenChange, existing, onSuccess }: EnquiryF
     setCustomerOpen(false);
     setExtraClients([]);
   }, [open, existing?.id]);
+
+  const inventoryQuery = useQuery({
+    queryKey: ["inventory", "sales-enquiry", debouncedItemSearch],
+    queryFn: () =>
+      api.listInventory({
+        status: "active",
+        limit: 50,
+        page: 1,
+        search: debouncedItemSearch || undefined,
+        sortBy: "name",
+        sortOrder: "asc",
+      }),
+    enabled: open,
+  });
+
+  const selectedInventoryIds = useMemo(
+    () => new Set(lines.map((line) => line.inventoryItemId).filter(Boolean) as string[]),
+    [lines],
+  );
+  const interestTotal = useMemo(() => lines.reduce((sum, line) => sum + lineAmount(line), 0), [lines]);
+
+  const addInventoryLine = (item: BackendInventoryItem) => {
+    const saleRate = inventorySalePrice(item);
+    setLines((prev) => {
+      if (prev.some((line) => line.inventoryItemId === item.id)) return prev;
+      return [
+        ...prev,
+        {
+          key: newLineKey(),
+          source: "inventory",
+          inventoryItemId: item.id,
+          description: item.name,
+          sku: item.sku,
+          quantity: 1,
+          unitPrice: saleRate,
+          saleRate,
+        },
+      ];
+    });
+    setErrors((prev) => {
+      if (!prev.interestLines) return prev;
+      const next = { ...prev };
+      delete next.interestLines;
+      return next;
+    });
+  };
+
+  const addCustomLine = () => {
+    const description = customName.trim();
+    if (!description) {
+      setErrors((prev) => ({ ...prev, customName: "Enter a product name" }));
+      return;
+    }
+    setLines((prev) => [
+      ...prev,
+      {
+        key: newLineKey(),
+        source: "custom",
+        inventoryItemId: null,
+        description,
+        sku: null,
+        quantity: Math.max(1, Number(customQty) || 1),
+        unitPrice: Math.max(0, Number(customPrice) || 0),
+      },
+    ]);
+    setCustomName("");
+    setCustomQty(1);
+    setCustomPrice("");
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.customName;
+      delete next.interestLines;
+      return next;
+    });
+  };
+
+  const updateLine = (key: string, patch: Partial<InterestDraft>) => {
+    setLines((prev) => prev.map((line) => (line.key === key ? { ...line, ...patch } : line)));
+  };
 
   const clientsQuery = useQuery({
     queryKey: ["customers", "sales-enquiry-form"],
@@ -224,7 +376,8 @@ function EnquiryFormDialog({ open, onOpenChange, existing, onSuccess }: EnquiryF
   const validate = () => {
     const errs: Record<string, string> = {};
     if (!form.customerName.trim()) errs.customerName = "Client required";
-    if (!form.productInterest.trim()) errs.productInterest = "Product / service interest required";
+    const ready = lines.filter((line) => line.description.trim() && Number(line.quantity) > 0);
+    if (!ready.length) errs.interestLines = "Add at least one inventory or custom product";
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -233,9 +386,26 @@ function EnquiryFormDialog({ open, onOpenChange, existing, onSuccess }: EnquiryF
     if (!validate()) return;
     setSaving(true);
     try {
+      const ready = lines.filter((line) => line.description.trim() && Number(line.quantity) > 0);
       const payload = {
-        ...form,
-        estimatedBudget: form.estimatedBudget ? Number(form.estimatedBudget) || null : null,
+        customerName: form.customerName,
+        contactPerson: form.contactPerson,
+        phone: form.phone,
+        email: form.email,
+        source: form.source,
+        priority: form.priority,
+        status: form.status,
+        notes: form.notes,
+        assignedTo: form.assignedTo,
+        followUpDate: form.followUpDate,
+        interestLines: ready.map((line) => ({
+          source: line.source,
+          inventoryItemId: line.source === "inventory" ? line.inventoryItemId : null,
+          description: line.description.trim(),
+          sku: line.sku ?? null,
+          quantity: Number(line.quantity),
+          unitPrice: Number(line.unitPrice) || 0,
+        })),
       };
       if (existing) {
         await api.put(`/sales-enquiries/${existing.id}`, payload);
@@ -417,38 +587,251 @@ function EnquiryFormDialog({ open, onOpenChange, existing, onSuccess }: EnquiryF
             <Input type="email" value={form.email} onChange={set("email")} placeholder="purchase@hospital.com" />
           </div>
 
-          <div className="sm:col-span-2 space-y-1">
-            <Label className={errors.productInterest ? "text-destructive" : ""}>
-              Product / Service Interest <span className="text-destructive">*</span>
-            </Label>
-            <Textarea
-              value={form.productInterest}
-              onChange={set("productInterest")}
-              placeholder="e.g. Ventilator service contract, ECG machine spare parts..."
-              rows={2}
-              className={errors.productInterest ? "border-destructive" : ""}
-            />
-            {errors.productInterest && <p className="text-xs text-destructive">{errors.productInterest}</p>}
-          </div>
+          <div className="sm:col-span-2 space-y-3">
+            <div>
+              <Label className={errors.interestLines ? "text-destructive" : ""}>
+                Product / Service Interest <span className="text-destructive">*</span>
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Select one or more inventory products, and add custom products that are not in stock yet. Quantity and expected price are set on each line.
+              </p>
+            </div>
 
-          <div className="space-y-1">
-            <Label>Estimated Quantity</Label>
-            <Input
-              type="number"
-              min={1}
-              value={form.quantity}
-              onChange={(e) => setForm((p) => ({ ...p, quantity: Number(e.target.value) || 1 }))}
-            />
-          </div>
+            <Popover modal open={itemOpen} onOpenChange={setItemOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={itemOpen}
+                  className="h-10 w-full justify-between font-normal"
+                >
+                  <span className="flex min-w-0 items-center gap-2 truncate">
+                    <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    {selectedInventoryIds.size > 0 ? (
+                      <span className="truncate font-medium text-foreground">
+                        {selectedInventoryIds.size} inventory product{selectedInventoryIds.size === 1 ? "" : "s"} selected
+                      </span>
+                    ) : inventoryQuery.isLoading ? (
+                      <span className="text-muted-foreground">Loading inventory…</span>
+                    ) : (
+                      <span className="text-muted-foreground">Select inventory products…</span>
+                    )}
+                  </span>
+                  <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                className="z-[80] p-0"
+                align="start"
+                style={{ width: "var(--radix-popover-trigger-width)" }}
+              >
+                <Command shouldFilter={!debouncedItemSearch}>
+                  <CommandInput
+                    placeholder="Search by name or SKU…"
+                    value={itemSearch}
+                    onValueChange={setItemSearch}
+                  />
+                  <CommandList className="max-h-60">
+                    <CommandEmpty>
+                      {inventoryQuery.isLoading ? "Searching inventory…" : "No matching inventory products."}
+                    </CommandEmpty>
+                    <CommandGroup heading="Inventory products">
+                      {(inventoryQuery.data?.data ?? []).map((item) => {
+                        const selected = selectedInventoryIds.has(item.id);
+                        const stock = item.available ?? Math.max(0, item.inStock - item.reserved);
+                        return (
+                          <CommandItem
+                            key={item.id}
+                            value={`${item.name} ${item.sku}`}
+                            onSelect={() => {
+                              if (selected) {
+                                setLines((prev) => prev.filter((line) => line.inventoryItemId !== item.id));
+                                return;
+                              }
+                              addInventoryLine(item);
+                            }}
+                            className="py-2.5"
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4 shrink-0",
+                                selected ? "opacity-100" : "opacity-0",
+                              )}
+                            />
+                            <ProductThumb fileId={productImageFileId(item)} name={item.name} size="sm" className="mr-2" />
+                            <div className="min-w-0 flex-1">
+                              <span className="block truncate font-medium">{item.name}</span>
+                              <span className="block truncate text-xs text-muted-foreground">
+                                {item.sku} · {stock > 0 ? `${stock} in stock` : "Out of stock"}
+                              </span>
+                            </div>
+                            <span className="ml-2 shrink-0 text-sm font-medium">
+                              {formatCurrency(inventoryOriginUnitPrice(item))}
+                            </span>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
 
-          <div className="space-y-1">
-            <Label>Budget Amount</Label>
-            <Input
-              type="number"
-              value={form.estimatedBudget}
-              onChange={set("estimatedBudget")}
-              placeholder="e.g. 50000"
-            />
+            <div className="grid gap-2 rounded-lg border bg-muted/30 p-3 sm:grid-cols-[1fr_5rem_7rem_auto] sm:items-end">
+              <div className="space-y-1">
+                <Label className={errors.customName ? "text-destructive" : ""}>Custom product</Label>
+                <Input
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="Name not in inventory"
+                  className={errors.customName ? "border-destructive" : ""}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCustomLine();
+                    }
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Qty</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={customQty}
+                  onChange={(e) => setCustomQty(Math.max(1, Number(e.target.value) || 1))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Price</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={customPrice}
+                  onChange={(e) => setCustomPrice(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+              <Button type="button" variant="outline" onClick={addCustomLine} className="gap-1">
+                <Plus className="h-4 w-4" /> Add
+              </Button>
+            </div>
+            {errors.customName ? <p className="text-xs text-destructive">{errors.customName}</p> : null}
+
+            {lines.length === 0 ? (
+              <p className={cn("text-xs", errors.interestLines ? "text-destructive" : "text-muted-foreground")}>
+                {errors.interestLines || "No products added yet."}
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {lines.map((line) => {
+                  const belowSaleRate =
+                    line.source === "inventory" &&
+                    Number(line.saleRate) > 0 &&
+                    Number(line.unitPrice) < Number(line.saleRate);
+                  return (
+                  <div key={line.key} className="space-y-2 rounded-lg border p-3">
+                  <div className="grid gap-2 sm:grid-cols-[1fr_5.5rem_7rem_auto] sm:items-center">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase",
+                            line.source === "inventory"
+                              ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                              : "bg-sky-500/10 text-sky-700 dark:text-sky-300",
+                          )}
+                        >
+                          {line.source === "inventory" ? "Inventory" : "Custom"}
+                        </span>
+                        {line.sku ? (
+                          <span className="truncate font-mono text-[11px] text-muted-foreground">{line.sku}</span>
+                        ) : null}
+                      </div>
+                      {line.source === "custom" ? (
+                        <Input
+                          className="mt-1 h-8"
+                          value={line.description}
+                          onChange={(e) => updateLine(line.key, { description: e.target.value })}
+                        />
+                      ) : (
+                        <div className="mt-1 flex min-w-0 items-center gap-2">
+                          <ProductThumb
+                            fileId={productImageFileId(
+                              (inventoryQuery.data?.data ?? []).find((item) => item.id === line.inventoryItemId),
+                            )}
+                            name={line.description}
+                            size="xs"
+                          />
+                          <p className="truncate text-sm font-medium">{line.description}</p>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-7"
+                        onClick={() => updateLine(line.key, { quantity: Math.max(1, Number(line.quantity) - 1) })}
+                      >
+                        <Minus className="h-3 w-3" />
+                      </Button>
+                      <Input
+                        className="h-8 px-1 text-center"
+                        type="number"
+                        min={1}
+                        value={line.quantity}
+                        onChange={(e) => updateLine(line.key, { quantity: Math.max(1, Number(e.target.value) || 1) })}
+                      />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-7"
+                        onClick={() => updateLine(line.key, { quantity: Number(line.quantity) + 1 })}
+                      >
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Sale price</span>
+                      <Input
+                        className={cn("h-8", belowSaleRate ? "border-amber-500" : "")}
+                        type="number"
+                        min={0}
+                        value={line.unitPrice}
+                        onChange={(e) => updateLine(line.key, { unitPrice: Math.max(0, Number(e.target.value) || 0) })}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-destructive"
+                      onClick={() => setLines((prev) => prev.filter((row) => row.key !== line.key))}
+                      aria-label={`Remove ${line.description}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {belowSaleRate ? (
+                    <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        Below sale rate. Item sale price is {formatCurrency(line.saleRate)}. This price is under the selling price.
+                      </span>
+                    </p>
+                  ) : null}
+                  </div>
+                  );
+                })}
+                <p className="text-right text-sm text-muted-foreground">
+                  Expected total <span className="font-medium text-foreground">{formatCurrency(interestTotal)}</span>
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="space-y-1">
@@ -546,6 +929,8 @@ export default function SalesEnquiries() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const canCreate = hasRole(["admin", "sales", "coordinator"]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const board = searchParams.get("board") === "history" ? "history" : "activity";
   const [search, setSearch] = useState("");
   const [convertingId, setConvertingId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<EnquiryStatus | "all">("all");
@@ -560,7 +945,14 @@ export default function SalesEnquiries() {
     },
   });
 
-  const filtered = enquiries.filter((e) => {
+  const boardEnquiries =
+    board === "history"
+      ? enquiries
+      : enquiries.filter((enquiry) =>
+          isInActivity(enquiry.status, enquiry.updatedAt || enquiry.createdAt, ["converted", "lost"]),
+        );
+
+  const filtered = boardEnquiries.filter((e) => {
     const matchSearch =
       !search ||
       e.customerName.toLowerCase().includes(search.toLowerCase()) ||
@@ -571,17 +963,17 @@ export default function SalesEnquiries() {
   });
 
   const stats = {
-    open: enquiries.filter((e) => e.status === "open").length,
-    quoted: enquiries.filter((e) => e.status === "quoted").length,
-    converted: enquiries.filter((e) => e.status === "converted").length,
-    lost: enquiries.filter((e) => e.status === "lost").length,
+    open: boardEnquiries.filter((e) => e.status === "open").length,
+    quoted: boardEnquiries.filter((e) => e.status === "quoted").length,
+    converted: boardEnquiries.filter((e) => e.status === "converted").length,
+    lost: boardEnquiries.filter((e) => e.status === "lost").length,
   };
 
   const refetch = () => queryClient.invalidateQueries({ queryKey: ["sales-enquiries"] });
 
   const convertToQuotation = async (enq: SalesEnquiry) => {
     if (enq.convertedEstimateId) {
-      navigate(`/app/estimates/${enq.convertedEstimateId}`);
+      navigate(`/app/sales/quotations/${enq.convertedEstimateId}`);
       return;
     }
     setConvertingId(enq.id);
@@ -589,7 +981,7 @@ export default function SalesEnquiries() {
       const estimate = await api.convertSalesEnquiryToQuotation(enq.id);
       toast({ title: "Sales quotation created", description: estimate.reference });
       await refetch();
-      navigate(`/app/estimates/${estimate.id}`);
+      navigate(`/app/sales/quotations/${estimate.id}`);
     } catch (err) {
       toast.apiError(err, { fallback: "Could not create quotation" });
     } finally {
@@ -602,7 +994,7 @@ export default function SalesEnquiries() {
       <div className="space-y-5">
         <PageHeader
           title="Enquiry"
-          subtitle="Inbound sales leads. Convert an enquiry to a quotation, then to a sales order."
+          subtitle="Enquiry activity is current work. History lists every lead, converted and unconverted."
           icon={<FileQuestion className="h-6 w-6" />}
           actions={
             canCreate ? (
@@ -613,6 +1005,27 @@ export default function SalesEnquiries() {
             ) : undefined
           }
         />
+
+        <div className="flex flex-wrap items-center gap-2">
+          <SalesPipelineTabs current="enquiry" />
+          <ActivityHistoryTabs
+            value={board}
+            activityLabel="Enquiry activity"
+            onChange={(next) => {
+              const params = new URLSearchParams(searchParams);
+              if (next === "activity") params.delete("board");
+              else params.set("board", "history");
+              setSearchParams(params, { replace: true });
+              setStatusFilter("all");
+            }}
+          />
+        </div>
+
+        <p className="text-sm text-muted-foreground">
+          {board === "history"
+            ? "Every enquiry is listed here, converted and unconverted."
+            : "Open and quoted leads, plus sales converted in the last 2 days."}
+        </p>
 
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -678,7 +1091,9 @@ export default function SalesEnquiries() {
           <Card>
             <CardContent className="py-16 text-center">
               <FileQuestion className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
-              <p className="font-medium text-muted-foreground">No enquiries found</p>
+              <p className="font-medium text-muted-foreground">
+                {board === "history" ? "No history yet" : "No enquiry activity"}
+              </p>
               {canCreate && (
                 <Button className="mt-4" onClick={() => { setEditing(null); setFormOpen(true); }}>
                   <Plus className="mr-1.5 h-4 w-4" />
@@ -757,6 +1172,7 @@ export default function SalesEnquiries() {
 
         {formOpen && (
           <EnquiryFormDialog
+            key={editing?.id ?? "new"}
             open={formOpen}
             onOpenChange={setFormOpen}
             existing={editing}

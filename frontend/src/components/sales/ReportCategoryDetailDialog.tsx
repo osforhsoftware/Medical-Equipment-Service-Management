@@ -25,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ProductThumb } from "@/components/shared/ProductThumb";
 import { downloadSpreadsheet } from "@/lib/exportSpreadsheet";
 import { formatCurrency, formatCurrencyShort } from "@/lib/format";
 import { toast } from "@/lib/toast";
@@ -33,6 +34,7 @@ export interface ReportCategoryItem {
   name: string;
   quantity: number;
   amount: number;
+  imageFileId?: string | null;
 }
 
 interface ReportCategoryDetailDialogProps {
@@ -43,6 +45,7 @@ interface ReportCategoryDetailDialogProps {
   rows?: ReportCategoryItem[];
   dateRangeLabel?: string;
   categoryKey?: string;
+  showImages?: boolean;
 }
 
 export function ReportCategoryDetailDialog({
@@ -53,6 +56,7 @@ export function ReportCategoryDetailDialog({
   rows = [],
   dateRangeLabel,
   categoryKey = "category",
+  showImages = false,
 }: ReportCategoryDetailDialogProps) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<"amount_desc" | "amount_asc" | "qty_desc" | "qty_asc" | "name_asc">("amount_desc");
@@ -219,7 +223,14 @@ export function ReportCategoryDetailDialog({
                         {idx + 1}
                       </TableCell>
                       <TableCell>
-                        <span className="font-medium text-foreground">{row.name}</span>
+                        {showImages ? (
+                          <div className="flex min-w-0 items-center gap-2">
+                            <ProductThumb fileId={row.imageFileId} name={row.name} size="sm" />
+                            <span className="font-medium text-foreground">{row.name}</span>
+                          </div>
+                        ) : (
+                          <span className="font-medium text-foreground">{row.name}</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm tabular-nums">
                         {row.quantity}

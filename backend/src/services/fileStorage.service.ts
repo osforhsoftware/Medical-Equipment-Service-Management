@@ -10,6 +10,14 @@ const ALLOWED_MIME_TYPES = new Set([
   "text/plain", "text/csv", "video/mp4", "video/webm",
 ]);
 
+export const APPROVED_IMAGE_TYPE_MESSAGE =
+  "This image type is not allowed. You can only upload approved types: JPEG, PNG, and WebP.";
+
+export function unsupportedFileTypeMessage(mimeType: string) {
+  if (mimeType.toLowerCase().startsWith("image/")) return APPROVED_IMAGE_TYPE_MESSAGE;
+  return "This file type is not allowed. You can only upload approved types: JPEG, PNG, WebP, PDF, TXT, CSV, MP4, and WebM.";
+}
+
 function storageRoot() {
   return path.resolve(process.cwd(), env.PRIVATE_STORAGE_PATH);
 }
@@ -23,7 +31,7 @@ function safePath(storageKey: string) {
 
 export class FileStorageService {
   async save(tenantId: string, uploadedById: string, file: Express.Multer.File) {
-    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) throw new AppError("File type is not allowed", 415);
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) throw new AppError(unsupportedFileTypeMessage(file.mimetype), 415);
     if (!file.size || file.size > env.MAX_UPLOAD_BYTES) throw new AppError("File exceeds upload size limit", 413);
     return this.saveBuffer(tenantId, uploadedById, {
       buffer: file.buffer,
@@ -37,7 +45,7 @@ export class FileStorageService {
     uploadedById: string,
     file: { buffer: Buffer; originalName: string; mimeType: string },
   ) {
-    if (!ALLOWED_MIME_TYPES.has(file.mimeType)) throw new AppError("File type is not allowed", 415);
+    if (!ALLOWED_MIME_TYPES.has(file.mimeType)) throw new AppError(unsupportedFileTypeMessage(file.mimeType), 415);
     if (!file.buffer.length || file.buffer.length > env.MAX_UPLOAD_BYTES) {
       throw new AppError("File exceeds upload size limit", 413);
     }

@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { navGroups, navItems, type NavItem } from "@/config/nav";
-import { userCanAccessModule } from "@/lib/userRoles";
+import { userCanAccessModule, userCanOpenPage } from "@/lib/userRoles";
+import type { AppUser } from "@/data/types";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 interface AppSidebarProps {
@@ -126,13 +127,30 @@ function NavItemLink({
   );
 }
 
+function navItemForUser(item: NavItem, user: AppUser, rbacMatrix: Record<string, AppUser["role"][]>): NavItem | null {
+  if (!userCanAccessModule(user, item.label, rbacMatrix, item.roles)) return null;
+  const children = item.children?.filter((child) => userCanOpenPage(user, child.to, rbacMatrix));
+  const canOpenSelf = userCanOpenPage(user, item.to, rbacMatrix);
+  if (item.children?.length) {
+    if (!canOpenSelf && !children?.length) return null;
+    return {
+      ...item,
+      to: canOpenSelf ? item.to : children![0].to,
+      children,
+    };
+  }
+  return canOpenSelf ? item : null;
+}
+
 export function AppSidebar({ open, onClose }: AppSidebarProps) {
   const { user } = useAuth();
   const { rbacMatrix, settings } = useSettings();
   const { pathname, search } = useLocation();
   if (!user) return null;
 
-  const visible = navItems.filter((item) => userCanAccessModule(user, item.label, rbacMatrix, item.roles));
+  const visible = navItems
+    .map((item) => navItemForUser(item, user, rbacMatrix))
+    .filter((item): item is NavItem => item !== null);
   const closeIfOverlay = () => {
     if (window.matchMedia("(max-width: 1023px)").matches) onClose();
   };

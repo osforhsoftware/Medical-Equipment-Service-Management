@@ -7,11 +7,17 @@ import {
   trackingValue,
 } from "@/lib/jobPartsRequest";
 import { upsertOpenStockPurchaseRequest } from "@/lib/stockPurchaseRequest";
+import { requestableQuantity } from "@/lib/inventoryItemClass";
 import { usersRepository } from "@/repositories/users.repository";
 import { Prisma } from "@prisma/client";
 
 const partsRequestInclude = {
-  lines: { include: { inventoryItem: true }, orderBy: { createdAt: "asc" as const } },
+  lines: {
+    include: {
+      inventoryItem: { include: { images: { take: 1, orderBy: { sortOrder: "asc" as const } } } },
+    },
+    orderBy: { createdAt: "asc" as const },
+  },
   job: { select: { id: true, reference: true, customerName: true, engineer: true, status: true } },
 };
 
@@ -159,7 +165,7 @@ export class JobPartsService {
     return prisma.$transaction(async (tx) => {
       const request = await tx.jobPartsRequest.findFirst({
         where: { id: requestId, job: { tenantId } },
-        include: { lines: { include: { inventoryItem: true } }, job: true },
+        include: { lines: partsRequestInclude.lines, job: true },
       });
       if (!request) throw new AppError("Parts request not found", 404);
       if (request.status === "pending") throw new AppError("Approve this request before issuing stock", 409);
@@ -188,7 +194,7 @@ export class JobPartsService {
           ? reservation.quantity - reservation.consumed - reservation.released
           : 0;
         const reservedToUse = Math.min(quantity, Math.max(0, reservedRemaining));
-        const freelyAvailable = item.inStock - item.reserved;
+        const freelyAvailable = requestableQuantity(item);
         if (item.inStock < quantity || freelyAvailable < quantity - reservedToUse) {
           const shortage = quantity - (freelyAvailable + reservedToUse);
           await upsertOpenStockPurchaseRequest(tx, {

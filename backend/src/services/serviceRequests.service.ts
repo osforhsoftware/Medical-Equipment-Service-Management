@@ -19,6 +19,7 @@ import {
 } from "@/services/workflow/serviceTicketStateMachine";
 import { completedAtForStatusChange } from "@/lib/ticketBoardArchive";
 import { normalizeAdditionalFields } from "@/lib/additionalFields";
+import { equipmentTicketLabel } from "@/lib/equipmentLabel";
 
 const ASSIGNABLE_STAFF_ROLES = ["coordinator", "inspector", "estimator", "engineer", "inventory", "billing"];
 const ASSIGNMENT_SCOPED_ROLES = ["inspector", "engineer", "inventory", "billing"];
@@ -331,7 +332,7 @@ export class ServiceRequestsService {
       if (equip.customerId && equip.customerId !== customer.id) {
         throw new AppError("All selected equipment must belong to the selected customer", 400);
       }
-      const label = `${equip.name} (${equip.model})`;
+      const label = equipmentTicketLabel(equip);
       equipmentItems.push({ equipmentId: eqId, equipmentName: label, assetTag: equip.assetTag });
       if (!primaryEquipId) {
         primaryEquipId = eqId;

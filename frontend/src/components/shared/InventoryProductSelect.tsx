@@ -12,6 +12,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { BackendInventoryItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { ProductThumb, productImageFileId } from "@/components/shared/ProductThumb";
 
 function availableQty(item: BackendInventoryItem) {
   return item.available ?? Math.max(0, item.inStock - item.reserved);
@@ -34,6 +35,7 @@ type InventoryProductSelectProps = {
   disabled?: boolean;
   id?: string;
   modal?: boolean;
+  showImage?: boolean;
 };
 
 export function InventoryProductSelect({
@@ -49,6 +51,7 @@ export function InventoryProductSelect({
   disabled,
   id,
   modal = true,
+  showImage = true,
 }: InventoryProductSelectProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -100,8 +103,11 @@ export function InventoryProductSelect({
             triggerClassName,
           )}
         >
-          <span className="truncate text-left">
-            {selected ? getOptionLabel(selected) : placeholder}
+          <span className="flex min-w-0 items-center gap-2 truncate text-left">
+            {showImage && selected ? (
+              <ProductThumb fileId={productImageFileId(selected)} name={selected.name} size="xs" />
+            ) : null}
+            <span className="truncate">{selected ? getOptionLabel(selected) : placeholder}</span>
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
@@ -135,6 +141,9 @@ export function InventoryProductSelect({
                     <Check
                       className={cn("mr-2 h-4 w-4 shrink-0", isSelected ? "opacity-100" : "opacity-0")}
                     />
+                    {showImage ? (
+                      <ProductThumb fileId={productImageFileId(item)} name={item.name} size="xs" className="mr-2" />
+                    ) : null}
                     <span className="min-w-0 flex-1 truncate">{getOptionLabel(item)}</span>
                   </CommandItem>
                 );

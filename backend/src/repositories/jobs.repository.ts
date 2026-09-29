@@ -14,7 +14,14 @@ const jobIncludes = {
   signature: true,
   stockDeductions: { orderBy: { createdAt: "desc" as const } },
   partsRequests: {
-    include: { lines: { include: { inventoryItem: true }, orderBy: { createdAt: "asc" as const } } },
+    include: {
+      lines: {
+        include: {
+          inventoryItem: { include: { images: { take: 1, orderBy: { sortOrder: "asc" } } } },
+        },
+        orderBy: { createdAt: "asc" as const },
+      },
+    },
     orderBy: { createdAt: "desc" as const },
   },
 } satisfies Prisma.ServiceJobInclude;

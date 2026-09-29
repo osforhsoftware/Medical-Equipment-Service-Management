@@ -299,6 +299,7 @@ const PATH_TO_MODULE: Record<string, string> = {
   "/app/purchase-orders": "Purchase",
   "/app/purchase-returns": "Purchase Returns",
 
+  "/app/stock-reservations": "Inventory",
   "/app/stock-ledger": "Inventory",
   "/app/stock-transfers": "Inventory",
   "/app/stock-locations": "Inventory",

@@ -5,6 +5,10 @@ export const convertSalesQuoteSchema = z.object({
   notes: z.string().max(5000).optional().nullable(),
 });
 
+export const rejectSalesQuoteSchema = z.object({
+  note: z.string().trim().max(2000).optional().nullable(),
+});
+
 export const salesInvoiceSchema = z.object({
   dueAt: z.string().optional(),
   commissionRate: z.coerce.number().min(0).max(100).optional().default(0),
@@ -20,6 +24,12 @@ export const salesOrderLineSchema = z.object({
   unitPrice: z.coerce.number().min(0, "Sale price cannot be negative"),
   discount: z.coerce.number().min(0).optional().default(0),
   taxRate: z.coerce.number().min(0).max(100).optional().default(0),
+});
+
+export const updateSalesQuoteSchema = z.object({
+  notes: z.string().max(5000).optional().nullable(),
+  validUntil: z.string().min(1, "Valid until date is required"),
+  lines: z.array(salesOrderLineSchema).min(1, "Add at least one product"),
 });
 
 export const upsertSalesOrderSchema = z.object({

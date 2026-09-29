@@ -25,6 +25,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { ProductThumb } from "@/components/shared/ProductThumb";
 import { StatCard } from "@/components/shared/StatCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { RoleGuard } from "@/components/auth/RoleGuard";
@@ -66,6 +67,8 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
+import { userCanOpenPage } from "@/lib/userRoles";
 import {
   api,
   ApiError,
@@ -102,7 +105,8 @@ export default function Sales() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { hasRole } = useAuth();
+  const { user, hasRole } = useAuth();
+  const { rbacMatrix } = useSettings();
   const canBuild = hasRole(SALES_WRITE_ROLES);
   const canBill = hasRole(SALES_BILL_ROLES);
 
@@ -122,6 +126,7 @@ export default function Sales() {
     title: string;
     subtitle?: string;
     rows?: ReportCategoryItem[];
+    showImages?: boolean;
   }>({
     open: false,
     title: "",
@@ -332,12 +337,18 @@ export default function Sales() {
     toast.success("Sales report summary exported for Excel.");
   };
 
-  const openCategorySeeAll = (title: string, rows?: ReportCategoryItem[], subtitle?: string) => {
+  const openCategorySeeAll = (
+    title: string,
+    rows?: ReportCategoryItem[],
+    subtitle?: string,
+    showImages = false,
+  ) => {
     setCategoryModal({
       open: true,
       title,
       subtitle,
       rows: rows ?? [],
+      showImages,
     });
   };
 
@@ -542,7 +553,7 @@ export default function Sales() {
           </Link>
           <span className="mx-0.5 h-4 w-px bg-border" />
           <span className="mr-0.5 text-xs font-medium text-muted-foreground">Flow</span>
-          {FLOW_STEPS.map((step, index) => {
+          {FLOW_STEPS.filter((step) => user && userCanOpenPage(user, step.to, rbacMatrix)).map((step, index) => {
             const active =
               (step.key === "orders" && stage === "orders") ||
               (step.key === "delivery" && stage === "delivery") ||
@@ -1121,6 +1132,7 @@ export default function Sales() {
                           "Product-wise Sales Breakdown",
                           reports?.productWise,
                           `All product sales recorded in ${dateRangeLabel}`,
+                          true,
                         )
                       }
                     >
@@ -1132,8 +1144,11 @@ export default function Sales() {
                       <p className="text-xs text-muted-foreground py-4 text-center">No product data for this period.</p>
                     ) : (
                       (reports?.productWise ?? []).slice(0, 5).map((row) => (
-                        <div key={row.name} className="flex items-center justify-between text-xs py-1 border-b border-border/40 last:border-none">
-                          <span className="truncate pr-2 font-medium">{row.name}</span>
+                        <div key={row.name} className="flex items-center justify-between gap-2 text-xs py-1 border-b border-border/40 last:border-none">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <ProductThumb fileId={row.imageFileId} name={row.name} size="xs" />
+                            <span className="truncate font-medium">{row.name}</span>
+                          </div>
                           <span className="shrink-0 font-mono text-muted-foreground">
                             {row.quantity} · <span className="text-foreground font-semibold">{formatCurrency(row.amount)}</span>
                           </span>
@@ -1159,6 +1174,7 @@ export default function Sales() {
                           "Spare Parts Sales Breakdown",
                           reports?.sparePartsSales,
                           `All spare parts sold in ${dateRangeLabel}`,
+                          true,
                         )
                       }
                     >
@@ -1170,8 +1186,11 @@ export default function Sales() {
                       <p className="text-xs text-muted-foreground py-4 text-center">No spare parts sold in this period.</p>
                     ) : (
                       (reports?.sparePartsSales ?? []).slice(0, 5).map((row) => (
-                        <div key={row.name} className="flex items-center justify-between text-xs py-1 border-b border-border/40 last:border-none">
-                          <span className="truncate pr-2 font-medium">{row.name}</span>
+                        <div key={row.name} className="flex items-center justify-between gap-2 text-xs py-1 border-b border-border/40 last:border-none">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <ProductThumb fileId={row.imageFileId} name={row.name} size="xs" />
+                            <span className="truncate font-medium">{row.name}</span>
+                          </div>
                           <span className="shrink-0 font-mono text-muted-foreground">
                             {row.quantity} · <span className="text-foreground font-semibold">{formatCurrency(row.amount)}</span>
                           </span>
@@ -1197,6 +1216,7 @@ export default function Sales() {
                           "Consumables Sales Breakdown",
                           reports?.consumablesSales,
                           `All consumable items sold in ${dateRangeLabel}`,
+                          true,
                         )
                       }
                     >
@@ -1208,8 +1228,11 @@ export default function Sales() {
                       <p className="text-xs text-muted-foreground py-4 text-center">No consumables sold in this period.</p>
                     ) : (
                       (reports?.consumablesSales ?? []).slice(0, 5).map((row) => (
-                        <div key={row.name} className="flex items-center justify-between text-xs py-1 border-b border-border/40 last:border-none">
-                          <span className="truncate pr-2 font-medium">{row.name}</span>
+                        <div key={row.name} className="flex items-center justify-between gap-2 text-xs py-1 border-b border-border/40 last:border-none">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <ProductThumb fileId={row.imageFileId} name={row.name} size="xs" />
+                            <span className="truncate font-medium">{row.name}</span>
+                          </div>
                           <span className="shrink-0 font-mono text-muted-foreground">
                             {row.quantity} · <span className="text-foreground font-semibold">{formatCurrency(row.amount)}</span>
                           </span>
@@ -1433,8 +1456,13 @@ export default function Sales() {
                               {formatDate(line.orderedAt)}
                             </TableCell>
                             <TableCell>
-                              <p className="font-medium text-foreground">{line.description}</p>
-                              {line.sku && <p className="font-mono text-[11px] text-muted-foreground">SKU: {line.sku}</p>}
+                              <div className="flex min-w-0 items-center gap-2">
+                                <ProductThumb fileId={line.imageFileId} name={line.description} size="sm" />
+                                <div className="min-w-0">
+                                  <p className="font-medium text-foreground">{line.description}</p>
+                                  {line.sku && <p className="font-mono text-[11px] text-muted-foreground">SKU: {line.sku}</p>}
+                                </div>
+                              </div>
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline" className="text-[11px] font-normal capitalize">
@@ -1479,7 +1507,7 @@ export default function Sales() {
                     size="sm"
                     className="h-7 text-xs text-primary gap-1"
                     onClick={() =>
-                      openCategorySeeAll("Top Selling Products", desk?.topSellingProducts, "Historical top selling products")
+                      openCategorySeeAll("Top Selling Products", desk?.topSellingProducts, "Historical top selling products", true)
                     }
                   >
                     See all ({desk?.topSellingProducts?.length ?? 0}) <ChevronRight className="h-3 w-3" />
@@ -1490,8 +1518,11 @@ export default function Sales() {
                     <p className="text-sm text-muted-foreground">Record a sale to populate this list.</p>
                   ) : (
                     desk?.topSellingProducts.map((row) => (
-                      <div key={row.name} className="flex items-center justify-between text-sm py-1 border-b border-border/40 last:border-none">
-                        <span className="truncate pr-2 font-medium">{row.name}</span>
+                      <div key={row.name} className="flex items-center justify-between gap-2 text-sm py-1 border-b border-border/40 last:border-none">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <ProductThumb fileId={row.imageFileId} name={row.name} size="sm" />
+                          <span className="truncate font-medium">{row.name}</span>
+                        </div>
                         <span className="shrink-0 text-muted-foreground font-mono">
                           {row.quantity} sold · <span className="font-semibold text-foreground">{formatCurrency(row.amount)}</span>
                         </span>
@@ -1522,9 +1553,12 @@ export default function Sales() {
                         className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/50"
                         onClick={() => navigate(`/app/inventory/${item.id}`)}
                       >
-                        <div className="min-w-0">
-                          <p className="font-medium truncate">{item.name}</p>
-                          <p className="font-mono text-xs text-muted-foreground">{item.sku} · {item.category}</p>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <ProductThumb fileId={item.imageFileId} name={item.name} size="sm" />
+                          <div className="min-w-0">
+                            <p className="font-medium truncate">{item.name}</p>
+                            <p className="font-mono text-xs text-muted-foreground">{item.sku} · {item.category}</p>
+                          </div>
                         </div>
                         <span className="shrink-0 text-warning-foreground font-medium text-xs font-mono">
                           {item.available} available
@@ -1558,6 +1592,7 @@ export default function Sales() {
           subtitle={categoryModal.subtitle}
           rows={categoryModal.rows}
           dateRangeLabel={dateRangeLabel}
+          showImages={categoryModal.showImages}
         />
 
         <SalesReportPrintDialog

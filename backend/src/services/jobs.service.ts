@@ -12,7 +12,7 @@ import {
   assertJobTransition,
   resolveTicketEventStatus,
 } from "@/services/workflow/serviceTicketStateMachine";
-import { fileStorageService } from "@/services/fileStorage.service";
+import { APPROVED_IMAGE_TYPE_MESSAGE, fileStorageService } from "@/services/fileStorage.service";
 import {
   closeAllOpenWorkLogs,
   closeWorkLog,
@@ -26,6 +26,7 @@ import { mergeJobStageDetails } from "@/lib/jobStageDetails";
 import { upsertOpenStockPurchaseRequest } from "@/lib/stockPurchaseRequest";
 import { loadJobWorkbenchContext, summarizeStockDeductions } from "@/lib/jobWorkbench";
 import { issuedRemaining, rollupPartsRequestStatus, trackingValue } from "@/lib/jobPartsRequest";
+import { requestableQuantity } from "@/lib/inventoryItemClass";
 
 const ASSIGNABLE_JOB_ROLES = ["coordinator", "engineer", "qa"];
 const jobSyncInflight = new Map<string, Promise<void>>();
@@ -882,6 +883,9 @@ export class JobsService {
         fileId = stored.id;
         mimeType = stored.mimeType;
       }
+      if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType)) {
+        throw new AppError(APPROVED_IMAGE_TYPE_MESSAGE, 415);
+      }
       const row = await prisma.jobPhoto.create({
         data: {
           jobId: id,
@@ -1030,6 +1034,13 @@ export class JobsService {
       for (const row of lines) {
         const item = await tx.inventoryItem.findFirst({ where: { id: row.inventoryItemId, tenantId } });
         if (!item) throw new AppError("Inventory item not found", 404);
+        const requestable = requestableQuantity(item);
+        if (row.quantity > requestable) {
+          throw new AppError(
+            `Only ${requestable} of ${item.name} can be requested. Minimum stock (${item.reorderLevel}) and reserved stock (${item.reserved}) stay in the warehouse.`,
+            409,
+          );
+        }
         await tx.jobPartsRequestLine.create({
           data: {
             requestId: created.id,
@@ -1261,7 +1272,7 @@ export class JobsService {
         : 0;
       const reservedToConsume = Math.min(quantity, Math.max(0, reservedRemaining));
       const unreservedNeeded = quantity - reservedToConsume;
-      const freelyAvailable = item.inStock - item.reserved;
+      const freelyAvailable = requestableQuantity(item);
       if (item.inStock < quantity || freelyAvailable < unreservedNeeded) {
         const shortage = quantity - (freelyAvailable + reservedToConsume);
         await upsertOpenStockPurchaseRequest(tx, {

@@ -35,6 +35,7 @@ import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
 import { api } from "@/lib/api";
 import { toast } from "@/lib/toast";
+import { APPROVED_IMAGE_ACCEPT, uploadTypeErrorMessage } from "@/lib/uploadFileTypes";
 
 const DEMO_MODULE_ROWS: { label: string; countKey: keyof DemoSeedStatus["counts"] }[] = [
   { label: "Customers", countKey: "customers" },
@@ -83,6 +84,9 @@ export default function Settings() {
   const [logoUrl, setLogoUrl] = useState("");
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [defaultTaxRate, setDefaultTaxRate] = useState("8");
+  const [marginMode, setMarginMode] = useState<"on" | "fixed" | "off">("fixed");
+  const [minMarginPct, setMinMarginPct] = useState("20");
+  const [savingMargin, setSavingMargin] = useState(false);
   const [rbacMatrix, setRbacMatrix] = useState<Record<string, Role[]>>(buildDefaultRbacMatrix());
   const [savingOrg, setSavingOrg] = useState(false);
   const [savingRbac, setSavingRbac] = useState(false);
@@ -182,6 +186,8 @@ export default function Settings() {
     setCompanyWebsite(settings.companyWebsite ?? "");
     setLogoUrl(settings.logoUrl ?? "");
     setDefaultTaxRate(String(settings.defaultTaxRate));
+    setMarginMode(settings.marginMode === "on" || settings.marginMode === "off" ? settings.marginMode : "fixed");
+    setMinMarginPct(String(settings.minMarginPct ?? 20));
     setRbacMatrix(
       Object.fromEntries(
         navItems.map((item) => [
@@ -230,6 +236,27 @@ export default function Settings() {
       }
     } finally {
       setSavingOrg(false);
+    }
+  };
+
+  const saveMargin = async () => {
+    const pct = Number(minMarginPct);
+    if (marginMode === "fixed" && (!Number.isFinite(pct) || pct < 0 || pct > 100)) {
+      toast.error("Enter a margin between 0 and 100.");
+      return;
+    }
+    setSavingMargin(true);
+    try {
+      const updated = await api.updateSettings({
+        marginMode,
+        minMarginPct: Number.isFinite(pct) ? pct : 20,
+      });
+      updateLocal(updated);
+      toast.success("Margin rule saved");
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to save margin rule" });
+    } finally {
+      setSavingMargin(false);
     }
   };
 
@@ -331,7 +358,21 @@ export default function Settings() {
                   </div>
                   <div className="grid flex-1 gap-2">
                     <Label htmlFor="tenant-logo">Tenant logo</Label>
-                    <Input id="tenant-logo" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)} />
+                    <Input id="tenant-logo" type="file" accept={APPROVED_IMAGE_ACCEPT} onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null;
+                      if (!file) {
+                        setLogoFile(null);
+                        return;
+                      }
+                      const error = uploadTypeErrorMessage(file, true);
+                      if (error) {
+                        toast.error(error);
+                        event.target.value = "";
+                        setLogoFile(null);
+                        return;
+                      }
+                      setLogoFile(file);
+                    }} />
                     <p className="text-xs text-muted-foreground">Used on estimates, invoices and branded service documents.</p>
                   </div>
                 </div>
@@ -430,6 +471,57 @@ export default function Settings() {
                 </div>
               </div>
             </form>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-base">Margin</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Controls the minimum profit margin required before an estimate or sale can be saved.
+              </p>
+            </div>
+            <Button size="sm" disabled={savingMargin} onClick={() => void saveMargin()}>
+              {savingMargin ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Save margin
+            </Button>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="margin-mode">Margin rule</Label>
+              <Select value={marginMode} onValueChange={(value) => setMarginMode(value as "on" | "fixed" | "off")}>
+                <SelectTrigger id="margin-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="on">On</SelectItem>
+                  <SelectItem value="fixed">Fixed</SelectItem>
+                  <SelectItem value="off">Off</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {marginMode === "off"
+                  ? "No minimum margin. A line at 0% can be saved. Prices below cost are still blocked."
+                  : marginMode === "fixed"
+                    ? "Every line must meet the fixed percent below."
+                    : "Dynamic. Each line must meet that item's own selling-price margin. Items sold at cost are allowed."}
+              </p>
+            </div>
+            {marginMode === "fixed" ? (
+              <div className="grid gap-2">
+                <Label htmlFor="min-margin">Minimum margin (%)</Label>
+                <Input
+                  id="min-margin"
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={minMarginPct}
+                  onChange={(e) => setMinMarginPct(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Default is 20%. Raise the selling price when a line is under this.</p>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 

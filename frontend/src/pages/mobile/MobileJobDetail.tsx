@@ -55,9 +55,10 @@ import { userCanAccessPath } from "@/lib/userRoles";
 import { api, type BackendInventoryItem, type BackendServiceJob, type JobPhotoInput } from "@/lib/api";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
 import { defaultDatePlusDays, formatDate, formatDateTime, formatJobStatus } from "@/lib/format";
-import { formatInventoryItemClass } from "@/lib/inventoryItemClass";
+import { formatInventoryItemClass, inventoryMatchesExtraType, requestableStock } from "@/lib/inventoryItemClass";
 import { downloadServiceReportPdf } from "@/lib/serviceReport";
 import { toast } from "@/lib/toast";
+import { APPROVED_IMAGE_ACCEPT, keepApprovedFiles } from "@/lib/uploadFileTypes";
 
 const JOB_STATUS_OPTIONS = [
   { value: "scheduled", label: "Assigned" },
@@ -350,7 +351,9 @@ export default function MobileJobDetail() {
 
     setActionSaving(true);
     try {
-      const selectedItem = inventory.find((item) => item.id === partsItemId);
+      const selectedItem = inventory.find((item) => item.id === partsItemId && inventoryMatchesExtraType(item, "product"));
+      const requestable = selectedItem ? requestableStock(selectedItem) : 0;
+      const issueQty = selectedItem ? Math.min(partsQty, requestable) : 0;
       await api.addJobExtra(job.id, {
         inventoryItemId: selectedItem?.id ?? null,
         description: selectedItem?.name ?? partsNote.trim().slice(0, 120),
@@ -360,13 +363,15 @@ export default function MobileJobDetail() {
         unitPrice: Number(selectedItem?.unitCost ?? 0),
         taxRate: 0,
       });
-      try {
-        await api.requestJobParts(job.id, {
-          notes: partsNote.trim(),
-          lines: selectedItem ? [{ inventoryItemId: selectedItem.id, quantity: partsQty }] : [],
-        });
-      } catch {
-        /* job may already be partsPending */
+      if (selectedItem && issueQty > 0) {
+        try {
+          await api.requestJobParts(job.id, {
+            notes: partsNote.trim(),
+            lines: [{ inventoryItemId: selectedItem.id, quantity: issueQty }],
+          });
+        } catch {
+          /* job may already be partsPending */
+        }
       }
       setPartsNote("");
       setPartsItemId("");
@@ -826,8 +831,9 @@ export default function MobileJobDetail() {
       <ActionDrawer open={photosOpen} onOpenChange={(open) => { if (!open) { photosValidation.reset(); resetPhotoDraft(); } setPhotosOpen(open); }} title="Upload Photos" contentRef={photosDrawerRef}>
         <form noValidate onSubmit={(e) => { e.preventDefault(); void handleUploadPhotos(); }}>
           <p className="text-sm text-muted-foreground">Attach before/after photos. Add a time or note for each image.</p>
-          <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => {
-            const files = Array.from(e.target.files ?? []);
+          <input ref={photoInputRef} type="file" accept={APPROVED_IMAGE_ACCEPT} multiple className="hidden" onChange={(e) => {
+            const { allowed: files, error } = keepApprovedFiles(Array.from(e.target.files ?? []), true);
+            if (error) toast.error(error);
             setPhotoFiles(files);
             setPhotoCaptions(files.map(() => ""));
             photosValidation.clearError("photos");
@@ -886,13 +892,17 @@ export default function MobileJobDetail() {
             <div>
               <Label>Inventory product (optional)</Label>
               <InventoryProductSelect
-                items={inventory}
+                items={inventory.filter((item) => inventoryMatchesExtraType(item, "product"))}
                 value={partsItemId || ""}
                 onValueChange={setPartsItemId}
                 placeholder="Select a product, if required"
-                getOptionLabel={(item) => `${item.name} (${item.sku})`}
+                emptyText="No product items in inventory."
+                getOptionLabel={(item) => `${item.name} (${item.sku}) — ${requestableStock(item)} available`}
                 triggerClassName="mt-1.5"
               />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Available quantity excludes minimum stock and reserved stock.
+              </p>
             </div>
             <div>
               <Label htmlFor="mobile-parts-qty">Quantity</Label>

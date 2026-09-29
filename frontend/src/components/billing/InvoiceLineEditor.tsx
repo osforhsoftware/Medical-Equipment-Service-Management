@@ -185,6 +185,7 @@ export function InvoiceLineEditor({
                           placeholder="Inventory item"
                           emptyText="No inventory products"
                           triggerClassName="h-8 min-w-0 text-xs"
+                          showImage={false}
                         />
                       </div>
                       {shouldShow?.(descKey) && errors?.[descKey] ? (

@@ -99,6 +99,12 @@ export default function EstimateDetail() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (estimate && !estimate.serviceRequestId) {
+      navigate(`/app/sales/quotations/${estimate.id}`, { replace: true });
+    }
+  }, [estimate, navigate]);
+
   const act = async (action: "approved" | "rejected" | "revision") => {
     if (!estimate) return;
     const values = { decisionNote, engineerId };
