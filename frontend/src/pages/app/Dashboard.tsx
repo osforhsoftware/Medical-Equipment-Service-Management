@@ -58,7 +58,7 @@ import {
   formatJobStatus,
   formatRelativeTime,
 } from "@/lib/format";
-import { getImportantNotifications } from "@/lib/notificationPriority";
+import { resolveNotificationHref } from "@/lib/notificationLink";
 import { emitNotificationsUpdated, NOTIFICATIONS_UPDATED } from "@/lib/notifications-events";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
@@ -367,9 +367,17 @@ export default function Dashboard() {
   }, [role, user, rbacMatrix]);
   const canCreateTicket = hasRole(TICKET_CREATE_ROLES);
 
-  const importantBanner = useMemo(() => {
-    const important = getImportantNotifications(notifications, 5);
-    return important.find((n) => !dismissedImportantIds.has(n.id)) ?? null;
+  const bannerNotifications = useMemo(() => {
+    const seen = new Set<string>();
+    return [...notifications]
+      .filter((n) => !dismissedImportantIds.has(n.id))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .filter((n) => {
+        const key = `${n.type}|${n.title}|${n.body}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
   }, [notifications, dismissedImportantIds]);
 
   const recentNotifications = useMemo(
@@ -395,6 +403,7 @@ export default function Dashboard() {
   };
 
   const openNotification = async (id: string) => {
+    const notification = notifications.find((n) => n.id === id);
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
     try {
       await api.markNotificationRead(id);
@@ -402,7 +411,8 @@ export default function Dashboard() {
     } catch {
       void refreshNotifications();
     }
-    navigate("/app/notifications");
+    const href = notification ? await resolveNotificationHref(notification) : "/app/service-tickets";
+    navigate(href);
   };
 
   const activity = data?.activityTrend ?? data?.revenueTrend.map((row) => ({
@@ -485,9 +495,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {importantBanner ? (
+      {bannerNotifications.length > 0 ? (
         <ImportantNotificationBanner
-          notification={importantBanner}
+          notifications={bannerNotifications}
           onDismiss={dismissImportant}
           onOpen={(id) => void openNotification(id)}
         />

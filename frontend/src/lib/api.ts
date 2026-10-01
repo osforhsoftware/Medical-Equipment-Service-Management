@@ -434,6 +434,13 @@ export interface BackendInspectionRecommendation {
   quantity: string | number;
   estimatedCost: string | number;
   procurementStatus?: string | null;
+  inventoryItem?: {
+    sellingPrice?: string | number | null;
+    unitCost?: string | number | null;
+  } | null;
+  catalogItem?: {
+    unitPrice?: string | number | null;
+  } | null;
 }
 
 export interface BackendInspectionReport {

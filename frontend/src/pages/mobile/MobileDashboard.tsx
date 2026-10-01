@@ -27,6 +27,7 @@ import {
   showTodaySchedule,
 } from "@/lib/mobileStaffDashboard";
 import { ApiError, api, type BackendNotification, type DashboardData, type DashboardQueueItem } from "@/lib/api";
+import { resolveNotificationHref } from "@/lib/notificationLink";
 import { getImportantNotifications } from "@/lib/notificationPriority";
 import { emitNotificationsUpdated } from "@/lib/notifications-events";
 import { formatDate, formatJobStatus } from "@/lib/format";
@@ -182,6 +183,7 @@ export default function MobileDashboard() {
   );
 
   const openAlert = async (id: string) => {
+    const notification = notifications.find((n) => n.id === id);
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
     try {
       await api.markNotificationRead(id);
@@ -189,7 +191,8 @@ export default function MobileDashboard() {
     } catch {
       await load();
     }
-    navigate("/app/notifications");
+    const href = notification ? await resolveNotificationHref(notification) : "/app/service-tickets";
+    navigate(href);
   };
 
   if (loading && !data) {

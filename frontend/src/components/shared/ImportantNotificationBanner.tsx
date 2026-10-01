@@ -46,67 +46,81 @@ const iconToneMap = {
 } as const;
 
 interface ImportantNotificationBannerProps {
-  notification: BackendNotification;
+  notifications: BackendNotification[];
   onDismiss: (id: string) => void;
   onOpen: (id: string) => void;
 }
 
 export function ImportantNotificationBanner({
-  notification,
+  notifications,
   onDismiss,
   onOpen,
 }: ImportantNotificationBannerProps) {
-  const Icon = iconMap[notification.type] ?? Bell;
+  if (notifications.length === 0) return null;
 
   return (
     <div
-      role="alert"
-      className={cn(
-        "relative flex items-start gap-3 rounded-lg border px-4 py-3 shadow-sm",
-        toneMap[notification.type],
-      )}
+      role="region"
+      aria-label="Recent notifications"
+      className="max-h-[7.25rem] space-y-1.5 overflow-y-auto pr-0.5"
     >
-      <span
-        className={cn(
-          "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
-          iconToneMap[notification.type],
-        )}
-      >
-        <Icon className="h-4 w-4" />
-      </span>
+      {notifications.map((notification) => {
+        const Icon = iconMap[notification.type] ?? Bell;
+        return (
+          <div
+            key={notification.id}
+            role="alert"
+            className={cn(
+              "flex items-center gap-2.5 rounded-lg border px-3 py-2 shadow-sm",
+              toneMap[notification.type],
+            )}
+          >
+            <span
+              className={cn(
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
+                iconToneMap[notification.type],
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </span>
 
-      <button
-        type="button"
-        onClick={() => onOpen(notification.id)}
-        className="min-w-0 flex-1 text-left"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold text-foreground">{notification.title}</p>
-          <Badge variant="outline" className="text-[10px]">
-            {typeLabel[notification.type]}
-          </Badge>
-          {!notification.read ? (
-            <Badge variant="secondary" className="text-[10px]">
-              New
-            </Badge>
-          ) : null}
-        </div>
-        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{notification.body}</p>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          {formatRelativeTime(notification.createdAt)}
-        </p>
-      </button>
+            <button
+              type="button"
+              onClick={() => onOpen(notification.id)}
+              className="min-w-0 flex-1 text-left"
+            >
+              <div className="flex flex-wrap items-center gap-1.5">
+                <p className="text-sm font-semibold leading-tight text-foreground">
+                  {notification.title}
+                </p>
+                <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                  {typeLabel[notification.type]}
+                </Badge>
+                {!notification.read ? (
+                  <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                    New
+                  </Badge>
+                ) : null}
+                <span className="text-[11px] text-muted-foreground">
+                  {formatRelativeTime(notification.createdAt)}
+                </span>
+              </div>
+              <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{notification.body}</p>
+            </button>
 
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-        aria-label="Dismiss important notification"
-        onClick={() => onDismiss(notification.id)}
-      >
-        <X className="h-4 w-4" />
-      </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+              aria-label={`Dismiss ${notification.title}`}
+              onClick={() => onDismiss(notification.id)}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        );
+      })}
     </div>
   );
 }

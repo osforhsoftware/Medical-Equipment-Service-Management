@@ -1,11 +1,30 @@
+import { firstPositivePrice } from "@/components/shared/InventoryHelpers";
 import {
   api,
   type BackendCustomer,
   type BackendEquipment,
+  type BackendInspectionRecommendation,
   type BackendInspectionReport,
   type BackendServiceRequest,
   type BackendTimelineEvent,
 } from "@/lib/api";
+
+/** Amount for a recommended line: current selling price × quantity (cost price if selling price is unset). */
+export function recommendationLinePrice(item: Pick<
+  BackendInspectionRecommendation,
+  "quantity" | "estimatedCost" | "inventoryItem" | "catalogItem"
+>): number {
+  const unit = firstPositivePrice(
+    item.inventoryItem?.sellingPrice,
+    item.inventoryItem?.unitCost,
+    item.catalogItem?.unitPrice,
+  );
+  const qty = Number(item.quantity);
+  const quantity = Number.isFinite(qty) && qty > 0 ? qty : 1;
+  if (unit > 0) return Math.round(unit * quantity * 100) / 100;
+  const stored = Number(item.estimatedCost);
+  return Number.isFinite(stored) && stored > 0 ? stored : 0;
+}
 
 export function displayOrFallback(value: unknown, fallback = "") {
   if (value === null || value === undefined) return fallback;

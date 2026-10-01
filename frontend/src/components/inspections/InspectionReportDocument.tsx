@@ -10,7 +10,7 @@ import {
   type BackendInspectionReport,
   type BackendServiceRequest,
 } from "@/lib/api";
-import { displayOrFallback, formatErrorCodes, formatJsonField } from "@/lib/inspectionReport";
+import { displayOrFallback, formatErrorCodes, formatJsonField, recommendationLinePrice } from "@/lib/inspectionReport";
 import { parseCustomerAdditionalFields } from "@/lib/customerFields";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -227,9 +227,7 @@ export function InspectionReportDocument({
                     {item.description ? (
                       <span className="doc-parts-desc">{item.description}</span>
                     ) : null}
-                    {item.estimatedCost != null ? (
-                      <span className="doc-parts-cost">{formatCurrency(item.estimatedCost)}</span>
-                    ) : null}
+                    <span className="doc-parts-cost">{formatCurrency(recommendationLinePrice(item))}</span>
                   </li>
                 ))}
               </ul>

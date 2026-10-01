@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   Bell,
@@ -16,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { api, type BackendNotification } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/format";
+import { resolveNotificationHref } from "@/lib/notificationLink";
 import { emitNotificationsUpdated } from "@/lib/notifications-events";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -104,6 +106,7 @@ function groupLabel(createdAt: string, now = new Date()): string {
 const GROUP_ORDER = ["Today", "Yesterday", "Earlier this week", "Older"] as const;
 
 export default function Notifications() {
+  const navigate = useNavigate();
   const [items, setItems] = useState<BackendNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [markingAll, setMarkingAll] = useState(false);
@@ -160,18 +163,22 @@ export default function Notifications() {
     }));
   }, [filtered]);
 
-  const markRead = async (id: string) => {
+  const openNotification = async (id: string) => {
     const target = items.find((n) => n.id === id);
-    if (!target || target.read) return;
+    if (!target) return;
 
-    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
-    try {
-      await api.markNotificationRead(id);
-      emitNotificationsUpdated();
-    } catch (err) {
-      setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: false } : n)));
-      toast.apiError(err, { fallback: "Failed to mark notification as read" });
+    if (!target.read) {
+      setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+      try {
+        await api.markNotificationRead(id);
+        emitNotificationsUpdated();
+      } catch (err) {
+        setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: false } : n)));
+        toast.apiError(err, { fallback: "Failed to mark notification as read" });
+      }
     }
+
+    navigate(await resolveNotificationHref(target));
   };
 
   const markAll = async () => {
@@ -335,7 +342,7 @@ export default function Notifications() {
                     <li key={n.id}>
                       <button
                         type="button"
-                        onClick={() => void markRead(n.id)}
+                        onClick={() => void openNotification(n.id)}
                         className={cn(
                           "group relative flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted/35",
                           !n.read && tone.unreadBg,

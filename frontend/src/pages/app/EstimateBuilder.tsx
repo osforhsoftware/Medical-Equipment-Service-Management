@@ -64,6 +64,18 @@ const PRICE_CATEGORY_MULTIPLIER: Record<string, number> = {
   standard: 1.0,     // same as retail
 };
 
+function partUnitPrice(
+  item: { sellingPrice?: string | number | null; unitCost?: string | number | null } | undefined,
+  recommendation: { estimatedCost?: string | number | null; quantity?: string | number | null },
+): number {
+  const fromInventory = firstPositivePrice(item?.sellingPrice, item?.unitCost);
+  if (fromInventory > 0) return fromInventory;
+  const stored = Number(recommendation.estimatedCost) || 0;
+  if (stored <= 0) return 0;
+  const qty = Number(recommendation.quantity) || 1;
+  return qty > 0 ? stored / qty : stored;
+}
+
 function priceForCategory(basePrice: number, category: string | null | undefined): number {
   if (!category) return basePrice;
   const key = category.toLowerCase().trim();
@@ -202,10 +214,7 @@ export default function EstimateBuilder() {
                 partNumber: item?.sku,
                 quantity: Number(r.quantity) || 1,
                 unitPrice:
-                  priceForCategory(
-                    firstPositivePrice(item?.sellingPrice, r.estimatedCost, item?.unitCost),
-                    customer?.priceCategory,
-                  ) + delivery,
+                  priceForCategory(partUnitPrice(item, r), customer?.priceCategory) + delivery,
               });
             }),
           );
@@ -221,10 +230,7 @@ export default function EstimateBuilder() {
                 inventoryItemId: r.inventoryItemId,
                 partNumber: item?.sku,
                 quantity: Number(r.quantity) || 1,
-                unitPrice: priceForCategory(
-                  firstPositivePrice(item?.sellingPrice, r.estimatedCost, item?.unitCost),
-                  customer?.priceCategory,
-                ),
+                unitPrice: priceForCategory(partUnitPrice(item, r), customer?.priceCategory),
               });
             }),
           );

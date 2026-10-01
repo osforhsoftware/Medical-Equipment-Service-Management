@@ -10,6 +10,7 @@ import { validateInspectionSubmission } from "@/utils/inspectionValidation";
 import { ticketAssignmentService } from "@/services/ticketAssignment.service";
 import { normalizeAdditionalFields } from "@/lib/additionalFields";
 import { Prisma } from "@prisma/client";
+import { recommendationLinePrice } from "@/lib/recommendationPrice";
 import { upsertOpenStockPurchaseRequest } from "@/lib/stockPurchaseRequest";
 import { APPROVED_IMAGE_TYPE_MESSAGE } from "@/services/fileStorage.service";
 
@@ -281,7 +282,10 @@ export class InspectionsService {
                 description: part.description?.trim() || `Recommended spare part: ${item.name}`,
                 priority: (part.priority ?? "medium") as never,
                 quantity: requestedQuantity,
-                estimatedCost: Number(item.sellingPrice ?? item.unitCost ?? 0) * requestedQuantity,
+                estimatedCost: recommendationLinePrice({
+                  inventoryItem: item,
+                  quantity: requestedQuantity,
+                }),
                 procurementStatus,
               },
             });

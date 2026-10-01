@@ -38,6 +38,7 @@ import {
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
 import { fieldAria, fieldErrorClass } from "@/lib/formValidation";
 import { formatCurrency, formatDate, formatDateTime, formatServiceStatus } from "@/lib/format";
+import { recommendationLinePrice } from "@/lib/inspectionReport";
 import { toast } from "@/lib/toast";
 
 const editSchema = z.object({
@@ -427,7 +428,7 @@ export default function InspectionDetail() {
                               <td className="py-2.5 pr-3">
                                 <StatusBadge status={item.priority} className="text-[10px]" />
                               </td>
-                              <td className="py-2.5">{formatCurrency(item.estimatedCost)}</td>
+                              <td className="py-2.5">{formatCurrency(recommendationLinePrice(item))}</td>
                             </tr>
                           ))}
                         </tbody>
