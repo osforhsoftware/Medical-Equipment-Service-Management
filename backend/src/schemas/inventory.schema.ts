@@ -6,7 +6,7 @@ const additionalFieldSchema = z.object({
   value: z.string().trim().max(5000).default(""),
 });
 
-export const createInventorySchema = z.object({
+const inventoryFields = z.object({
   sku: z.string().trim().max(64).optional(),
   name: z.string().min(2, "Name is required").max(200),
   itemClass: z.enum(INVENTORY_ITEM_CLASSES).optional().default("spare_part"),
@@ -33,7 +33,24 @@ export const createInventorySchema = z.object({
   additionalFields: z.array(additionalFieldSchema).max(30).optional().nullable(),
 });
 
-export const updateInventorySchema = createInventorySchema.partial();
+function rejectInvertedStockLevels(
+  data: { reorderLevel?: number; maxLevel?: number },
+  ctx: z.RefinementCtx,
+) {
+  const minLevel = data.reorderLevel ?? 0;
+  const maxLevel = data.maxLevel ?? 0;
+  if (maxLevel > 0 && minLevel > maxLevel) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["maxLevel"],
+      message: "Max level must be greater than or equal to min level.",
+    });
+  }
+}
+
+export const createInventorySchema = inventoryFields.superRefine(rejectInvertedStockLevels);
+
+export const updateInventorySchema = inventoryFields.partial().superRefine(rejectInvertedStockLevels);
 
 export const approvePartsRequestSchema = z.object({
   lines: z

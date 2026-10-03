@@ -4,6 +4,7 @@ import { MesmsLogo } from "@/components/shared/MesmsLogo";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/context/SettingsContext";
 import { groupDocumentLines } from "@/lib/billingCharges";
+import { lineNet, summarizeLines } from "@/lib/estimates";
 import { formatDate, formatDocumentCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -46,10 +47,6 @@ interface ProfessionalDocumentProps {
   showFooter?: boolean;
   children?: ReactNode;
   className?: string;
-}
-
-function lineNet(line: DocumentLine) {
-  return Math.max(0, line.quantity * line.unitPrice - (line.discount ?? 0));
 }
 
 function termParagraphs(terms: string) {
@@ -95,9 +92,11 @@ export function ProfessionalDocument({
 }: ProfessionalDocumentProps) {
   const { settings } = useSettings();
   const company = settings?.companyName ?? "MESMS";
-  const subtotal = lines.reduce((sum, line) => sum + lineNet(line), 0);
-  const tax = lines.reduce((sum, line) => sum + lineNet(line) * ((line.taxRate ?? 0) / 100), 0);
-  const total = Math.max(0, subtotal - discount) + tax;
+  const documentTotals = summarizeLines(lines, discount);
+  const subtotal = documentTotals.subtotal;
+  const tax = documentTotals.tax;
+  const discountTotal = documentTotals.discount;
+  const total = documentTotals.total;
   const termParts = terms ? termParagraphs(terms) : [];
   const taxRate = dominantTaxRate(lines);
   const taxLabel = taxRate != null ? `GST (${taxRate}%)` : "Tax";
@@ -273,10 +272,10 @@ export function ProfessionalDocument({
                   <dt>Subtotal</dt>
                   <dd>{formatDocumentCurrency(subtotal)}</dd>
                 </div>
-                {discount > 0 ? (
+                {kind === "Estimate" || discountTotal > 0 ? (
                   <div>
                     <dt>Discount</dt>
-                    <dd>-{formatDocumentCurrency(discount)}</dd>
+                    <dd>-{formatDocumentCurrency(discountTotal)}</dd>
                   </div>
                 ) : null}
                 <div>

@@ -21,6 +21,7 @@ import { InfoRow, ChargeBreakdown, downloadInvoicePdf, normalizeInvoiceLineDescr
 import { InvoiceLineEditor } from "@/components/billing/InvoiceLineEditor";
 import { ApiError, api, type BackendCatalogItem, type BackendCustomer, type BackendInventoryItem, type BackendInvoice, type BillingJobContext, type InvoiceLineInput } from "@/lib/api";
 import { newBillingLine, summarizeChargeGroups } from "@/lib/billingCharges";
+import { summarizeLines } from "@/lib/estimates";
 import { PAYMENT_METHOD_OPTIONS } from "@/lib/fixedOptions";
 import { formatCurrency, formatDate, formatDateTime, formatServiceStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
@@ -275,12 +276,7 @@ export default function BillingInvoiceDetail() {
     [editing, editLines, invoice],
   );
 
-  const editPreviewTotal = useMemo(() => {
-    return lines.reduce((sum, line) => {
-      const net = line.quantity * line.unitPrice - (line.discount ?? 0);
-      return sum + net + net * ((line.taxRate ?? 0) / 100);
-    }, 0);
-  }, [lines]);
+  const editPreviewTotal = useMemo(() => summarizeLines(lines).total, [lines]);
 
   const chargeSummary = useMemo(
     () => summarizeChargeGroups(lines.map((line) => ({

@@ -6,6 +6,7 @@ import {
   normalizeTicketStatus,
   resolveTicketEventStatus,
 } from "@/services/workflow/serviceTicketStateMachine";
+import { parseCalendarDate } from "@/utils/calendarDate";
 import { generateReference } from "@/utils/reference";
 import { extraChargeType, extraLineTotal } from "@/utils/invoiceCharges";
 import { computeVerificationChecklist } from "@/services/billing.service";
@@ -27,6 +28,7 @@ import {
 import { serviceRequestsService } from "@/services/serviceRequests.service";
 import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
 import { assertCustomerCreditAllows, assertLineMargin, loadMarginRule } from "@/lib/commercialRules";
+import { calculateEstimateTotals } from "@/lib/estimateTotals";
 
 type Actor = { userId: string; role: string };
 type JsonObject = Record<string, unknown>;
@@ -181,19 +183,16 @@ export class DomainService {
       if (!estimate) throw new AppError("Estimate not found", 404);
       if (estimate.status === "approved" || estimate.status === "converted") throw new AppError("Approved estimates cannot be revised", 409);
 
-      let subtotal = new Prisma.Decimal(0);
-      let tax = new Prisma.Decimal(0);
-      const lines = input.lines.map((line: any) => {
-        const gross = money(line.quantity).mul(money(line.unitPrice));
-        const net = Prisma.Decimal.max(0, gross.minus(money(line.discount)));
-        const lineTax = net.mul(new Prisma.Decimal(line.taxRate).div(100));
-        const lineTotal = money(net.plus(lineTax));
-        subtotal = subtotal.plus(net);
-        tax = tax.plus(lineTax);
-        return { ...line, lineTotal };
-      });
-      const discount = money(input.discount ?? 0);
-      const total = money(Prisma.Decimal.max(0, subtotal.minus(discount)).plus(tax));
+      const totals = calculateEstimateTotals(input.lines, input.discount ?? 0);
+      const lines = input.lines.map((line: any, index: number) => ({
+        ...line,
+        discount: money(totals.lines[index].discount),
+        lineTotal: money(totals.lines[index].total),
+      }));
+      const subtotal = money(totals.subtotal);
+      const discount = money(totals.discount);
+      const tax = money(totals.tax);
+      const total = money(totals.total);
       if (estimate.customerId) {
         const marginRule = await loadMarginRule(tenantId, tx);
         for (const line of input.lines as Array<{ description?: string; unitPrice?: number; inventoryItemId?: string | null }>) {
@@ -234,6 +233,7 @@ export class DomainService {
             terms: input.terms,
             notes: input.notes,
             discount: input.discount,
+            headerDiscount: Number(input.discount ?? 0) || 0,
             currency: input.currency,
             warranty: input.warranty,
             estimatedCompletion: input.estimatedCompletion,
@@ -281,7 +281,7 @@ export class DomainService {
           estimatedCompletion:
             input.estimatedCompletion !== undefined
               ? input.estimatedCompletion
-                ? new Date(input.estimatedCompletion)
+                ? parseCalendarDate(input.estimatedCompletion)
                 : null
               : undefined,
           status: nextStatus as never,
@@ -963,7 +963,7 @@ export class DomainService {
       for (const line of transfer.lineItems) {
         const available = line.sourceInventoryItem.inStock - line.sourceInventoryItem.reserved;
         if (available < line.quantity) {
-          throw new AppError(`Insufficient available stock for ${line.description}. Available: ${available}`, 409);
+          throw new AppError(`Insufficient available stock for ${line.description}. Available: ${Math.max(0, available)}`, 409);
         }
         const item = await tx.inventoryItem.update({
           where: { id: line.sourceInventoryItemId },
@@ -1466,7 +1466,7 @@ export class DomainService {
         if (!item) throw new AppError("Inventory item not found", 404);
         const available = item.inStock - item.reserved;
         if (available < returned.quantity) {
-          throw new AppError(`Insufficient available stock to return ${line.description}. Available: ${available}`, 409);
+          throw new AppError(`Insufficient available stock to return ${line.description}. Available: ${Math.max(0, available)}`, 409);
         }
         const updated = await tx.inventoryItem.update({
           where: { id: item.id },
@@ -1972,7 +1972,7 @@ export class DomainService {
         orderBy: { createdAt: "desc" },
       }),
       prisma.estimate.findMany({
-        where: { tenantId, customerId },
+        where: { tenantId, customerId, status: { not: "draft" } },
         include: {
           lineItems: true,
           decisions: { orderBy: { createdAt: "desc" } },

@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/select";
 import type { BackendCatalogItem, BackendInventoryItem, EstimateLineInput } from "@/lib/api";
 import { ESTIMATE_LINE_TYPES, formatLineType, lineTotal, newEstimateLine } from "@/lib/estimates";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, parseAmount } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { inventoryOriginUnitPrice, lineMarginMinimum, MarginWarningBadge } from "@/components/shared/InventoryHelpers";
 import { useSettings } from "@/context/SettingsContext";
@@ -224,7 +224,7 @@ export function EstimateItemsTable({
                         size={1}
                         className={numberInputClass}
                         value={line.quantity}
-                        onChange={(e) => updateLine(index, { quantity: Number(e.target.value) || 0 })}
+                        onChange={(e) => updateLine(index, { quantity: parseAmount(e.target.value) })}
                         aria-label={`Line ${index + 1} quantity`}
                       />
                     ) : (
@@ -240,7 +240,7 @@ export function EstimateItemsTable({
                           size={1}
                           className={numberInputClass}
                           value={line.unitPrice}
-                          onChange={(e) => updateLine(index, { unitPrice: Number(e.target.value) || 0 })}
+                          onChange={(e) => updateLine(index, { unitPrice: parseAmount(e.target.value) })}
                           aria-label={`Line ${index + 1} unit price`}
                         />
                         {/* Margin warning shown when inventory cost is known */}
@@ -275,7 +275,7 @@ export function EstimateItemsTable({
                         size={1}
                         className={numberInputClass}
                         value={line.taxRate}
-                        onChange={(e) => updateLine(index, { taxRate: Number(e.target.value) || 0 })}
+                        onChange={(e) => updateLine(index, { taxRate: parseAmount(e.target.value) })}
                         aria-label={`Line ${index + 1} tax rate`}
                       />
                     ) : (
@@ -290,7 +290,7 @@ export function EstimateItemsTable({
                         size={1}
                         className={numberInputClass}
                         value={line.discount || 0}
-                        onChange={(e) => updateLine(index, { discount: Number(e.target.value) || 0 })}
+                        onChange={(e) => updateLine(index, { discount: parseAmount(e.target.value) })}
                         aria-label={`Line ${index + 1} discount`}
                       />
                     ) : (

@@ -115,7 +115,7 @@ export class FileStorageService {
       const estimate = await prisma.estimate.findFirst({
         where: { id: clientDocument.entityId, tenantId, customerId: user.customerId },
       });
-      if (estimate) return;
+      if (estimate && estimate.status !== "draft") return;
     }
     if (clientDocument.entityType === "service-report") {
       const job = await prisma.serviceJob.findFirst({

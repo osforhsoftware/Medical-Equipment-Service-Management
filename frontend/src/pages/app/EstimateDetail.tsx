@@ -30,6 +30,7 @@ import {
   canEditEstimate,
   estimateStatusLabel,
   isEstimatePendingDecision,
+  totalsForEstimate,
 } from "@/lib/estimates";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
@@ -188,6 +189,7 @@ export default function EstimateDetail() {
     taxRate: Number(line.taxRate),
     discount: Number(line.discount),
   }));
+  const financials = estimate ? totalsForEstimate(estimate) : null;
 
   return (
     <RoleGuard roles={ESTIMATE_READ_ROLES}>
@@ -302,10 +304,10 @@ export default function EstimateDetail() {
                   <dl className="grid gap-2 text-sm sm:grid-cols-2">
                     <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Labor</dt><dd className="font-medium">{formatCurrency(estimate.laborCost)}</dd></div>
                     <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Parts</dt><dd className="font-medium">{formatCurrency(estimate.partsCost)}</dd></div>
-                    <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Subtotal</dt><dd className="font-medium">{formatCurrency(estimate.subtotal ?? 0)}</dd></div>
-                    <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Discount</dt><dd className="font-medium">{formatCurrency(estimate.discount ?? 0)}</dd></div>
-                    <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Tax</dt><dd className="font-medium">{formatCurrency(estimate.tax ?? 0)}</dd></div>
-                    <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Total</dt><dd className="text-base font-semibold">{formatCurrency(estimate.total)}</dd></div>
+                    <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Subtotal</dt><dd className="font-medium">{formatCurrency(financials?.subtotal ?? 0)}</dd></div>
+                    <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Discount</dt><dd className="font-medium">{formatCurrency(financials?.discount ?? 0)}</dd></div>
+                    <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Tax</dt><dd className="font-medium">{formatCurrency(financials?.tax ?? 0)}</dd></div>
+                    <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Total</dt><dd className="text-base font-semibold">{formatCurrency(financials?.total ?? 0)}</dd></div>
                   </dl>
                 </DetailSection>
                 {estimate.notes ? (

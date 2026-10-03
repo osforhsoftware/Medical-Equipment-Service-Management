@@ -125,6 +125,21 @@ const inventorySchema = z
         message: data.supplierOther?.trim() ? "Click Add to save the new supplier." : "Enter a supplier name.",
       });
     }
+    const minLevel = Number(data.reorderLevel);
+    const maxLevel = Number(data.maxLevel);
+    if (
+      data.maxLevel.trim() &&
+      Number.isFinite(minLevel) &&
+      Number.isFinite(maxLevel) &&
+      maxLevel > 0 &&
+      minLevel > maxLevel
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["maxLevel"],
+        message: "Max level must be greater than or equal to min level.",
+      });
+    }
   });
 
 const emptyForm = {
@@ -352,6 +367,12 @@ export default function Inventory() {
   const [saving, setSaving] = useState(false);
   const [addingTerm, setAddingTerm] = useState<"category" | "supplier" | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const onHandPreview = Number(form.inStock) || 0;
+  const alreadyReserved = editingItem?.reserved ?? 0;
+  const typedReserve = Number(form.reserveQuantity);
+  const pendingReserve = Number.isInteger(typedReserve) && typedReserve > 0 ? typedReserve : 0;
+  const reservedPreview = alreadyReserved + pendingReserve;
+  const availablePreview = Math.max(0, onHandPreview - reservedPreview);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [existingImageFileIds, setExistingImageFileIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<BackendInventoryItem | null>(null);
@@ -726,7 +747,7 @@ export default function Inventory() {
       key: "inStock",
       header: "Available",
       render: (i) => {
-        const available = i.inStock - i.reserved;
+        const available = Math.max(0, i.available ?? i.inStock - i.reserved);
         return (
           <div className="w-32">
             <div className="flex items-center justify-between text-sm">
@@ -1362,15 +1383,15 @@ export default function Inventory() {
                 <div className="grid grid-cols-3 gap-2 rounded-lg border px-3 py-2 text-sm">
                   <div>
                     <p className="text-xs text-muted-foreground">On hand</p>
-                    <p className="font-semibold">{Number(form.inStock) || 0}</p>
+                    <p className="font-semibold">{onHandPreview}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Reserved</p>
-                    <p className="font-semibold">{editingItem?.reserved ?? 0}</p>
+                    <p className="font-semibold">{reservedPreview}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Available</p>
-                    <p className="font-semibold">{Math.max(0, (Number(form.inStock) || 0) - (editingItem?.reserved ?? 0))}</p>
+                    <p className="font-semibold">{availablePreview}</p>
                   </div>
                 </div>
                 <div className="grid gap-2" data-field="reserveQuantity">

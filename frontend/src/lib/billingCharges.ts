@@ -74,11 +74,16 @@ export function billingLineTypeLabel(type: string) {
 }
 
 export function lineAmount(line: ChargeLine) {
-  if (typeof line.lineTotal === "number" && Number.isFinite(line.lineTotal)) {
-    return Math.max(0, line.lineTotal);
-  }
-  const net = Math.max(0, Number(line.quantity || 0) * Number(line.unitPrice || 0) - Number(line.discount || 0));
-  return net + net * (Number(line.taxRate || 0) / 100);
+  // Always recompute. A stored lineTotal already includes tax and would hide a live discount edit.
+  const qty = Number(line.quantity);
+  const price = Number(line.unitPrice);
+  const rawDiscount = Number(line.discount);
+  const taxRate = Number(line.taxRate);
+  const gross = (Number.isFinite(qty) ? qty : 0) * (Number.isFinite(price) ? price : 0);
+  const discount = Math.min(Math.max(0, Number.isFinite(rawDiscount) ? rawDiscount : 0), Math.max(0, gross));
+  const net = gross - discount;
+  const rate = Number.isFinite(taxRate) ? taxRate : 0;
+  return net + (net * rate) / 100;
 }
 
 export function summarizeChargeGroups(lines: ChargeLine[]) {

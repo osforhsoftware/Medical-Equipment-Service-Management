@@ -37,6 +37,7 @@ export const estimateRevisionSchema = z.object({
       unitPrice: money,
       taxRate: z.coerce.number().min(0).max(100).default(0),
       discount: money.default(0),
+      discountType: z.enum(["amount", "percent"]).optional(),
     })).min(1),
   }),
 });

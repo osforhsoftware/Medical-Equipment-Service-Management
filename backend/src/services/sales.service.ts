@@ -1,8 +1,10 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
+import { parseCalendarDate } from "@/utils/calendarDate";
 import { generateReference } from "@/utils/reference";
 import { applyPriceCategory, assertCustomerCreditAllows, assertLineMargin, loadMarginRule } from "@/lib/commercialRules";
+import { calculateEstimateTotals } from "@/lib/estimateTotals";
 import { assertOwnSalesRecord, salesOwnerFilter } from "@/lib/salesScope";
 
 const money = (value: Prisma.Decimal | number | string | null | undefined) =>
@@ -491,20 +493,18 @@ export class SalesService {
         ? await tx.customer.findFirst({ where: { id: estimate.customerId, tenantId } })
         : null;
       const lines = await this.resolveSaleLines(tx, tenantId, input.lines, customer?.priceCategory);
-      let subtotal = new Prisma.Decimal(0);
-      let tax = new Prisma.Decimal(0);
-      const priced = lines.map((line) => {
-        const gross = money(line.quantity).mul(money(line.unitPrice));
-        const net = Prisma.Decimal.max(0, gross.minus(money(line.discount)));
-        const lineTax = net.mul(money(line.taxRate).div(100));
-        const lineTotal = net.plus(lineTax);
-        subtotal = subtotal.plus(net);
-        tax = tax.plus(lineTax);
-        return { ...line, type: this.quoteLineType(line), lineTotal };
-      });
-      const total = subtotal.plus(tax);
-      const validUntil = new Date(input.validUntil);
-      if (Number.isNaN(validUntil.getTime())) throw new AppError("Valid until date is invalid", 422);
+      const totals = calculateEstimateTotals(lines, 0);
+      const priced = lines.map((line, index) => ({
+        ...line,
+        type: this.quoteLineType(line),
+        discount: money(totals.lines[index].discount),
+        lineTotal: money(totals.lines[index].total),
+      }));
+      const subtotal = money(totals.subtotal);
+      const discount = money(totals.discount);
+      const tax = money(totals.tax);
+      const total = money(totals.total);
+      const validUntil = parseCalendarDate(input.validUntil);
 
       const revisionNumber = estimate.revision + 1;
       await tx.estimateLineItem.deleteMany({ where: { estimateId } });
@@ -514,7 +514,7 @@ export class SalesService {
           estimateId,
           revision: revisionNumber,
           subtotal,
-          discount: new Prisma.Decimal(0),
+          discount,
           tax,
           total,
           notes: input.notes ?? null,
@@ -529,6 +529,8 @@ export class SalesService {
               taxRate: Number(line.taxRate),
             })),
             notes: input.notes ?? null,
+            discount: 0,
+            headerDiscount: 0,
           },
         },
       });
@@ -558,7 +560,7 @@ export class SalesService {
           revision: revisionNumber,
           status: "draft",
           subtotal,
-          discount: new Prisma.Decimal(0),
+          discount,
           tax,
           total,
           partsCost,

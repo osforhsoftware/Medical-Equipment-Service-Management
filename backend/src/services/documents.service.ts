@@ -7,6 +7,7 @@ import { normalizeAdditionalFields } from "@/lib/additionalFields";
 import { formatInventoryItemClass } from "@/lib/inventoryItemClass";
 import { parseJobStageDetails } from "@/lib/jobStageDetails";
 import { recommendationLinePrice } from "@/lib/recommendationPrice";
+import { calculateEstimateTotals, estimateLevelDiscount } from "@/lib/estimateTotals";
 
 type DocumentKind = "estimate" | "invoice" | "service-report" | "inspection-report";
 
@@ -781,7 +782,11 @@ export class DocumentsService {
     if (kind === "estimate") {
       const estimate = await prisma.estimate.findFirst({
         where: { id: entityId, tenantId },
-        include: { lineItems: true, customer: true },
+        include: {
+          lineItems: true,
+          customer: true,
+          revisions: { orderBy: { revision: "desc" }, take: 1 },
+        },
       });
       if (!estimate) throw new AppError("Estimate not found", 404);
       reference = estimate.reference;
@@ -832,11 +837,20 @@ export class DocumentsService {
       );
       const taxRates = [...new Set(estimate.lineItems.map((line) => Number(line.taxRate ?? 0)))];
       const taxLabel = taxRates.length === 1 && taxRates[0] > 0 ? `GST (${taxRates[0]}%)` : "Tax";
+      const totals = calculateEstimateTotals(
+        estimate.lineItems,
+        estimateLevelDiscount({
+          discount: estimate.discount,
+          subtotal: estimate.subtotal,
+          lineItems: estimate.lineItems,
+          revisions: estimate.revisions,
+        }),
+      );
       this.totals(doc, [
-        { label: "Subtotal", value: money(estimate.subtotal) },
-        ...(Number(estimate.discount) > 0 ? [{ label: "Discount", value: `-${money(estimate.discount)}` }] : []),
-        { label: taxLabel, value: money(estimate.tax) },
-        { label: "Grand Total", value: money(estimate.total), emphasis: true },
+        { label: "Subtotal", value: money(totals.subtotal) },
+        { label: "Discount", value: `-${money(totals.discount)}` },
+        { label: taxLabel, value: money(totals.tax) },
+        { label: "Grand Total", value: money(totals.total), emphasis: true },
       ]);
       if (estimate.terms) {
         doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(8).text("TERMS & CONDITIONS");
@@ -898,10 +912,12 @@ export class DocumentsService {
       this.drawGroupedLines(doc, invoice.lineItems);
       const taxRates = [...new Set(invoice.lineItems.map((line) => Number(line.taxRate ?? 0)))];
       const taxLabel = taxRates.length === 1 && taxRates[0] > 0 ? `GST (${taxRates[0]}%)` : "Tax";
+      const invoiceTotals = calculateEstimateTotals(invoice.lineItems, 0);
       this.totals(doc, [
-        { label: "Subtotal", value: money(invoice.amount) },
-        { label: taxLabel, value: money(invoice.tax) },
-        { label: "Grand Total", value: money(invoice.total), emphasis: true },
+        { label: "Subtotal", value: money(invoiceTotals.subtotal) },
+        { label: "Discount", value: `-${money(invoiceTotals.discount)}` },
+        { label: taxLabel, value: money(invoiceTotals.tax) },
+        { label: "Grand Total", value: money(invoiceTotals.total), emphasis: true },
         ...(Number(invoice.paidTotal) > 0
           ? [
               { label: "Paid", value: money(invoice.paidTotal) },

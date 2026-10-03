@@ -834,6 +834,7 @@ export interface EstimateLineInput {
   unitPrice: number;
   taxRate: number;
   discount: number;
+  discountType?: "amount" | "percent";
 }
 
 export interface BackendEstimateRevision {
@@ -846,6 +847,7 @@ export interface BackendEstimateRevision {
   status: string;
   terms?: string | null;
   notes?: string | null;
+  snapshot?: unknown;
   createdAt: string;
 }
 

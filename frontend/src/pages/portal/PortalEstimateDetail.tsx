@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ApiError, api, type BackendEstimate } from "@/lib/api";
-import { estimateStatusLabel, estimateToDocumentLines, isEstimatePendingDecision } from "@/lib/estimates";
+import { estimateLevelDiscount, estimateStatusLabel, estimateToDocumentLines, isEstimatePendingDecision } from "@/lib/estimates";
 import { formatCurrency } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
@@ -116,7 +116,7 @@ export default function PortalEstimateDetail() {
                                                                                                                                                                                                                                                   { label: "Approval", value: estimate.status },
                                                                                                                                                                                                                                                 ]}
                                                                                                                                                                                                                                                 lines={estimateToDocumentLines(estimate)}
-                                                                                                                                                                                                                                                discount={Number(estimate.discount ?? 0)}
+                                                                                                                                                                                                                                                discount={estimateLevelDiscount(estimate)}
                                                                                                                                                                                                                                                 notes={estimate.notes ?? undefined}
                                                                                                                                                                                                                                                 terms={estimate.terms ?? undefined}
                                                                                                                                                                                                                                                 hideToolbar

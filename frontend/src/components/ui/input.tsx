@@ -4,7 +4,7 @@ import { normalizeNumberInputValue } from "@/lib/numberInput";
 import { cn } from "@/lib/utils";
 
 const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
-  ({ className, type, onFocus, onBlur, onChange, onMouseUp, ...props }, ref) => {
+  ({ className, type, onFocus, onBlur, onChange, onMouseUp, onWheel, ...props }, ref) => {
     const isNumber = type === "number";
 
     const handleFocus = (event: React.FocusEvent<HTMLInputElement>) => {
@@ -37,6 +37,15 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
       onChange?.(event);
     };
 
+    const handleWheel = (event: React.WheelEvent<HTMLInputElement>) => {
+      if (isNumber) {
+        // Wheel-over-hover and the native spinner both change the value with no keystroke.
+        event.preventDefault();
+        event.currentTarget.blur();
+      }
+      onWheel?.(event);
+    };
+
     const handleBlur = (event: React.FocusEvent<HTMLInputElement>) => {
       if (isNumber) {
         const raw = event.target.value.trim();
@@ -64,11 +73,14 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
         type={type}
         className={cn(
           "flex h-10 w-full min-w-0 overflow-hidden rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground shadow-none ring-offset-background transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground/80 focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60 md:text-sm",
+          isNumber &&
+            "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
           className,
         )}
         ref={ref}
         onFocus={handleFocus}
         onMouseUp={handleMouseUp}
+        onWheel={handleWheel}
         onChange={handleChange}
         onBlur={handleBlur}
       />

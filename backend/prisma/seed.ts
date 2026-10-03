@@ -142,6 +142,8 @@ async function main() {
     role: UserRole;
     branchKey: keyof typeof branches;
     color: string;
+    /** When set, login password equals this value (test accounts). Otherwise DEMO_PASSWORD. */
+    password?: string;
   }> = [
     {
       username: "coordinator1",
@@ -215,6 +217,79 @@ async function main() {
       branchKey: "hq",
       color: "210 55% 40%",
     },
+    // Short test logins: password is the same as the email.
+    {
+      username: "sc1",
+      name: "Test Coordinator",
+      email: "sc@gmail.com",
+      password: "sc@gmail.com",
+      role: "coordinator",
+      branchKey: "hq",
+      color: "160 70% 40%",
+    },
+    {
+      username: "is1",
+      name: "Test Inspector",
+      email: "is@gmail.com",
+      password: "is@gmail.com",
+      role: "inspector",
+      branchKey: "hq",
+      color: "30 80% 45%",
+    },
+    {
+      username: "est",
+      name: "Test Estimator",
+      email: "est@gmail.com",
+      password: "est@gmail.com",
+      role: "estimator",
+      branchKey: "hq",
+      color: "280 60% 45%",
+    },
+    {
+      username: "sls",
+      name: "Test Sales",
+      email: "sales@gmail.com",
+      password: "sales@gmail.com",
+      role: "sales",
+      branchKey: "hq",
+      color: "25 85% 45%",
+    },
+    {
+      username: "eng",
+      name: "Test Engineer",
+      email: "eng@gmail.com",
+      password: "eng@gmail.com",
+      role: "engineer",
+      branchKey: "hq",
+      color: "200 75% 40%",
+    },
+    {
+      username: "inv",
+      name: "Test Inventory",
+      email: "inv@gmail.com",
+      password: "inv@gmail.com",
+      role: "inventory",
+      branchKey: "hq",
+      color: "90 50% 40%",
+    },
+    {
+      username: "bill",
+      name: "Test Billing",
+      email: "bill@gmail.com",
+      password: "bill@gmail.com",
+      role: "billing",
+      branchKey: "hq",
+      color: "45 80% 42%",
+    },
+    {
+      username: "qa2",
+      name: "Test QA",
+      email: "qa@gmail.com",
+      password: "qa@gmail.com",
+      role: "qa",
+      branchKey: "hq",
+      color: "210 55% 40%",
+    },
   ];
 
   const users: Record<string, { id: string; name: string }> = {
@@ -222,12 +297,13 @@ async function main() {
   };
 
   for (const u of staffDefs) {
+    const userHash = u.password ? await bcrypt.hash(u.password, 10) : demoHash;
     const user = await prisma.user.upsert({
       where: { tenantId_username: { tenantId: TENANT_ID, username: u.username } },
       update: {
         name: u.name,
         email: u.email,
-        passwordHash: demoHash,
+        passwordHash: userHash,
         role: u.role,
         branchId: branches[u.branchKey].id,
       },
@@ -236,7 +312,7 @@ async function main() {
         name: u.name,
         username: u.username,
         email: u.email,
-        passwordHash: demoHash,
+        passwordHash: userHash,
         role: u.role,
         branchId: branches[u.branchKey].id,
         avatarColor: u.color,
@@ -1551,6 +1627,10 @@ async function main() {
   console.log("Admin login — username: medical_equment / password: medical@961");
   console.log("Demo staff  — password for all: demo@123");
   console.log("  coordinator1, inspector1, estimator1, sales1, engineer1, engineer2, inventory1, billing1");
+  console.log("Test staff  — password is the same as the email:");
+  console.log("  sc@gmail.com (coordinator), is@gmail.com (inspector), est@gmail.com (estimator)");
+  console.log("  sales@gmail.com (sales), eng@gmail.com (engineer), inv@gmail.com (inventory)");
+  console.log("  bill@gmail.com (billing), qa@gmail.com (qa)");
   console.log("");
   console.log("Dummy data includes:");
   console.log("  3 branches · 5 customers · 7 equipment · 6 service requests");

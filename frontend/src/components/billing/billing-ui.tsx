@@ -9,6 +9,7 @@ import {
   extraLineTotal,
   type BillingChargeGroupKey,
 } from "@/lib/billingCharges";
+import { totalsForEstimate } from "@/lib/estimates";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -107,6 +108,7 @@ export function BillingEstimateDetails({ context }: { context: BillingJobContext
   if (!estimate) {
     return <p className="text-sm text-muted-foreground">No estimate is linked to this job.</p>;
   }
+  const financials = totalsForEstimate(estimate);
 
   return (
     <div className="space-y-4">
@@ -127,10 +129,10 @@ export function BillingEstimateDetails({ context }: { context: BillingJobContext
         <InfoRow label="Equipment" value={estimate.equipmentName} />
         <InfoRow label="Labor" value={formatCurrency(estimate.laborCost)} />
         <InfoRow label="Parts" value={formatCurrency(estimate.partsCost)} />
-        <InfoRow label="Subtotal" value={formatCurrency(estimate.subtotal ?? 0)} />
-        <InfoRow label="Discount" value={formatCurrency(estimate.discount ?? 0)} />
-        <InfoRow label="Tax" value={formatCurrency(estimate.tax ?? 0)} />
-        <InfoRow label="Estimate total" value={formatCurrency(estimate.total)} />
+        <InfoRow label="Subtotal" value={formatCurrency(financials.subtotal)} />
+        <InfoRow label="Discount" value={formatCurrency(financials.discount)} />
+        <InfoRow label="Tax" value={formatCurrency(financials.tax)} />
+        <InfoRow label="Estimate total" value={formatCurrency(financials.total)} />
       </div>
       <EstimateItemsTable mode="view" lines={estimateViewLines(context)} />
       {estimate.notes ? (

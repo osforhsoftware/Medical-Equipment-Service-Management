@@ -42,9 +42,9 @@ import {
   type EstimateLineInput,
 } from "@/lib/api";
 import { splitInspectionFindings } from "@/components/inspections/useInspectionReportEditor";
-import { estimateStatusLabel, newEstimateLine, summarizeLines, workflowStepIndex } from "@/lib/estimates";
+import { canEditEstimate, estimateLevelDiscount, estimateStatusLabel, newEstimateLine, summarizeLines, workflowStepIndex } from "@/lib/estimates";
 import { useSettings } from "@/context/SettingsContext";
-import { defaultDatePlusDays, formatDate } from "@/lib/format";
+import { defaultDatePlusDays, formatDate, parseAmount } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 const estimateSchema = z.object({
@@ -179,7 +179,7 @@ export default function EstimateBuilder() {
         const full = await api.getEstimate(existing.id);
         setEstimate(full);
         setValidUntil(full.validUntil?.slice(0, 10) || defaultDatePlusDays(14));
-        setDiscount(Number(full.discount) || 0);
+        setDiscount(estimateLevelDiscount(full));
         setTerms(full.terms || customer?.paymentTerms || "Payment due as agreed. Parts are subject to availability.");
         setNotes(full.notes || "");
         setCurrency(full.currency || "INR");
@@ -293,7 +293,13 @@ export default function EstimateBuilder() {
   const inspectionSplit = inspection ? splitInspectionFindings(inspection.findings ?? "") : null;
   const step = workflowStepIndex(estimate?.status, lines.some((l) => l.description.trim()), Boolean(validUntil));
 
+  const editable = !estimate || canEditEstimate(estimate.status);
+
   const persist = async (sendForApproval: boolean, thenPreview = false) => {
+    if (estimate && !canEditEstimate(estimate.status)) {
+      toast.error(`This estimate is ${estimateStatusLabel(estimate.status).toLowerCase()} and cannot be changed.`);
+      return null;
+    }
     if (!ticket && !party) return null;
     if (!validateAll(formValues, undefined, formRef.current)) return null;
     if (marginBlocked) {
@@ -401,18 +407,18 @@ export default function EstimateBuilder() {
               )}
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" disabled={saving} onClick={() => void persist(false)}>
+              <Button type="button" variant="outline" disabled={saving || !editable} onClick={() => void persist(false)}>
                 Save Draft
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                disabled={saving}
+                disabled={saving || !editable}
                 onClick={() => void persist(false, true)}
               >
                 Preview
               </Button>
-              <Button type="button" disabled={saving || creditBlocked || marginBlocked} onClick={() => setConfirmSend(true)}>
+              <Button type="button" disabled={saving || !editable || creditBlocked || marginBlocked} onClick={() => setConfirmSend(true)}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 Send quotation
               </Button>
@@ -455,14 +461,20 @@ export default function EstimateBuilder() {
 
         {shouldShow("lines") && <FormFieldError field="lines" message={errors.lines} />}
 
+        {!editable && estimate ? (
+          <p className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+            This estimate is {estimateStatusLabel(estimate.status).toLowerCase()} and is read-only.
+          </p>
+        ) : null}
+
         <CreditExposureBanner
           customerId={party?.id || ticket?.customerId}
-          currentTotal={lines.reduce((acc, l) => acc + l.quantity * l.unitPrice, 0)}
+          currentTotal={totals.total}
         />
 
         <div data-field="lines">
           <EstimateItemsTable
-            mode="edit"
+            mode={editable ? "edit" : "view"}
             lines={lines}
             taxDefault={taxDefault}
             catalog={catalog}
@@ -530,6 +542,7 @@ export default function EstimateBuilder() {
                   name="validUntil"
                   type="date"
                   value={validUntil}
+                  disabled={!editable}
                   className={fieldErrorClass(shouldShow("validUntil"))}
                   {...fieldAria("validUntil", shouldShow("validUntil") ? errors.validUntil : null)}
                   onChange={(e) => {
@@ -543,7 +556,7 @@ export default function EstimateBuilder() {
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label htmlFor="currency">Currency</Label>
-                  <Input id="currency" value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} maxLength={10} />
+                  <Input id="currency" value={currency} disabled={!editable} onChange={(e) => setCurrency(e.target.value.toUpperCase())} maxLength={10} />
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="estimated-completion">Estimated completion</Label>
@@ -551,6 +564,7 @@ export default function EstimateBuilder() {
                     id="estimated-completion"
                     type="date"
                     value={estimatedCompletion}
+                    disabled={!editable}
                     onChange={(e) => setEstimatedCompletion(e.target.value)}
                   />
                 </div>
@@ -560,21 +574,22 @@ export default function EstimateBuilder() {
                 <Input
                   id="warranty"
                   value={warranty}
+                  disabled={!editable}
                   onChange={(e) => setWarranty(e.target.value)}
                   placeholder="e.g. 90 days parts and labour"
                 />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="discount">Discount</Label>
-                <Input id="discount" type="number" min={0} value={discount} onChange={(e) => setDiscount(Number(e.target.value) || 0)} />
+                <Input id="discount" type="number" min={0} value={discount} disabled={!editable} onChange={(e) => setDiscount(parseAmount(e.target.value))} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="terms">Payment terms / Terms & conditions</Label>
-                <Textarea id="terms" value={terms} onChange={(e) => setTerms(e.target.value)} rows={3} />
+                <Textarea id="terms" value={terms} disabled={!editable} onChange={(e) => setTerms(e.target.value)} rows={3} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="notes">Internal notes</Label>
-                <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+                <Textarea id="notes" value={notes} disabled={!editable} onChange={(e) => setNotes(e.target.value)} rows={3} />
               </div>
             </section>
             <div className="lg:sticky lg:top-36">
@@ -585,10 +600,10 @@ export default function EstimateBuilder() {
 
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-background/95 px-4 py-3 no-print lg:hidden">
           <div className="mx-auto flex max-w-[1600px] gap-2">
-            <Button className="flex-1" variant="outline" disabled={saving} onClick={() => void persist(false)}>
+            <Button className="flex-1" variant="outline" disabled={saving || !editable} onClick={() => void persist(false)}>
               Save Draft
             </Button>
-            <Button className="flex-1" disabled={saving || creditBlocked || marginBlocked} onClick={() => setConfirmSend(true)}>
+            <Button className="flex-1" disabled={saving || !editable || creditBlocked || marginBlocked} onClick={() => setConfirmSend(true)}>
               Send for Approval
             </Button>
           </div>

@@ -178,11 +178,23 @@ export class InventoryService {
   }
 
   async update(id: string, tenantId: string, data: Record<string, unknown>) {
-    await this.getById(id, tenantId);
+    const existing = await this.getById(id, tenantId);
     // reserved is system-managed — never accept client writes
     const { reserved: _reserved, imageFileIds, ...safe } = data as CreateInventoryData & {
       reserved?: number;
     };
+    const nextOnHand = safe.inStock ?? existing.inStock;
+    const nextMin = safe.reorderLevel ?? existing.reorderLevel;
+    const nextMax = safe.maxLevel ?? existing.maxLevel;
+    if (!Number.isFinite(nextOnHand) || nextOnHand < 0) {
+      throw new AppError("Quantity on hand cannot be negative", 422);
+    }
+    if (nextOnHand < existing.reserved) {
+      throw new AppError(`Quantity on hand cannot fall below the ${existing.reserved} reserved units`, 409);
+    }
+    if (nextMax > 0 && nextMin > nextMax) {
+      throw new AppError("Max level must be greater than or equal to min level", 422);
+    }
     if (safe.supplierId) {
       const supplier = await prisma.supplier.findFirst({ where: { id: safe.supplierId, tenantId } });
       if (!supplier) throw new AppError("Supplier not found", 404);

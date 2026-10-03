@@ -2,6 +2,7 @@ import { estimatesRepository } from "@/repositories/estimates.repository";
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
 import { customersRepository } from "@/repositories/customers.repository";
 import { AppError } from "@/middleware/errorHandler";
+import { parseCalendarDate } from "@/utils/calendarDate";
 import { generateReference } from "@/utils/reference";
 import { normalizeTicketStatus, resolveTicketEventStatus } from "@/services/workflow/serviceTicketStateMachine";
 import { prisma } from "@/db/prisma";
@@ -74,7 +75,7 @@ export class EstimatesService {
         partsCost: data.partsCost,
         total,
         status: "draft",
-        validUntil: new Date(data.validUntil),
+        validUntil: parseCalendarDate(data.validUntil),
       });
     }
 
@@ -98,7 +99,7 @@ export class EstimatesService {
       partsCost: data.partsCost,
       total,
       status: "draft",
-      validUntil: new Date(data.validUntil),
+      validUntil: parseCalendarDate(data.validUntil),
     });
 
     if (sr.status === "inspection" || sr.status === "estimate") {
@@ -143,7 +144,7 @@ export class EstimatesService {
         (Number(data.partsCost ?? existing.partsCost) || 0);
     }
     if (data.validUntil) {
-      data.validUntil = new Date(data.validUntil as string);
+      data.validUntil = parseCalendarDate(data.validUntil);
     }
     const updated = await estimatesRepository.update(id, tenantId, data);
     if (

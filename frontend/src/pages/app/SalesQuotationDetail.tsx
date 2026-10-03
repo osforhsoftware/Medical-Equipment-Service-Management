@@ -36,6 +36,7 @@ import { SALES_WRITE_ROLES } from "@/config/roles";
 import { useAuth } from "@/context/AuthContext";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { ApiError, api, type BackendEstimate, type BackendInventoryItem } from "@/lib/api";
+import { estimateLevelDiscount, summarizeLines } from "@/lib/estimates";
 import { formatCurrency } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -76,11 +77,6 @@ function linesFromQuote(quote: BackendEstimate): QuoteLine[] {
     discount: Number(line.discount) || 0,
     taxRate: Number(line.taxRate) || 0,
   }));
-}
-
-function lineAmount(line: QuoteLine) {
-  const net = Math.max(0, line.quantity * line.unitPrice - (line.discount || 0));
-  return net + (net * (line.taxRate || 0)) / 100;
 }
 
 export default function SalesQuotationDetail() {
@@ -142,7 +138,10 @@ export default function SalesQuotationDetail() {
     () => new Set(lines.map((line) => line.inventoryItemId).filter(Boolean) as string[]),
     [lines],
   );
-  const total = useMemo(() => lines.reduce((sum, line) => sum + lineAmount(line), 0), [lines]);
+  const total = useMemo(
+    () => summarizeLines(lines, quote ? estimateLevelDiscount(quote) : 0).total,
+    [lines, quote],
+  );
 
   const refresh = async (next?: BackendEstimate) => {
     if (next) queryClient.setQueryData(["sales-quotation", id], next);
@@ -392,6 +391,7 @@ export default function SalesQuotationDetail() {
                     discount: line.discount,
                     taxRate: line.taxRate,
                   }))}
+                  discount={estimateLevelDiscount(quote)}
                   notes={notes || undefined}
                   hideToolbar
                   showSignature

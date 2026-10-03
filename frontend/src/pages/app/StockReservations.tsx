@@ -79,6 +79,10 @@ export default function StockReservations() {
   const inventory = inventoryQuery.data ?? [];
   const selected = inventory.find((item) => item.id === itemId);
   const selectedAvailable = selected ? (selected.available ?? Math.max(0, selected.inStock - selected.reserved)) : 0;
+  const typedReserve = Number(quantity);
+  const pendingReserve = Number.isInteger(typedReserve) && typedReserve > 0 ? typedReserve : 0;
+  const reservedPreview = selected ? selected.reserved + pendingReserve : 0;
+  const availablePreview = selected ? Math.max(0, selected.inStock - reservedPreview) : 0;
 
   const rows = useMemo<ReservationRow[]>(() => {
     return (rowsQuery.data ?? []).map((row) => ({
@@ -322,11 +326,11 @@ export default function StockReservations() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Reserved</p>
-                    <p className="font-semibold">{selected.reserved}</p>
+                    <p className="font-semibold">{reservedPreview}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Available</p>
-                    <p className="font-semibold">{selectedAvailable}</p>
+                    <p className="font-semibold">{availablePreview}</p>
                   </div>
                 </div>
               ) : null}

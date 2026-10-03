@@ -6,7 +6,7 @@ import { RoleGuard } from "@/components/auth/RoleGuard";
 import { ESTIMATE_READ_ROLES } from "@/config/roles";
 import { Button } from "@/components/ui/button";
 import { ApiError, api, type BackendCustomer, type BackendEstimate } from "@/lib/api";
-import { estimateToDocumentLines } from "@/lib/estimates";
+import { estimateLevelDiscount, estimateToDocumentLines } from "@/lib/estimates";
 import { formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
@@ -146,7 +146,7 @@ export default function EstimatePreview() {
               { label: "Approval", value: estimate.status },
             ]}
             lines={estimateToDocumentLines(estimate)}
-            discount={Number(estimate.discount ?? 0)}
+            discount={estimateLevelDiscount(estimate)}
             notes={estimate.notes ?? undefined}
             terms={estimate.terms ?? undefined}
             hideToolbar
