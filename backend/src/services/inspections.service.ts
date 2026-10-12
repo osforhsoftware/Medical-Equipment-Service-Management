@@ -14,8 +14,10 @@ import { recommendationLinePrice } from "@/lib/recommendationPrice";
 import { upsertOpenStockPurchaseRequest } from "@/lib/stockPurchaseRequest";
 import { APPROVED_IMAGE_TYPE_MESSAGE } from "@/services/fileStorage.service";
 
-type RecommendedPartInput = {
-  inventoryItemId: string;
+type RecommendedItemInput = {
+  type?: "part" | "service";
+  inventoryItemId?: string;
+  catalogItemId?: string;
   quantity: number;
   title?: string;
   description?: string;
@@ -28,7 +30,7 @@ type CreateInspectionData = {
   severity: string;
   attachmentFileIds?: string[];
   attachments?: { fileId: string; caption?: string }[];
-  recommendedParts?: RecommendedPartInput[];
+  recommendedParts?: RecommendedItemInput[];
   additionalFields?: { label: string; value: string }[] | null;
   submit?: boolean;
 };
@@ -253,22 +255,47 @@ export class InspectionsService {
         });
         if (!validation.ok) throw new AppError("Inspection submission is invalid", 422);
 
-        const parts = data.recommendedParts;
+        const requestedItems = data.recommendedParts;
         const keepItemIds = new Set<string>();
 
-        if (parts) {
+        if (requestedItems) {
           await tx.inspectionRecommendation.deleteMany({
-            where: { inspectionReportId: report.id, type: "part" },
+            where: { inspectionReportId: report.id, type: { in: ["part", "service"] } },
           });
 
-          for (const part of parts) {
-            if (!part.inventoryItemId || part.quantity <= 0) continue;
-            const item = await tx.inventoryItem.findFirst({
-              where: { id: part.inventoryItemId, tenantId },
-            });
-            if (!item) throw new AppError(`Inventory item ${part.inventoryItemId} not found`, 404);
+          for (const requested of requestedItems) {
+            if (requested.quantity <= 0) continue;
+            const requestedQuantity = Math.max(1, Math.ceil(Number(requested.quantity)));
+            const itemType = requested.type === "service" || requested.catalogItemId ? "service" : "part";
 
-            const requestedQuantity = Math.max(1, Math.ceil(Number(part.quantity)));
+            if (itemType === "service") {
+              if (!requested.catalogItemId) continue;
+              const catalogItem = await tx.serviceCatalogItem.findFirst({
+                where: { id: requested.catalogItemId, tenantId },
+              });
+              if (!catalogItem) throw new AppError(`Service ${requested.catalogItemId} not found`, 404);
+
+              await tx.inspectionRecommendation.create({
+                data: {
+                  inspectionReportId: report.id,
+                  catalogItemId: catalogItem.id,
+                  type: "service",
+                  title: requested.title?.trim() || catalogItem.name,
+                  description: requested.description?.trim() || catalogItem.description || `Recommended service: ${catalogItem.name}`,
+                  priority: (requested.priority ?? "medium") as never,
+                  quantity: requestedQuantity,
+                  estimatedCost: Number(catalogItem.unitPrice) * requestedQuantity,
+                },
+              });
+              continue;
+            }
+
+            if (!requested.inventoryItemId) continue;
+            const item = await tx.inventoryItem.findFirst({
+              where: { id: requested.inventoryItemId, tenantId },
+            });
+            if (!item) throw new AppError(`Inventory item ${requested.inventoryItemId} not found`, 404);
+
             const available = Math.max(0, item.inStock - item.reserved);
             const shortage = requestedQuantity > available;
             const procurementStatus = shortage ? "pending_procurement" : "available";
@@ -276,11 +303,11 @@ export class InspectionsService {
             const recommendation = await tx.inspectionRecommendation.create({
               data: {
                 inspectionReportId: report.id,
-                inventoryItemId: part.inventoryItemId,
+                inventoryItemId: requested.inventoryItemId,
                 type: "part",
-                title: part.title?.trim() || item.name,
-                description: part.description?.trim() || `Recommended spare part: ${item.name}`,
-                priority: (part.priority ?? "medium") as never,
+                title: requested.title?.trim() || item.name,
+                description: requested.description?.trim() || `Recommended spare part: ${item.name}`,
+                priority: (requested.priority ?? "medium") as never,
                 quantity: requestedQuantity,
                 estimatedCost: recommendationLinePrice({
                   inventoryItem: item,
@@ -290,10 +317,10 @@ export class InspectionsService {
               },
             });
 
-            keepItemIds.add(part.inventoryItemId);
+            keepItemIds.add(requested.inventoryItemId);
             const { request, created } = await upsertOpenStockPurchaseRequest(tx, {
               tenantId,
-              inventoryItemId: part.inventoryItemId,
+              inventoryItemId: requested.inventoryItemId,
               quantity: requestedQuantity,
               requestedBy: actorId,
               serviceRequestId,
@@ -311,7 +338,7 @@ export class InspectionsService {
             }
 
             partResults.push({
-              inventoryItemId: part.inventoryItemId,
+              inventoryItemId: requested.inventoryItemId,
               requestedQuantity,
               availableQuantity: available,
               procurementStatus,
@@ -331,7 +358,7 @@ export class InspectionsService {
               ...(keepItemIds.size ? { inventoryItemId: { notIn: [...keepItemIds] } } : {}),
             },
           });
-          if (stale.length && (keepItemIds.size || parts.length === 0)) {
+          if (stale.length) {
             await tx.stockPurchaseRequest.deleteMany({
               where: { id: { in: stale.map((row) => row.id) } },
             });

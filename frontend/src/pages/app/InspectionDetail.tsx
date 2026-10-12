@@ -37,8 +37,7 @@ import {
 } from "@/lib/customerFields";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
 import { fieldAria, fieldErrorClass } from "@/lib/formValidation";
-import { formatCurrency, formatDate, formatDateTime, formatServiceStatus } from "@/lib/format";
-import { recommendationLinePrice } from "@/lib/inspectionReport";
+import { formatDate, formatDateTime, formatServiceStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 const editSchema = z.object({
@@ -402,7 +401,7 @@ export default function InspectionDetail() {
                 ) : null}
 
                 {report.recommendations?.length ? (
-                  <DetailSection title="Recommended parts & work">
+                  <DetailSection title="Requested parts & services">
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-sm">
                         <thead>
@@ -411,7 +410,6 @@ export default function InspectionDetail() {
                             <th className="pb-2 pr-3 font-medium">Type</th>
                             <th className="pb-2 pr-3 font-medium">Qty</th>
                             <th className="pb-2 pr-3 font-medium">Priority</th>
-                            <th className="pb-2 font-medium">Est. cost</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -428,7 +426,6 @@ export default function InspectionDetail() {
                               <td className="py-2.5 pr-3">
                                 <StatusBadge status={item.priority} className="text-[10px]" />
                               </td>
-                              <td className="py-2.5">{formatCurrency(recommendationLinePrice(item))}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -485,6 +482,7 @@ export default function InspectionDetail() {
         recommendedParts={editor.recommendedParts}
         setRecommendedParts={editor.setRecommendedParts}
         inventory={editor.inventory}
+        serviceCatalog={editor.serviceCatalog}
         machineImages={editor.machineImages}
         setMachineImages={editor.setMachineImages}
         setMachineImage={editor.setMachineImage}

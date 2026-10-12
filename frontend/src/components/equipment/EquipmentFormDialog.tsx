@@ -730,7 +730,7 @@ export function EquipmentFormDialog({
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2" data-field="installDate">
-              <Label htmlFor="install-date">Install date (optional)</Label>
+              <Label htmlFor="install-date">Install Date / Received Date</Label>
               <Input
                 id="install-date"
                 type="date"

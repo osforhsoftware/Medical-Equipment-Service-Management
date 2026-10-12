@@ -171,9 +171,38 @@ export default function EstimateBuilder() {
 
       const existing = estimates.find((e) => e.serviceRequestId === ticketId || e.requestRef === sr.reference);
       const report = await api.getInspectionReport(ticketId!).catch(() => null);
-      const partsReqs = (report?.recommendations ?? []).filter(
-        (r) => r.inventoryItemId || r.type === "part" || r.title.toLowerCase().includes("inventory"),
+      const requestedItems = (report?.recommendations ?? []).filter(
+        (r) => r.inventoryItemId || r.catalogItemId || ["part", "service"].includes(r.type),
       );
+      const requestedEstimateLine = (recommendation: (typeof requestedItems)[number]) => {
+        const quantity = Number(recommendation.quantity) || 1;
+        if (recommendation.type === "service" || recommendation.catalogItemId) {
+          const service = services.find((item) => item.id === recommendation.catalogItemId);
+          const storedTotal = Number(recommendation.estimatedCost) || 0;
+          return newEstimateLine(taxDefault, {
+            type: "service",
+            description: recommendation.title || service?.name || "Service",
+            catalogItemId: recommendation.catalogItemId,
+            quantity,
+            unitPrice: Number(service?.unitPrice) || (quantity > 0 ? storedTotal / quantity : storedTotal),
+            taxRate: Number(service?.taxRate) || taxDefault,
+          });
+        }
+
+        const item = stock.find((inventoryItem) => inventoryItem.id === recommendation.inventoryItemId);
+        const delivery =
+          item?.deliveryChargeType === "perUnit"
+            ? Number(item.deliveryCharge ?? 0) * quantity
+            : Number(item?.deliveryCharge ?? 0);
+        return newEstimateLine(taxDefault, {
+          type: "part",
+          description: recommendation.title || item?.name || "Part",
+          inventoryItemId: recommendation.inventoryItemId,
+          partNumber: item?.sku,
+          quantity,
+          unitPrice: priceForCategory(partUnitPrice(item, recommendation), customer?.priceCategory) + delivery,
+        });
+      };
 
       if (existing) {
         const full = await api.getEstimate(existing.id);
@@ -199,41 +228,12 @@ export default function EstimateBuilder() {
               discount: Number(line.discount),
             })),
           );
-        } else if (partsReqs.length) {
-          setLines(
-            partsReqs.map((r) => {
-              const item = stock.find((i) => i.id === r.inventoryItemId);
-              const delivery =
-                item?.deliveryChargeType === "perUnit"
-                  ? Number(item.deliveryCharge ?? 0) * Number(r.quantity)
-                  : Number(item?.deliveryCharge ?? 0);
-              return newEstimateLine(taxDefault, {
-                type: "part",
-                description: r.title,
-                inventoryItemId: r.inventoryItemId,
-                partNumber: item?.sku,
-                quantity: Number(r.quantity) || 1,
-                unitPrice:
-                  priceForCategory(partUnitPrice(item, r), customer?.priceCategory) + delivery,
-              });
-            }),
-          );
+        } else if (requestedItems.length) {
+          setLines(requestedItems.map(requestedEstimateLine));
         }
-      } else if (partsReqs.length) {
+      } else if (requestedItems.length) {
           if (customer?.paymentTerms) setTerms(customer.paymentTerms);
-          setLines(
-            partsReqs.map((r) => {
-              const item = stock.find((i) => i.id === r.inventoryItemId);
-              return newEstimateLine(taxDefault, {
-                type: "part",
-                description: r.title || item?.name || "Part",
-                inventoryItemId: r.inventoryItemId,
-                partNumber: item?.sku,
-                quantity: Number(r.quantity) || 1,
-                unitPrice: priceForCategory(partUnitPrice(item, r), customer?.priceCategory),
-              });
-            }),
-          );
+        setLines(requestedItems.map(requestedEstimateLine));
       }
     } catch (err) {
       toast({

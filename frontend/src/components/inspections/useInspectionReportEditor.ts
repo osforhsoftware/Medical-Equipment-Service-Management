@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type BackendInspectionReport, type BackendInventoryItem, type BackendServiceRequest } from "@/lib/api";
+import {
+  api,
+  type BackendCatalogItem,
+  type BackendInspectionReport,
+  type BackendInventoryItem,
+  type BackendServiceRequest,
+} from "@/lib/api";
 import {
   parseCustomerAdditionalFields,
   sanitizeCustomerAdditionalFields,
@@ -10,8 +16,10 @@ import { toast } from "@/lib/toast";
 
 const WORK_DETAILS_MARKER = "\n\nWork details:\n";
 
-export type RecommendedPartDraft = {
+export type RequestedItemDraft = {
+  type: "part" | "service";
   inventoryItemId: string;
+  catalogItemId: string;
   quantity: number;
 };
 
@@ -39,8 +47,9 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
   const [additionalFields, setAdditionalFields] = useState<CustomerAdditionalField[]>([
     { label: "", value: "" },
   ]);
-  const [recommendedParts, setRecommendedParts] = useState<RecommendedPartDraft[]>([]);
+  const [recommendedParts, setRecommendedParts] = useState<RequestedItemDraft[]>([]);
   const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
+  const [serviceCatalog, setServiceCatalog] = useState<BackendCatalogItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
 
@@ -89,9 +98,14 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
 
     setLoadingReport(true);
     try {
-      setInventory(
-        await api.listInventory({ limit: 100, page: 1, status: "active" }).then((r) => r.data).catch(() => [] as BackendInventoryItem[]),
-      );
+      const [inventoryItems, catalogItems] = await Promise.all([
+        api.listInventory({ limit: 100, page: 1, status: "active" })
+          .then((r) => r.data)
+          .catch(() => [] as BackendInventoryItem[]),
+        api.listServiceCatalog().catch(() => [] as BackendCatalogItem[]),
+      ]);
+      setInventory(inventoryItems);
+      setServiceCatalog(catalogItems.filter((item) => item.isActive));
       const report = await api.getInspectionReport(task.id);
       if (report) {
         const split = splitInspectionFindings(report.findings ?? "");
@@ -104,9 +118,11 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
         setAdditionalFields(fields.length ? fields : [{ label: "", value: "" }]);
         setRecommendedParts(
           (report.recommendations ?? [])
-            .filter((item) => item.inventoryItemId && item.type !== "service")
+            .filter((item) => item.inventoryItemId || item.catalogItemId)
             .map((item) => ({
-              inventoryItemId: item.inventoryItemId as string,
+              type: item.type === "service" || item.catalogItemId ? "service" as const : "part" as const,
+              inventoryItemId: item.inventoryItemId ?? "",
+              catalogItemId: item.catalogItemId ?? "",
               quantity: Math.max(1, Math.ceil(Number(item.quantity) || 1)),
             })),
         );
@@ -146,10 +162,15 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
         attachmentFileIds: attachments.map((item) => item.fileId),
         additionalFields: sanitizeCustomerAdditionalFields(additionalFields),
         recommendedParts: recommendedParts
-          .filter((part) => part.inventoryItemId && part.quantity > 0)
-          .map((part) => ({
-            inventoryItemId: part.inventoryItemId,
-            quantity: Math.max(1, Math.ceil(Number(part.quantity) || 1)),
+          .filter((item) =>
+            item.quantity > 0 && (item.type === "service" ? item.catalogItemId : item.inventoryItemId),
+          )
+          .map((item) => ({
+            type: item.type,
+            ...(item.type === "service"
+              ? { catalogItemId: item.catalogItemId }
+              : { inventoryItemId: item.inventoryItemId }),
+            quantity: Math.max(1, Math.ceil(Number(item.quantity) || 1)),
           })),
         submit: true,
       });
@@ -184,6 +205,7 @@ export function useInspectionReportEditor(onSaved?: () => Promise<void> | void) 
     recommendedParts,
     setRecommendedParts,
     inventory,
+    serviceCatalog,
     machineImages,
     setMachineImages,
     setMachineImage,

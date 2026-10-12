@@ -184,11 +184,20 @@ export const inspectionReportSchema = z.object({
   recommendedParts: z
     .array(
       z.object({
-        inventoryItemId: z.string().cuid(),
+        type: z.enum(["part", "service"]).default("part"),
+        inventoryItemId: z.string().cuid().optional(),
+        catalogItemId: z.string().cuid().optional(),
         quantity: z.coerce.number().positive(),
         title: z.string().trim().max(200).optional(),
         description: z.string().trim().max(5000).optional(),
         priority: z.enum(["low", "medium", "high", "critical"]).optional(),
+      }).superRefine((item, ctx) => {
+        if (item.type === "part" && !item.inventoryItemId) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["inventoryItemId"], message: "Select an inventory part" });
+        }
+        if (item.type === "service" && !item.catalogItemId) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["catalogItemId"], message: "Select a service" });
+        }
       }),
     )
     .optional(),

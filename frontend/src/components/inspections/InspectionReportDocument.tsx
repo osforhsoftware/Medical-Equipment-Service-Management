@@ -10,9 +10,9 @@ import {
   type BackendInspectionReport,
   type BackendServiceRequest,
 } from "@/lib/api";
-import { displayOrFallback, formatErrorCodes, formatJsonField, recommendationLinePrice } from "@/lib/inspectionReport";
+import { displayOrFallback, formatErrorCodes, formatJsonField } from "@/lib/inspectionReport";
 import { parseCustomerAdditionalFields } from "@/lib/customerFields";
-import { formatCurrency, formatDateTime } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 interface InspectionReportDocumentProps {
@@ -184,13 +184,25 @@ export function InspectionReportDocument({
           </dl>
         </div>
 
-        <Section title="Customer">
+        <Section title="Client details">
           <InfoGrid
             items={[
               { label: "Name", value: displayOrFallback(customer?.name ?? request.customerName) },
               { label: "Phone", value: displayOrFallback(customer?.phone) },
               { label: "Email", value: displayOrFallback(customer?.email) },
               { label: "Site address", value: displayOrFallback(siteAddress) },
+            ]}
+          />
+        </Section>
+
+        <Section title="Organization details">
+          <InfoGrid
+            items={[
+              { label: "Company", value: displayOrFallback(settings?.companyName) },
+              { label: "Address", value: displayOrFallback(settings?.companyAddress) },
+              { label: "Phone", value: displayOrFallback(settings?.companyPhone) },
+              { label: "Email", value: displayOrFallback(settings?.supportEmail) },
+              { label: "Website", value: displayOrFallback(settings?.companyWebsite) },
             ]}
           />
         </Section>
@@ -217,7 +229,7 @@ export function InspectionReportDocument({
           </p>
           {report.recommendations?.length ? (
             <div className="doc-parts-list">
-              <p className="doc-parts-heading">Recommended parts &amp; work</p>
+              <p className="doc-parts-heading">Requested parts &amp; services</p>
               <ul>
                 {report.recommendations.map((item) => (
                   <li key={item.id}>
@@ -227,7 +239,6 @@ export function InspectionReportDocument({
                     {item.description ? (
                       <span className="doc-parts-desc">{item.description}</span>
                     ) : null}
-                    <span className="doc-parts-cost">{formatCurrency(recommendationLinePrice(item))}</span>
                   </li>
                 ))}
               </ul>

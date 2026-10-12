@@ -5,10 +5,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PhotoCaptionTile } from "@/components/shared/PhotoCaptionTile";
 import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 import {
   api,
+  type BackendCatalogItem,
   type BackendInspectionReport,
   type BackendInventoryItem,
   type BackendServiceRequest,
@@ -18,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
 import { APPROVED_IMAGE_ACCEPT, keepApprovedFiles } from "@/lib/uploadFileTypes";
 import { InspectionSection } from "./InspectionSection";
-import type { RecommendedPartDraft } from "./useInspectionReportEditor";
+import type { RequestedItemDraft } from "./useInspectionReportEditor";
 
 const SEVERITY_OPTIONS = [
   {
@@ -67,9 +69,10 @@ interface InspectionReportFormProps {
   setSeverity: (v: string) => void;
   additionalFields: CustomerAdditionalField[];
   setAdditionalFields: Dispatch<SetStateAction<CustomerAdditionalField[]>>;
-  recommendedParts: RecommendedPartDraft[];
-  setRecommendedParts: Dispatch<SetStateAction<RecommendedPartDraft[]>>;
+  recommendedParts: RequestedItemDraft[];
+  setRecommendedParts: Dispatch<SetStateAction<RequestedItemDraft[]>>;
   inventory: BackendInventoryItem[];
+  serviceCatalog: BackendCatalogItem[];
   machineImages: File[];
   setMachineImages: Dispatch<SetStateAction<File[]>>;
   setMachineImage: (file: File | null) => void;
@@ -96,6 +99,7 @@ export function InspectionReportForm({
   recommendedParts,
   setRecommendedParts,
   inventory,
+  serviceCatalog,
   setMachineImages,
   setMachineImage,
   imageCaptions,
@@ -366,34 +370,79 @@ export function InspectionReportForm({
       </InspectionSection>
 
       <InspectionSection
-        title="Requested parts"
-        description="Spare parts needed for this job. These update Stock Purchase Requests for inventory."
+        title="Requested parts & services"
+        description="Add inventory parts or services needed for this job. Inventory parts update Stock Purchase Requests."
         optional
       >
         <div className="space-y-3">
-          {recommendedParts.map((part, index) => (
-            <div key={`${part.inventoryItemId}-${index}`} className="grid gap-2 sm:grid-cols-[1fr_88px_auto] sm:items-end">
+          {recommendedParts.map((item, index) => (
+            <div key={`${item.type}-${item.inventoryItemId}-${item.catalogItemId}-${index}`} className="grid gap-2 sm:grid-cols-[120px_1fr_88px_auto] sm:items-end">
               <div className="grid gap-1.5">
-                <Label className={index > 0 ? "sr-only" : undefined}>Inventory item</Label>
-                <InventoryProductSelect
-                  items={inventory}
-                  value={part.inventoryItemId || ""}
-                  onValueChange={(value) => {
+                <Label className={index > 0 ? "sr-only" : undefined}>Type</Label>
+                <Select
+                  value={item.type}
+                  onValueChange={(value: "part" | "service") => {
                     setRecommendedParts((prev) =>
-                      prev.map((row, i) => (i === index ? { ...row, inventoryItemId: value } : row)),
+                      prev.map((row, i) => i === index
+                        ? { ...row, type: value, inventoryItemId: "", catalogItemId: "" }
+                        : row),
                     );
                   }}
-                  placeholder="Select a spare part"
-                  getOptionLabel={(item) => `${item.name} (${item.sku})`}
-                />
+                >
+                  <SelectTrigger aria-label="Requested item type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="part">Part</SelectItem>
+                    <SelectItem value="service">Service</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor={`part-qty-${index}`} className={index > 0 ? "sr-only" : undefined}>Qty</Label>
+                <Label className={index > 0 ? "sr-only" : undefined}>
+                  {item.type === "service" ? "Service" : "Inventory item"}
+                </Label>
+                {item.type === "service" ? (
+                  <Select
+                    value={item.catalogItemId || undefined}
+                    onValueChange={(value) => {
+                      setRecommendedParts((prev) =>
+                        prev.map((row, i) => (i === index ? { ...row, catalogItemId: value } : row)),
+                      );
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a service" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {serviceCatalog.map((service) => (
+                        <SelectItem key={service.id} value={service.id}>
+                          {service.name} ({service.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <InventoryProductSelect
+                    items={inventory}
+                    value={item.inventoryItemId || ""}
+                    onValueChange={(value) => {
+                      setRecommendedParts((prev) =>
+                        prev.map((row, i) => (i === index ? { ...row, inventoryItemId: value } : row)),
+                      );
+                    }}
+                    placeholder="Select a spare part"
+                    getOptionLabel={(inventoryItem) => `${inventoryItem.name} (${inventoryItem.sku})`}
+                  />
+                )}
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor={`requested-qty-${index}`} className={index > 0 ? "sr-only" : undefined}>Qty</Label>
                 <Input
-                  id={`part-qty-${index}`}
+                  id={`requested-qty-${index}`}
                   type="number"
                   min={1}
-                  value={part.quantity}
+                  value={item.quantity}
                   onChange={(e) => {
                     const quantity = Math.max(1, Number(e.target.value) || 1);
                     setRecommendedParts((prev) =>
@@ -407,7 +456,7 @@ export function InspectionReportForm({
                 variant="outline"
                 size="icon"
                 className="shrink-0"
-                aria-label="Remove requested part"
+                aria-label="Remove requested item"
                 onClick={() => setRecommendedParts((prev) => prev.filter((_, i) => i !== index))}
               >
                 <Trash2 className="h-4 w-4" />
@@ -418,10 +467,13 @@ export function InspectionReportForm({
             type="button"
             variant="outline"
             className="w-full sm:w-auto"
-            onClick={() => setRecommendedParts((prev) => [...prev, { inventoryItemId: "", quantity: 1 }])}
+            onClick={() => setRecommendedParts((prev) => [
+              ...prev,
+              { type: "part", inventoryItemId: "", catalogItemId: "", quantity: 1 },
+            ])}
           >
             <Plus className="mr-2 h-4 w-4" />
-            Add requested part
+            Add part or service
           </Button>
         </div>
       </InspectionSection>

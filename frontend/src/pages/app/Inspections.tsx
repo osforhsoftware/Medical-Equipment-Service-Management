@@ -481,6 +481,7 @@ export default function Inspections() {
         recommendedParts={editor.recommendedParts}
         setRecommendedParts={editor.setRecommendedParts}
         inventory={editor.inventory}
+        serviceCatalog={editor.serviceCatalog}
         machineImages={editor.machineImages}
         setMachineImages={editor.setMachineImages}
         setMachineImage={editor.setMachineImage}

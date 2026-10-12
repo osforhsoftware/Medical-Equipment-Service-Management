@@ -553,7 +553,9 @@ export interface CreateInspectionInput {
   attachmentFileIds?: string[];
   attachments?: { fileId: string; caption?: string }[];
   recommendedParts?: {
-    inventoryItemId: string;
+    type?: "part" | "service";
+    inventoryItemId?: string;
+    catalogItemId?: string;
     quantity: number;
     title?: string;
     description?: string;

@@ -6,7 +6,6 @@ import { BILLING_CHARGE_GROUPS, chargeGroupForType } from "@/utils/invoiceCharge
 import { normalizeAdditionalFields } from "@/lib/additionalFields";
 import { formatInventoryItemClass } from "@/lib/inventoryItemClass";
 import { parseJobStageDetails } from "@/lib/jobStageDetails";
-import { recommendationLinePrice } from "@/lib/recommendationPrice";
 import { calculateEstimateTotals, estimateLevelDiscount } from "@/lib/estimateTotals";
 
 type DocumentKind = "estimate" | "invoice" | "service-report" | "inspection-report";
@@ -776,7 +775,7 @@ export class DocumentsService {
     let filename = `${kind}-${entityId}.pdf`;
     let invoiceId: string | undefined;
     let kindLabel = "Document";
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, include: { settings: true } });
     const company = tenant?.name ?? "MESMS";
 
     if (kind === "estimate") {
@@ -986,7 +985,7 @@ export class DocumentsService {
         { label: "Ticket", value: job.requestRef || "—" },
       ]);
 
-      this.sectionHeading(doc, "Customer");
+      this.sectionHeading(doc, "Client details");
       this.keyValueRows(doc, [
         { label: "Customer", value: orDash(customer?.name ?? job.customerName) },
         { label: "Contact person", value: orDash(customer?.contactPerson) },
@@ -1310,6 +1309,15 @@ export class DocumentsService {
         { label: "Site address", value: displayValue(siteAddress) },
       ]);
 
+      this.sectionHeading(doc, "Organization details");
+      this.keyValueRows(doc, [
+        { label: "Company", value: displayValue(company) },
+        { label: "Address", value: displayValue(tenant?.settings?.companyAddress) },
+        { label: "Phone", value: displayValue(tenant?.settings?.companyPhone) },
+        { label: "Email", value: displayValue(tenant?.settings?.supportEmail) },
+        { label: "Website", value: displayValue(tenant?.settings?.companyWebsite) },
+      ]);
+
       this.sectionHeading(doc, "Equipment");
       const equipmentRows: Array<{ label: string; value: string }> = [];
       if (sr.equipment) {
@@ -1353,7 +1361,7 @@ export class DocumentsService {
       if (report.recommendations.length) {
         this.ensureSpace(doc, 30);
         doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(8);
-        doc.text("RECOMMENDED PARTS & WORK", LEFT, doc.y);
+        doc.text("REQUESTED PARTS & SERVICES", LEFT, doc.y);
         doc.moveDown(0.5);
         for (const item of report.recommendations) {
           this.ensureSpace(doc, 20);
@@ -1363,8 +1371,6 @@ export class DocumentsService {
           if (item.description) {
             doc.font("Helvetica").fontSize(8.5).fillColor(MUTED).text(item.description);
           }
-          const linePrice = recommendationLinePrice(item);
-          doc.font("Helvetica").fontSize(9).fillColor(INK).text(money(linePrice));
           doc.moveDown(0.4);
         }
         doc.fillColor(INK);
