@@ -23,7 +23,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ESTIMATE_WRITE_ROLES, INSPECTION_WRITE_ROLES, SERVICE_BILLING_ROLES, TICKET_CREATE_ROLES } from "@/config/roles";
-import { CustomerAdditionalFieldsEditor } from "@/components/customers/CustomerAdditionalFieldsEditor";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { userCanAccessPath } from "@/lib/userRoles";
@@ -35,11 +34,7 @@ import {
   type BackendTimelineEvent,
   type BackendUser,
 } from "@/lib/api";
-import {
-  parseCustomerAdditionalFields,
-  sanitizeCustomerAdditionalFields,
-  type CustomerAdditionalField,
-} from "@/lib/customerFields";
+import { parseCustomerAdditionalFields } from "@/lib/customerFields";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
 import { formatDate, formatDateTime, formatServiceStatus } from "@/lib/format";
 import { roleLabels } from "@/data/mock";
@@ -116,7 +111,6 @@ export default function ServiceRequestDetail() {
     typeOther: "",
     priority: "",
     description: "",
-    additionalFields: [{ label: "", value: "" }] as CustomerAdditionalField[],
   });
   const workflowDialogRef = useRef<HTMLDivElement>(null);
   const assignDialogRef = useRef<HTMLDivElement>(null);
@@ -287,13 +281,11 @@ export default function ServiceRequestDetail() {
 
   const openEditTicket = () => {
     if (!request) return;
-    const fields = parseCustomerAdditionalFields(request.additionalFields);
     setEditForm({
       type: request.type ?? "",
       typeOther: request.typeOther ?? "",
       priority: request.priority,
       description: request.description ?? "",
-      additionalFields: fields.length ? fields : [{ label: "", value: "" }],
     });
     editValidation.reset();
     setEditOpen(true);
@@ -312,7 +304,6 @@ export default function ServiceRequestDetail() {
         typeOther: parsed.data.type === "Other" ? parsed.data.typeOther?.trim() || null : null,
         priority: parsed.data.priority,
         description: parsed.data.description,
-        additionalFields: sanitizeCustomerAdditionalFields(editForm.additionalFields),
       });
       setRequest(updated);
       toast.success("Ticket updated");
@@ -505,16 +496,6 @@ export default function ServiceRequestDetail() {
                     {request.description || "No description provided."}
                   </p>
                 </DetailSection>
-                {parseCustomerAdditionalFields(request.additionalFields).length > 0 ? (
-                  <DetailSection title="Additional registration fields">
-                    <DetailInfoGrid
-                      items={parseCustomerAdditionalFields(request.additionalFields).map((field) => ({
-                        label: field.label,
-                        value: field.value || "—",
-                      }))}
-                    />
-                  </DetailSection>
-                ) : null}
               </div>
             ),
           },
@@ -972,12 +953,6 @@ export default function ServiceRequestDetail() {
                 <FormFieldError field="description" message={editValidation.errors.description} />
               )}
             </div>
-            <CustomerAdditionalFieldsEditor
-              value={editForm.additionalFields}
-              onChange={(additionalFields) => setEditForm({ ...editForm, additionalFields })}
-              title="Additional registration fields"
-              description="Optional custom fields (site contact, accessories received, PO reference, etc.)."
-            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>

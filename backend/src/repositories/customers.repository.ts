@@ -64,16 +64,12 @@ export class CustomersRepository {
     return prisma.customer.update({ where: { id }, data });
   }
 
-  /** Soft-delete: mark inactive so related equipment, jobs, and invoices stay linked. */
-  async softDelete(id: string, tenantId: string): Promise<Customer> {
-    const result = await prisma.customer.updateMany({
-      where: { id, tenantId },
-      data: { status: "inactive" },
-    });
+  /** Permanently remove the customer. Contacts cascade; callers must check blocking relations first. */
+  async delete(id: string, tenantId: string): Promise<void> {
+    const result = await prisma.customer.deleteMany({ where: { id, tenantId } });
     if (result.count === 0) {
       throw new Error("Customer not found");
     }
-    return (await this.findById(id, tenantId))!;
   }
 
   async restore(id: string, tenantId: string): Promise<Customer> {

@@ -291,13 +291,13 @@ export default function Customers() {
     setDeleting(true);
     try {
       await api.deleteCustomer(deleteTarget.id);
-      toast.success("Customer removed", {
-        description: `${deleteTarget.name} is inactive. Related equipment and jobs remain available for history.`,
+      toast.success("Customer deleted", {
+        description: `${deleteTarget.name} was permanently removed.`,
       });
       setDeleteTarget(null);
       await queryClient.invalidateQueries({ queryKey: ["customers"] });
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to remove customer" });
+      toast.apiError(err, { fallback: "Unable to delete customer" });
     } finally {
       setDeleting(false);
     }
@@ -412,16 +412,15 @@ export default function Customers() {
                     )}
                     Restore
                   </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-destructive hover:text-destructive"
-                    onClick={() => openDelete(c)}
-                  >
-                    <Trash2 className="mr-1 h-3.5 w-3.5" /> Remove
-                  </Button>
-                )}
+                ) : null}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => openDelete(c)}
+                >
+                  <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
+                </Button>
               </div>
             ),
           } satisfies Column<BackendCustomer>,
@@ -790,24 +789,25 @@ export default function Customers() {
         onOpenChange={(open) => {
           if (!open) closeDelete();
         }}
-        title="Remove customer?"
+        title="Delete customer?"
         description={
           <div className="space-y-2">
             <p>
-              This soft-removes{" "}
+              This permanently deletes{" "}
               <span className="font-medium text-foreground">{deleteTarget?.name}</span> (
-              {deleteTarget?.reference}). The record is marked inactive — not permanently erased.
+              {deleteTarget?.reference}). This cannot be undone.
             </p>
-            <p>
-              Related work stays linked for history
-              {deleteTarget
-                ? `: ${deleteTarget.equipmentCount} equipment · ${deleteTarget.activeJobs} active jobs`
-                : ""}
-              . Existing jobs, estimates, invoices, and sales are not deleted.
-            </p>
+            {deleteTarget && (deleteTarget.equipmentCount > 0 || deleteTarget.activeJobs > 0) ? (
+              <p>
+                This customer still has {deleteTarget.equipmentCount} equipment and{" "}
+                {deleteTarget.activeJobs} active jobs. Delete is blocked until that related work is removed.
+              </p>
+            ) : (
+              <p>Contacts for this customer are deleted with the record.</p>
+            )}
           </div>
         }
-        confirmLabel="Remove customer"
+        confirmLabel="Delete customer"
         loading={deleting}
         onConfirm={() => void confirmDelete()}
       />

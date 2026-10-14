@@ -45,16 +45,11 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAuth } from "@/context/AuthContext";
 import { TICKET_CREATE_ROLES } from "@/config/roles";
-import { CustomerAdditionalFieldsEditor } from "@/components/customers/CustomerAdditionalFieldsEditor";
 import {
   api,
   type BackendServiceRequest,
   type BackendUser,
 } from "@/lib/api";
-import {
-  sanitizeCustomerAdditionalFields,
-  type CustomerAdditionalField,
-} from "@/lib/customerFields";
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
@@ -348,7 +343,6 @@ export default function ServiceRequests() {
     typeOther: "",
     priority: "",
     description: "",
-    additionalFields: [{ label: "", value: "" }] as CustomerAdditionalField[],
   });
   const [selectedEquipIds, setSelectedEquipIds] = useState<string[]>([]);
   const [inspectors, setInspectors] = useState<BackendUser[]>([]);
@@ -393,7 +387,6 @@ export default function ServiceRequests() {
         typeOther: "",
         priority: customerId && equipmentIds.length > 0 ? "medium" : "",
         description,
-        additionalFields: [{ label: "", value: "" }],
       });
       setSelectedEquipIds(equipmentIds);
       setSelectedStaff(null);
@@ -597,7 +590,6 @@ export default function ServiceRequests() {
         typeOther: parsed.data.type === "Other" ? parsed.data.typeOther?.trim() || null : null,
         priority: parsed.data.priority,
         description: parsed.data.description,
-        additionalFields: sanitizeCustomerAdditionalFields(form.additionalFields),
         equipmentIds: selectedEquipIds,
         ...(selectedStaff
           ? {
@@ -635,7 +627,6 @@ export default function ServiceRequests() {
       typeOther: "",
       priority: "",
       description: "",
-      additionalFields: [{ label: "", value: "" }],
     });
     setSelectedEquipIds([]);
     setSelectedStaff(null);
@@ -1196,13 +1187,6 @@ export default function ServiceRequests() {
               </div>
               {shouldShow("description") && <FormFieldError field="description" message={errors.description} />}
             </div>
-
-            <CustomerAdditionalFieldsEditor
-              value={form.additionalFields}
-              onChange={(additionalFields) => setForm({ ...form, additionalFields })}
-              title="Additional registration fields"
-              description="Optional custom fields (site contact, accessories received, PO reference, etc.)."
-            />
 
             {/* Intake → Inspection flow only (no direct engineer/estimator assign on create) */}
             <div className="rounded-lg border border-border p-3 space-y-3">

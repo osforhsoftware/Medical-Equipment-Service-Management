@@ -50,7 +50,7 @@ export class CustomersController {
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
       const data = await customersService.delete(req.params.id, req.tenantId!);
-      res.json(success("Customer removed successfully", data));
+      res.json(success("Customer deleted successfully", data));
     } catch (err) { next(err); }
   }
 

@@ -308,13 +308,12 @@ export default function BillingInvoiceDetail() {
         { label: "Due date", value: formatDate(invoice.dueAt) },
       ];
     }
+    const equipment = context?.job.equipment;
     return [
-      ...(context?.job.equipmentName
-        ? [{ label: "Equipment", value: context.job.equipmentName }]
-        : []),
-      ...(context?.job.equipment?.location
-        ? [{ label: "Location", value: context.job.equipment.location }]
-        : []),
+      { label: "SL", value: equipment?.serialNumber || "—" },
+      { label: "Model", value: equipment?.model || "—" },
+      { label: "Make", value: equipment?.manufacturer || "—" },
+      { label: "Description", value: equipment?.name || context?.job.equipmentName || "—" },
       { label: "Job", value: invoice.jobRef || "—" },
       {
         label: "Status",

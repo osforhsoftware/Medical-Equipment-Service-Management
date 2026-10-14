@@ -40,6 +40,16 @@ function normalizeCreditLimit(value: unknown): Prisma.Decimal | null | undefined
   return new PrismaNS.Decimal(Math.round(n * 100) / 100);
 }
 
+function countLabel(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function formatList(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}
+
 function serializeCustomer(customer: Customer, outstandingBalance = 0) {
   return {
     ...customer,
@@ -172,24 +182,46 @@ export class CustomersService {
   }
 
   /**
-   * Soft-delete a customer (status → inactive).
-   * Related equipment, service requests, jobs, estimates, invoices, and sales
-   * stay linked for history — never cascade-removed.
+   * Permanently delete a customer.
+   * Blocked while equipment, service work, sales, invoices, or a portal login still reference them.
    */
   async delete(id: string, tenantId: string) {
     const existing = await customersRepository.findById(id, tenantId);
     if (!existing) throw new AppError("Customer not found", 404);
-    if (existing.status === "inactive") {
-      throw new AppError("Customer is already removed", 400);
+
+    const blockers = await this.deletionBlockers(id, tenantId);
+    if (blockers.length > 0) {
+      throw new AppError(
+        `This customer cannot be deleted while they still have ${formatList(blockers)}.`,
+        409,
+      );
     }
-    const removed = await customersRepository.softDelete(id, tenantId);
-    return {
-      ...serializeCustomer(removed),
-      related: {
-        equipmentCount: existing.equipmentCount,
-        activeJobs: existing.activeJobs,
-      },
-    };
+
+    await customersRepository.delete(id, tenantId);
+    return { id, deleted: true as const, name: existing.name, reference: existing.reference };
+  }
+
+  private async deletionBlockers(id: string, tenantId: string): Promise<string[]> {
+    const where = { tenantId, customerId: id };
+    const [equipment, serviceRequests, estimates, jobs, invoices, salesOrders, portalUsers] = await Promise.all([
+      prisma.equipment.count({ where }),
+      prisma.serviceRequest.count({ where }),
+      prisma.estimate.count({ where }),
+      prisma.serviceJob.count({ where }),
+      prisma.invoice.count({ where }),
+      prisma.salesOrder.count({ where }),
+      prisma.user.count({ where }),
+    ]);
+
+    const parts: string[] = [];
+    if (equipment) parts.push(countLabel(equipment, "equipment record"));
+    if (serviceRequests) parts.push(countLabel(serviceRequests, "service request"));
+    if (estimates) parts.push(countLabel(estimates, "estimate"));
+    if (jobs) parts.push(countLabel(jobs, "job"));
+    if (invoices) parts.push(countLabel(invoices, "invoice"));
+    if (salesOrders) parts.push(countLabel(salesOrders, "sales order"));
+    if (portalUsers) parts.push(countLabel(portalUsers, "portal user"));
+    return parts;
   }
 
   async restore(id: string, tenantId: string) {

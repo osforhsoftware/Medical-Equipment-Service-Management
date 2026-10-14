@@ -218,7 +218,7 @@ export default function InspectionReportView() {
             )}
           </div>
         ) : (
-          <div className="print-area mx-auto w-full max-w-[210mm] border border-border bg-white p-4 shadow-sm print:mx-0 print:max-w-none print:border-0 print:p-0 print:shadow-none sm:p-6">
+          <div className="print-area mx-auto w-full max-w-[210mm] border border-border bg-white shadow-sm print:mx-0 print:max-w-none print:border-0 print:p-0 print:shadow-none">
             <InspectionReportDocument
               request={bundle.request}
               report={bundle.report}

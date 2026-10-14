@@ -1,18 +1,18 @@
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { MesmsLogo } from "@/components/shared/MesmsLogo";
-import { StatusBadge } from "@/components/shared/StatusBadge";
 import { splitInspectionFindings } from "@/components/inspections/useInspectionReportEditor";
 import { useSettings } from "@/context/SettingsContext";
 import {
   api,
   type BackendCustomer,
   type BackendEquipment,
+  type BackendInspectionRecommendation,
   type BackendInspectionReport,
   type BackendServiceRequest,
 } from "@/lib/api";
-import { displayOrFallback, formatErrorCodes, formatJsonField } from "@/lib/inspectionReport";
+import { formatErrorCodes, formatJsonField } from "@/lib/inspectionReport";
 import { parseCustomerAdditionalFields } from "@/lib/customerFields";
-import { formatDateTime } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 interface InspectionReportDocumentProps {
@@ -23,10 +23,64 @@ interface InspectionReportDocumentProps {
   className?: string;
 }
 
-function InfoGrid({ items }: { items: Array<{ label: string; value: React.ReactNode }> }) {
+const SIGNATURE_LABELS = new Set(["Inspector Signature", "Admin Signature"]);
+
+function presentText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  if (text.toLowerCase() === "nil") return null;
+  if (text === "—" || text === "–" || text === "-" || text === "---") return null;
+  return text;
+}
+
+function chipLabel(value: string) {
+  return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function priorityTone(severity: string): "grey" | "amber" | "red" {
+  const value = severity.toLowerCase();
+  if (value === "high" || value === "critical") return "red";
+  if (value === "medium") return "amber";
+  return "grey";
+}
+
+function formatQty(value: string | number) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return presentText(value) ?? "";
+  return Number.isInteger(amount) ? String(amount) : String(amount);
+}
+
+function sparePartName(item: BackendInspectionRecommendation): string | null {
+  return presentText(item.inventoryItem?.name) ?? presentText(item.catalogItem?.name) ?? presentText(
+    presentText(item.description)?.replace(/^recommended (spare part|service):\s*/i, ""),
+  );
+}
+
+function partNote(item: BackendInspectionRecommendation): string | null {
+  const description = presentText(item.description);
+  if (!description) return null;
+  const spare = sparePartName(item);
+  if (spare && description.toLowerCase() === spare.toLowerCase()) return null;
+  return description;
+}
+
+function ReportChip({ tone, children }: { tone: "grey" | "amber" | "red" | "green"; children: ReactNode }) {
+  return <span className={`inspection-chip inspection-chip-${tone}`}>{children}</span>;
+}
+
+function FieldGrid({ items }: { items: Array<{ label: string; value: ReactNode }> }) {
+  const visible = items.filter((item) => {
+    if (typeof item.value === "string") return presentText(item.value) !== null;
+    return item.value !== null && item.value !== undefined && item.value !== false;
+  });
+  if (!visible.length) return null;
   return (
     <dl className="doc-info-grid">
-      {items.map((item, index) => (
+      {visible.map((item, index) => (
         <div key={`${item.label}-${index}`} className="doc-info-item">
           <dt className="doc-field-label">{item.label}</dt>
           <dd className="doc-field-value">{item.value}</dd>
@@ -36,7 +90,7 @@ function InfoGrid({ items }: { items: Array<{ label: string; value: React.ReactN
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="doc-inspection-section">
       <h2 className="doc-section-heading">{title}</h2>
@@ -45,61 +99,115 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+function FieldsSection({ title, items }: { title: string; items: Array<{ label: string; value: ReactNode }> }) {
+  const grid = <FieldGrid items={items} />;
+  if (!grid) return null;
+  return <Section title={title}>{grid}</Section>;
+}
+
+function NarrativeSection({ title, text }: { title: string; text: string | null }) {
+  return (
+    <Section title={title}>
+      {text ? (
+        <p className="doc-text-block whitespace-pre-wrap">{text}</p>
+      ) : (
+        <p className="doc-empty-line">No findings recorded</p>
+      )}
+    </Section>
+  );
+}
+
+function captionWithoutDateTime(value: string | null | undefined) {
+  const text = presentText(value);
+  if (!text) return "";
+  const stripped = text
+    .replace(
+      /\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:[tT\s,]+(?:at\s+)?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s*[ap]m)?)?/gi,
+      " ",
+    )
+    .replace(
+      /\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}(?:[\s,]+(?:at\s+)?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s*[ap]m)?)?/gi,
+      " ",
+    )
+    .replace(
+      /\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?,?\s+\d{2,4}(?:[\s,]+(?:at\s+)?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s*[ap]m)?)?/gi,
+      " ",
+    )
+    .replace(
+      /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+\d{2,4}(?:[\s,]+(?:at\s+)?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s*[ap]m)?)?/gi,
+      " ",
+    )
+    .replace(/\b\d{1,2}[:.]\d{2}(?:[:.]\d{2})?\s*[ap]m\b/gi, " ")
+    .replace(/\b(?:img|image|photo|pic|screenshot)[_\-\s]*\d{6,14}\b/gi, " ")
+    .replace(/\.(?:jpe?g|png|webp|gif|heic)$/i, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,.;:_-]+|[\s,.;:_-]+$/g, "")
+    .trim();
+  if (!stripped || /^(?:whatsapp image|img|image|photo|pic|screenshot|camera)$/i.test(stripped)) return "";
+  return stripped;
+}
+
 function ReportPhoto({
   src,
   alt,
   caption,
-  uploadedAt,
   href,
 }: {
   src: string;
   alt: string;
   caption?: string | null;
-  uploadedAt?: string;
   href: string;
 }) {
-  const comment = caption?.trim() || "";
-  const showUploadedAt = uploadedAt && comment !== formatDateTime(uploadedAt);
+  const comment = captionWithoutDateTime(caption);
   return (
     <figure className="doc-photo-cell">
       <a href={href} target="_blank" rel="noreferrer" className="doc-photo-frame" title={alt}>
         <img src={src} alt={alt} className="doc-photo-thumb" loading="lazy" />
       </a>
-      <figcaption className="doc-photo-caption-label">Comment</figcaption>
-      <p className="doc-photo-caption">{comment || "No comment provided"}</p>
-      {showUploadedAt ? <p className="doc-photo-meta">{formatDateTime(uploadedAt)}</p> : null}
+      {comment ? (
+        <>
+          <figcaption className="doc-photo-caption-label">Comment</figcaption>
+          <p className="doc-photo-caption">{comment}</p>
+        </>
+      ) : null}
     </figure>
   );
 }
 
-function equipmentRows(
-  request: BackendServiceRequest,
-  equipment: BackendEquipment[],
-  machineCondition?: string | null,
-) {
+function equipmentFields(request: BackendServiceRequest, equipment: BackendEquipment[]) {
+  const rows: Array<{ label: string; value: string }> = [];
+  const push = (label: string, value: unknown) => {
+    const text = presentText(value);
+    if (text) rows.push({ label, value: text });
+  };
+
   if (equipment.length) {
-    return equipment.flatMap((item) => [
-      { label: "Equipment", value: displayOrFallback(item.name) },
-      {
-        label: "Brand / Model",
-        value: [displayOrFallback(item.manufacturer), displayOrFallback(item.model)].filter(Boolean).join(" · "),
-      },
-      { label: "Serial No.", value: displayOrFallback(item.serialNumber) },
-      { label: "Asset ID", value: displayOrFallback(item.assetTag) },
-      { label: "Location", value: displayOrFallback(item.location) },
-      { label: "Condition", value: displayOrFallback(machineCondition ?? item.condition) },
-    ]);
+    for (const item of equipment) {
+      push("SL", item.serialNumber);
+      push("Model", item.model);
+      push("Make", item.manufacturer);
+      push("Description", item.name);
+    }
+    return rows;
   }
+
   if (request.equipmentItems?.length) {
-    return request.equipmentItems.flatMap((item) => [
-      { label: "Equipment", value: displayOrFallback(item.equipmentName) },
-      { label: "Asset ID", value: displayOrFallback(item.assetTag) },
-    ]);
+    for (const item of request.equipmentItems) {
+      push("Description", item.equipmentName);
+    }
+    return rows;
   }
-  return [
-    { label: "Equipment", value: displayOrFallback(request.equipmentName) },
-    { label: "Condition", value: displayOrFallback(machineCondition) },
-  ];
+
+  push("Description", request.equipmentName);
+  return rows;
+}
+
+function ReportRow({ children }: { children: ReactNode }) {
+  return (
+    <tr className="doc-keep">
+      <td>{children}</td>
+    </tr>
+  );
 }
 
 export function InspectionReportDocument({
@@ -114,10 +222,43 @@ export function InspectionReportDocument({
   const split = splitInspectionFindings(report.findings ?? "");
   const siteAddress = [customer?.address, customer?.city, customer?.country].filter(Boolean).join(", ");
   const reportStatus = report.submittedAt ? "Submitted" : "Draft";
-  const checklistFields = formatJsonField(report.checklist);
-  const measurementFields = formatJsonField(report.measurements);
-  const errorCodes = formatErrorCodes(report.errorCodes);
+  const completionLabel = report.submittedAt ? "Completed" : "Draft";
+  const checklistFields = formatJsonField(report.checklist).flatMap((field) => {
+    const value = presentText(field.value);
+    return value ? [{ label: field.label, value }] : [];
+  });
+  const measurementFields = formatJsonField(report.measurements).flatMap((field) => {
+    const value = presentText(field.value);
+    return value ? [{ label: field.label, value }] : [];
+  });
+  const errorCodes = formatErrorCodes(report.errorCodes).map((code) => presentText(code)).filter((code): code is string => Boolean(code));
   const additionalFields = parseCustomerAdditionalFields(report.additionalFields);
+  const visibleAdditional = additionalFields.flatMap((field) => {
+    if (SIGNATURE_LABELS.has(field.label)) return [];
+    const value = presentText(field.value);
+    if (!value || value.startsWith("data:image")) return [];
+    return [{ label: field.label, value }];
+  });
+  const inspectorName = presentText(report.reportedBy);
+  const visibleInspector = inspectorName && !/^system\s+administrator$/i.test(inspectorName) ? inspectorName : null;
+  const inspectionDate = presentText(formatDate(report.reportedAt));
+  const findings = presentText(split.findings);
+  const workDetails = presentText(split.workDetails);
+  const recommendation = presentText(report.recommendation);
+  const orgLines = [
+    presentText(settings?.companyAddress),
+    presentText(settings?.companyPhone),
+    presentText(settings?.supportEmail),
+    presentText(settings?.companyWebsite),
+  ].filter((line): line is string => Boolean(line));
+  const partRows = report.recommendations ?? [];
+  const partNotes = partRows.flatMap((item) => {
+    const note = partNote(item);
+    return note ? [{ id: item.id, note }] : [];
+  });
+  const severity = presentText(report.severity);
+  const calibration = presentText(report.calibrationStatus);
+  const remarks = presentText(report.technicianRemarks);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -140,186 +281,184 @@ export function InspectionReportDocument({
   return (
     <section className={cn("professional-document inspection-report-document bg-white text-slate-900", className)}>
       <div className="doc-sheet inspection-doc-sheet">
-        <header className="doc-header">
-          <div className="doc-brand">
-            <div className="doc-logo flex items-center">
-              <MesmsLogo size="sm" variant="horizontal" customLogoUrl={settings?.logoUrl} />
-            </div>
-            <div className="doc-company">
-              <p className="doc-company-name">{company}</p>
-              {settings?.supportEmail ? (
-                <p className="doc-company-email">{settings.supportEmail}</p>
-              ) : null}
-            </div>
-          </div>
-          <div className="doc-title-block">
-            <p className="doc-kind">Inspection Report</p>
-            <dl className="doc-invoice-meta">
-              <div>
-                <dt>Inspection Report No</dt>
-                <dd>{request.reference}</dd>
+        <table className="inspection-print-frame">
+          <thead>
+            <tr>
+              <td>
+                <header className="doc-header">
+                  <div className="doc-brand">
+                    <div className="doc-logo flex items-center">
+                      <MesmsLogo size="md" variant="icon" customLogoUrl={settings?.logoUrl} />
+                    </div>
+                    <div className="doc-company">
+                      <p className="doc-company-name">{company}</p>
+                      {orgLines.map((line, index) => (
+                        <p key={`${line}-${index}`} className="doc-company-line">{line}</p>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="doc-title-block">
+                    <p className="doc-kind">Inspection Report</p>
+                    <dl className="doc-invoice-meta">
+                      <div>
+                        <dt>Report No</dt>
+                        <dd>{request.reference}</dd>
+                      </div>
+                      {inspectionDate ? (
+                        <div>
+                          <dt>Inspection Date</dt>
+                          <dd>{inspectionDate}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </div>
+                </header>
+              </td>
+            </tr>
+          </thead>
+          <tbody>
+            <ReportRow>
+              <div className="doc-report-summary">
+                <div className="doc-report-summary-badges">
+                  {severity ? <ReportChip tone={priorityTone(severity)}>{chipLabel(severity)}</ReportChip> : null}
+                  <ReportChip tone={report.submittedAt ? "green" : "amber"}>{completionLabel}</ReportChip>
+                </div>
+                <dl className="doc-report-summary-meta">
+                  {visibleInspector ? (
+                    <div>
+                      <dt>Inspector</dt>
+                      <dd>{visibleInspector}</dd>
+                    </div>
+                  ) : null}
+                  <div>
+                    <dt>Report Status</dt>
+                    <dd>{reportStatus}</dd>
+                  </div>
+                </dl>
               </div>
-              <div>
-                <dt>Inspection date</dt>
-                <dd>{formatDateTime(report.reportedAt)}</dd>
-              </div>
-            </dl>
-          </div>
-        </header>
-
-        <div className="doc-report-summary">
-          <div className="doc-report-summary-badges">
-            <StatusBadge status={report.severity} className="text-xs" />
-            <StatusBadge status={report.submittedAt ? "completed" : "draft"} className="text-xs" />
-          </div>
-          <dl className="doc-report-summary-meta">
-            <div>
-              <dt>Inspector</dt>
-              <dd>{displayOrFallback(report.reportedBy)}</dd>
-            </div>
-            <div>
-              <dt>Status</dt>
-              <dd>{reportStatus}</dd>
-            </div>
-          </dl>
-        </div>
-
-        <Section title="Client details">
-          <InfoGrid
-            items={[
-              { label: "Name", value: displayOrFallback(customer?.name ?? request.customerName) },
-              { label: "Phone", value: displayOrFallback(customer?.phone) },
-              { label: "Email", value: displayOrFallback(customer?.email) },
-              { label: "Site address", value: displayOrFallback(siteAddress) },
-            ]}
-          />
-        </Section>
-
-        <Section title="Organization details">
-          <InfoGrid
-            items={[
-              { label: "Company", value: displayOrFallback(settings?.companyName) },
-              { label: "Address", value: displayOrFallback(settings?.companyAddress) },
-              { label: "Phone", value: displayOrFallback(settings?.companyPhone) },
-              { label: "Email", value: displayOrFallback(settings?.supportEmail) },
-              { label: "Website", value: displayOrFallback(settings?.companyWebsite) },
-            ]}
-          />
-        </Section>
-
-        <Section title="Equipment">
-          <InfoGrid items={equipmentRows(request, equipment, report.machineCondition)} />
-        </Section>
-
-        <Section title="Inspection Findings">
-          <p className="doc-text-block whitespace-pre-wrap">
-            {split.findings.trim() || "—"}
-          </p>
-        </Section>
-
-        {split.workDetails.trim() ? (
-          <Section title="Work Required">
-            <p className="doc-text-block whitespace-pre-wrap">{split.workDetails}</p>
-          </Section>
-        ) : null}
-
-        <Section title="Recommendations">
-          <p className="doc-text-block whitespace-pre-wrap">
-            {(report.recommendation ?? "").trim() || "—"}
-          </p>
-          {report.recommendations?.length ? (
-            <div className="doc-parts-list">
-              <p className="doc-parts-heading">Requested parts &amp; services</p>
-              <ul>
-                {report.recommendations.map((item) => (
-                  <li key={item.id}>
-                    <span className="doc-parts-title">
-                      {item.title} · Qty {item.quantity} · {item.priority}
-                    </span>
-                    {item.description ? (
-                      <span className="doc-parts-desc">{item.description}</span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </Section>
-
-        {checklistFields.length ? (
-          <Section title="Checklist">
-            <InfoGrid items={checklistFields} />
-          </Section>
-        ) : null}
-
-        {measurementFields.length ? (
-          <Section title="Measurements">
-            <InfoGrid items={measurementFields} />
-          </Section>
-        ) : null}
-
-        {errorCodes.length ? (
-          <Section title="Error codes">
-            <ul className="doc-error-codes">
-              {errorCodes.map((code) => (
-                <li key={code}>{code}</li>
-              ))}
-            </ul>
-          </Section>
-        ) : null}
-
-        {report.calibrationStatus ? (
-          <Section title="Calibration">
-            <p className="doc-text-block">{report.calibrationStatus}</p>
-          </Section>
-        ) : null}
-
-        {additionalFields.length ? (
-          <Section title="Additional fields">
-            <InfoGrid
-              items={additionalFields.map((field) => ({
-                label: field.label,
-                value: field.value || "—",
-              }))}
-            />
-          </Section>
-        ) : null}
-
-        {report.attachments?.length ? (
-          <Section title="Inspection photos">
-            <div className="doc-photo-grid">
-              {report.attachments.map((att) => (
-                <ReportPhoto
-                  key={att.id}
-                  src={api.fileDownloadUrl(att.fileId)}
-                  alt={att.file?.originalName ?? att.caption ?? "Inspection image"}
-                  caption={att.caption ?? att.file?.originalName}
-                  uploadedAt={att.createdAt}
-                  href={api.fileDownloadUrl(att.fileId)}
-                />
-              ))}
-            </div>
-          </Section>
-        ) : null}
-
-        {report.technicianRemarks?.trim() ? (
-          <Section title="Remarks">
-            <p className="doc-text-block whitespace-pre-wrap">{report.technicianRemarks}</p>
-          </Section>
-        ) : null}
-
-        <div className="doc-signatures">
-          <div className="doc-sign">
-            <p className="doc-label">Inspector Signature</p>
-            <div className="doc-sign-line" />
-            <p className="doc-sign-caption">{displayOrFallback(report.reportedBy)}</p>
-          </div>
-          <div className="doc-sign">
-            <p className="doc-label">Approval Signature</p>
-            <div className="doc-sign-line" />
-            <p className="doc-sign-caption">{company}</p>
-          </div>
-        </div>
+            </ReportRow>
+            <ReportRow>
+              <FieldsSection
+                title="Client Details"
+                items={[
+                  { label: "Name", value: presentText(customer?.name) ?? presentText(request.customerName) ?? "" },
+                  { label: "Phone", value: presentText(customer?.phone) ?? "" },
+                  { label: "Email", value: presentText(customer?.email) ?? "" },
+                  { label: "Site address", value: presentText(siteAddress) ?? "" },
+                ]}
+              />
+            </ReportRow>
+            <ReportRow>
+              <FieldsSection
+                title="Equipment"
+                items={equipmentFields(request, equipment)}
+              />
+            </ReportRow>
+            <ReportRow>
+              <NarrativeSection title="Inspection Findings" text={findings} />
+            </ReportRow>
+            {workDetails ? (
+              <ReportRow>
+                <Section title="Work Required">
+                  <p className="doc-text-block whitespace-pre-wrap">{workDetails}</p>
+                </Section>
+              </ReportRow>
+            ) : null}
+            <ReportRow>
+              <NarrativeSection title="Recommendations" text={recommendation} />
+            </ReportRow>
+            {partRows.length ? (
+              <ReportRow>
+                <Section title="Requested Parts & Services">
+                  <table className="doc-parts-table">
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th>Quantity</th>
+                        <th>Priority</th>
+                        <th>Recommended spare part</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {partRows.map((item) => (
+                        <tr key={item.id}>
+                          <td>{presentText(item.title) ?? sparePartName(item) ?? ""}</td>
+                          <td>{formatQty(item.quantity)}</td>
+                          <td>{presentText(item.priority) ? chipLabel(item.priority) : ""}</td>
+                          <td>{sparePartName(item) ?? ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {partNotes.length ? (
+                    <div className="doc-parts-notes">
+                      {partNotes.map((entry) => (
+                        <p key={entry.id} className="doc-parts-note">{entry.note}</p>
+                      ))}
+                    </div>
+                  ) : null}
+                </Section>
+              </ReportRow>
+            ) : null}
+            {checklistFields.length ? (
+              <ReportRow>
+                <FieldsSection title="Checklist" items={checklistFields} />
+              </ReportRow>
+            ) : null}
+            {measurementFields.length ? (
+              <ReportRow>
+                <FieldsSection title="Measurements" items={measurementFields} />
+              </ReportRow>
+            ) : null}
+            {errorCodes.length ? (
+              <ReportRow>
+                <Section title="Error Codes">
+                  <ul className="doc-error-codes">
+                    {errorCodes.map((code) => (
+                      <li key={code}>{code}</li>
+                    ))}
+                  </ul>
+                </Section>
+              </ReportRow>
+            ) : null}
+            {calibration ? (
+              <ReportRow>
+                <Section title="Calibration">
+                  <p className="doc-text-block">{calibration}</p>
+                </Section>
+              </ReportRow>
+            ) : null}
+            {visibleAdditional.length ? (
+              <ReportRow>
+                <FieldsSection title="Additional Fields" items={visibleAdditional} />
+              </ReportRow>
+            ) : null}
+            {report.attachments?.length ? (
+              <ReportRow>
+                <Section title="Inspection Photos">
+                  <div className="doc-photo-grid">
+                    {report.attachments.map((att) => (
+                      <ReportPhoto
+                        key={att.id}
+                        src={api.fileDownloadUrl(att.fileId)}
+                        alt={att.file?.originalName ?? att.caption ?? "Inspection image"}
+                        caption={att.caption}
+                        href={api.fileDownloadUrl(att.fileId)}
+                      />
+                    ))}
+                  </div>
+                </Section>
+              </ReportRow>
+            ) : null}
+            {remarks ? (
+              <ReportRow>
+                <Section title="Remarks">
+                  <p className="doc-text-block whitespace-pre-wrap">{remarks}</p>
+                </Section>
+              </ReportRow>
+            ) : null}
+          </tbody>
+        </table>
       </div>
     </section>
   );

@@ -5,7 +5,6 @@ import { FilePenLine, FileText, Loader2, Pencil, Trash2 } from "lucide-react";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { CustomerAdditionalFieldsEditor } from "@/components/customers/CustomerAdditionalFieldsEditor";
 import { InspectionReportPanel } from "@/components/inspections/InspectionReportPanel";
-import { InspectionSignaturePanel } from "@/components/inspections/InspectionSignaturePanel";
 import { splitInspectionFindings, useInspectionReportEditor } from "@/components/inspections/useInspectionReportEditor";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
@@ -345,38 +344,18 @@ export default function InspectionDetail() {
                   </p>
                 </DetailSection>
 
-                {parseCustomerAdditionalFields(report.additionalFields).length > 0 ? (
-                  <DetailSection title="Additional fields">
-                    <DetailInfoGrid
-                      items={parseCustomerAdditionalFields(report.additionalFields).filter(f => f.label !== "Inspector Signature" && f.label !== "Admin Signature").map((field) => ({
-                        label: field.label,
-                        value: field.value || "—",
-                      }))}
-                    />
-                  </DetailSection>
-                ) : null}
-
                 {(() => {
-                  const fields = parseCustomerAdditionalFields(report.additionalFields);
-                  const inspSig = fields.find((f) => f.label === "Inspector Signature")?.value;
-                  const admSig = fields.find((f) => f.label === "Admin Signature")?.value;
-                  if (!inspSig && !admSig) return null;
+                  const extraFields = parseCustomerAdditionalFields(report.additionalFields).filter(
+                    (field) => field.label !== "Inspector Signature" && field.label !== "Admin Signature" && !field.value.startsWith("data:image"),
+                  );
+                  if (!extraFields.length) return null;
                   return (
-                    <DetailSection title="Signatures">
-                      <InspectionSignaturePanel
-                        readOnly
-                        signatures={{
-                          inspectorSignature: {
-                            name: report.reportedBy,
-                            dataUrl: inspSig || null,
-                            capturedAt: inspSig ? (report.submittedAt ? String(report.submittedAt) : String(report.reportedAt)) : null,
-                          },
-                          approvalSignature: {
-                            name: "Admin / Coordinator",
-                            dataUrl: admSig || null,
-                            capturedAt: admSig ? (report.submittedAt ? String(report.submittedAt) : String(report.reportedAt)) : null,
-                          },
-                        }}
+                    <DetailSection title="Additional fields">
+                      <DetailInfoGrid
+                        items={extraFields.map((field) => ({
+                          label: field.label,
+                          value: field.value || "—",
+                        }))}
                       />
                     </DetailSection>
                   );

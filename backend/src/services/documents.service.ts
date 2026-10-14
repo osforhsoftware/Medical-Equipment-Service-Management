@@ -106,6 +106,83 @@ function displayValue(value: unknown) {
   return String(value).trim();
 }
 
+function reportText(value: unknown) {
+  const text = displayValue(value);
+  if (!text) return "";
+  if (text.toLowerCase() === "nil") return "";
+  if (text === "—" || text === "–" || text === "-" || text === "---") return "";
+  return text;
+}
+
+function formatReportQty(value: unknown) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return reportText(value);
+  return Number.isInteger(amount) ? String(amount) : String(amount);
+}
+
+function sparePartLabel(item: {
+  description?: string | null;
+  inventoryItem?: { name?: string | null } | null;
+  catalogItem?: { name?: string | null } | null;
+}) {
+  const linked = reportText(item.inventoryItem?.name) || reportText(item.catalogItem?.name);
+  if (linked) return linked;
+  const description = reportText(item.description);
+  if (!description) return "";
+  return reportText(description.replace(/^recommended (spare part|service):\s*/i, ""));
+}
+
+function sparePartNote(item: {
+  description?: string | null;
+  inventoryItem?: { name?: string | null } | null;
+  catalogItem?: { name?: string | null } | null;
+}) {
+  const description = reportText(item.description);
+  if (!description) return "";
+  const spare = sparePartLabel(item);
+  if (spare && description.toLowerCase() === spare.toLowerCase()) return "";
+  return description;
+}
+
+function visibleJsonFields(value: unknown): Array<{ label: string; value: string }> {
+  if (!value) return [];
+  let rows: Array<{ label: string; value: string }> = [];
+  if (Array.isArray(value)) {
+    const allStrings = value.every((item) => typeof item === "string");
+    rows = allStrings
+      ? (value as string[]).map((item) => ({ label: "Code", value: item }))
+      : value.map((item, index) => ({
+          label: `Item ${index + 1}`,
+          value: typeof item === "string" ? item : JSON.stringify(item),
+        }));
+  } else if (typeof value === "object") {
+    rows = Object.entries(value as Record<string, unknown>).map(([key, val]) => ({
+      label: key.replace(/_/g, " "),
+      value: displayValue(val),
+    }));
+  } else {
+    rows = [{ label: "Value", value: displayValue(value) }];
+  }
+  return rows.flatMap((row) => {
+    const text = reportText(row.value);
+    return text ? [{ label: row.label, value: text }] : [];
+  });
+}
+
+function visibleErrorCodes(value: unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => reportText(typeof item === "string" ? item : displayValue(item)))
+      .filter(Boolean);
+  }
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).map((item) => reportText(item)).filter(Boolean);
+  }
+  const text = reportText(value);
+  return text ? [text] : [];
+}
+
 function orDash(value: unknown) {
   return displayValue(value) || "—";
 }
@@ -122,6 +199,61 @@ function serviceTypeLabel(type: string, typeOther?: string | null) {
   return type;
 }
 
+function customerFacingPersonName(value: unknown) {
+  const text = displayValue(value);
+  if (!text || /^system\s+administrator$/i.test(text)) return "";
+  return text;
+}
+
+function equipmentIdentityRows(equipment: {
+  serialNumber?: string | null;
+  model?: string | null;
+  manufacturer?: string | null;
+  name?: string | null;
+}) {
+  return [
+    { label: "SL", value: orDash(equipment.serialNumber) },
+    { label: "Model", value: orDash(equipment.model) },
+    { label: "Make", value: orDash(equipment.manufacturer) },
+    { label: "Description", value: orDash(equipment.name) },
+  ];
+}
+
+function isServiceChargeType(type: string | null | undefined) {
+  return chargeGroupForType(String(type ?? "other")).key === "serviceCharges";
+}
+
+/** Drop capture time and date from a photo comment. Filenames are not used as comments. */
+function stripDateTimeFromCaption(value: unknown) {
+  const text = displayValue(value);
+  if (!text) return "";
+  const stripped = text
+    .replace(
+      /\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:[tT\s,]+(?:at\s+)?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s*[ap]m)?)?/gi,
+      " ",
+    )
+    .replace(
+      /\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}(?:[\s,]+(?:at\s+)?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s*[ap]m)?)?/gi,
+      " ",
+    )
+    .replace(
+      /\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?,?\s+\d{2,4}(?:[\s,]+(?:at\s+)?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s*[ap]m)?)?/gi,
+      " ",
+    )
+    .replace(
+      /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+\d{2,4}(?:[\s,]+(?:at\s+)?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s*[ap]m)?)?/gi,
+      " ",
+    )
+    .replace(/\b\d{1,2}[:.]\d{2}(?:[:.]\d{2})?\s*[ap]m\b/gi, " ")
+    .replace(/\b(?:img|image|photo|pic|screenshot)[_\-\s]*\d{6,14}\b/gi, " ")
+    .replace(/\.(?:jpe?g|png|webp|gif|heic)$/i, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,.;:_-]+|[\s,.;:_-]+$/g, "")
+    .trim();
+  if (!stripped || /^(?:whatsapp image|img|image|photo|pic|screenshot|camera)$/i.test(stripped)) return "";
+  return stripped;
+}
+
 export class DocumentsService {
   private async resolveReporterName(tenantId: string, reportedBy: string): Promise<string> {
     const value = displayValue(reportedBy);
@@ -130,7 +262,7 @@ export class DocumentsService {
       where: { tenantId, id: value },
       select: { name: true },
     });
-    return user?.name?.trim() || value;
+    return customerFacingPersonName(user?.name?.trim() || value);
   }
 
   private async header(
@@ -429,7 +561,16 @@ export class DocumentsService {
     doc.y = boxTop + contentH + 12;
   }
 
-  private stampFooters(doc: PDFKit.PDFDocument, company: string, kindLabel: string, reference: string) {
+  private stampFooters(
+    doc: PDFKit.PDFDocument,
+    company: string,
+    kindLabel: string,
+    reference: string,
+    layout?: { left: number; right: number },
+  ) {
+    const left = layout?.left ?? LEFT;
+    const right = layout?.right ?? RIGHT;
+    const width = right - left;
     const range = doc.bufferedPageRange();
     for (let i = 0; i < range.count; i += 1) {
       doc.switchToPage(range.start + i);
@@ -438,14 +579,14 @@ export class DocumentsService {
       const bottomMargin = doc.page.margins.bottom;
       doc.page.margins.bottom = 0;
       const y = doc.page.height - 40;
-      doc.moveTo(LEFT, y).lineTo(RIGHT, y).strokeColor(RULE).stroke();
+      doc.moveTo(left, y).lineTo(right, y).strokeColor(RULE).stroke();
       doc.fillColor(MUTED).font("Helvetica").fontSize(8);
-      doc.text(`${company}  ·  ${kindLabel} ${reference}`, LEFT, y + 8, {
-        width: WIDTH / 2,
+      doc.text(`${company}  ·  ${kindLabel} ${reference}`, left, y + 8, {
+        width: width / 2,
         lineBreak: false,
       });
-      doc.text(`Page ${i + 1} of ${range.count}`, LEFT + WIDTH / 2, y + 8, {
-        width: WIDTH / 2,
+      doc.text(`Page ${i + 1} of ${range.count}`, left + width / 2, y + 8, {
+        width: width / 2,
         align: "right",
         lineBreak: false,
       });
@@ -473,30 +614,6 @@ export class DocumentsService {
     doc.fillColor(MUTED).font("Helvetica").fontSize(9);
     doc.text(company, LEFT, lineY + 6, { width: colW, lineBreak: false });
     doc.text("Customer Signature", rightX, lineY + 6, { width: colW, lineBreak: false });
-
-    doc.y = lineY + 24;
-  }
-
-  private inspectionSignatures(doc: PDFKit.PDFDocument, inspectorName: string, company: string) {
-    const blockHeight = 76;
-    this.ensureSpace(doc, blockHeight);
-    const startY = doc.y + 6;
-    const colGap = 40;
-    const colW = (WIDTH - colGap) / 2;
-    const rightX = LEFT + colW + colGap;
-    const lineY = startY + 48;
-
-    doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(8);
-    doc.text("INSPECTOR SIGNATURE", LEFT, startY, { width: colW, lineBreak: false });
-    doc.text("APPROVAL SIGNATURE", rightX, startY, { width: colW, lineBreak: false });
-
-    doc.strokeColor(RULE_STRONG).lineWidth(0.75);
-    doc.moveTo(LEFT, lineY).lineTo(LEFT + colW, lineY).stroke();
-    doc.moveTo(rightX, lineY).lineTo(rightX + colW, lineY).stroke();
-
-    doc.fillColor(MUTED).font("Helvetica").fontSize(9);
-    doc.text(inspectorName, LEFT, lineY + 6, { width: colW, lineBreak: false });
-    doc.text(company, rightX, lineY + 6, { width: colW, lineBreak: false });
 
     doc.y = lineY + 24;
   }
@@ -588,12 +705,16 @@ export class DocumentsService {
     actorId: string,
     actorRole: string,
     attachments: Array<{ fileId: string; caption?: string | null; file?: { originalName: string } }>,
+    bounds?: { left: number; width: number; bottom: number },
   ) {
     if (!attachments.length) return;
 
+    const left = bounds?.left ?? LEFT;
+    const width = bounds?.width ?? WIDTH;
+    const bottom = bounds?.bottom ?? PAGE_BOTTOM;
     const perRow = 2;
     const gap = 14;
-    const cellW = (WIDTH - gap * (perRow - 1)) / perRow;
+    const cellW = (width - gap * (perRow - 1)) / perRow;
     const imgH = 120;
     const captionArea = 28;
     const rowGap = 12;
@@ -601,12 +722,12 @@ export class DocumentsService {
     for (let i = 0; i < attachments.length; i += perRow) {
       const batch = attachments.slice(i, i + perRow);
       const rowHeight = imgH + captionArea + rowGap;
-      this.ensureSpace(doc, rowHeight);
+      if (doc.y + rowHeight > bottom) doc.addPage();
       const rowY = doc.y;
 
       for (let col = 0; col < batch.length; col += 1) {
         const att = batch[col];
-        const x = LEFT + col * (cellW + gap);
+        const x = left + col * (cellW + gap);
 
         doc.save();
         doc.rect(x, rowY, cellW, imgH).strokeColor(RULE).lineWidth(0.5).stroke();
@@ -628,17 +749,19 @@ export class DocumentsService {
           });
         }
 
-        const caption = att.caption?.trim() || att.file?.originalName || "";
-        doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(6.5).text("COMMENT", x, rowY + imgH + 4, {
-          width: cellW,
-          align: "left",
-          lineBreak: false,
-        });
-        doc.fillColor(MUTED).font("Helvetica").fontSize(7.5).text(caption || "No comment provided", x, rowY + imgH + 13, {
-          width: cellW,
-          align: "left",
-          lineGap: 0,
-        });
+        const caption = stripDateTimeFromCaption(att.caption);
+        if (caption) {
+          doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(6.5).text("COMMENT", x, rowY + imgH + 4, {
+            width: cellW,
+            align: "left",
+            lineBreak: false,
+          });
+          doc.fillColor(MUTED).font("Helvetica").fontSize(7.5).text(caption, x, rowY + imgH + 13, {
+            width: cellW,
+            align: "left",
+            lineGap: 0,
+          });
+        }
       }
 
       doc.y = rowY + rowHeight;
@@ -764,13 +887,400 @@ export class DocumentsService {
     }
   }
 
+  private inspectionContentBottom(doc: PDFKit.PDFDocument) {
+    return doc.page.height - doc.page.margins.bottom - 6;
+  }
+
+  private ensureInspectionSpace(doc: PDFKit.PDFDocument, needed: number) {
+    if (doc.y + needed > this.inspectionContentBottom(doc)) doc.addPage();
+  }
+
+  private paintInspectionHeader(
+    doc: PDFKit.PDFDocument,
+    input: {
+      top: number;
+      left: number;
+      right: number;
+      width: number;
+      company: string;
+      lines: string[];
+      reference: string;
+      inspectionDate: string;
+      logo: Buffer | null;
+    },
+  ) {
+    const logoSize = 44;
+    let textX = input.left;
+    if (input.logo) {
+      try {
+        doc.image(input.logo, input.left, input.top, { fit: [logoSize, logoSize] });
+        textX = input.left + logoSize + 10;
+      } catch {
+        textX = input.left;
+      }
+    }
+    const textW = Math.max(80, input.right - textX);
+    doc.fillColor(INK).font("Helvetica-Bold").fontSize(14).text(input.company, textX, input.top, {
+      width: textW,
+    });
+    let lineY = doc.y + 1;
+    doc.font("Helvetica").fontSize(9).fillColor("#334155");
+    for (const line of input.lines) {
+      doc.text(line, textX, lineY, { width: textW });
+      lineY = doc.y + 1;
+    }
+    let y = Math.max(input.top + (input.logo ? logoSize : 0), lineY) + 12;
+    doc.fillColor(INK).font("Helvetica-Bold").fontSize(12).text("INSPECTION REPORT", input.left, y, {
+      width: input.width,
+    });
+    y = doc.y + 8;
+    const meta = [
+      { label: "Report No", value: input.reference },
+      ...(input.inspectionDate ? [{ label: "Inspection Date", value: input.inspectionDate }] : []),
+    ];
+    doc.font("Helvetica").fontSize(9);
+    const labelWidth = Math.max(...meta.map((row) => doc.widthOfString(row.label)), 0) + 14;
+    for (const row of meta) {
+      doc.fillColor("#64748b").font("Helvetica").fontSize(9).text(row.label, input.left, y, {
+        width: labelWidth,
+        lineBreak: false,
+      });
+      doc.fillColor(INK).font("Helvetica").fontSize(10).text(row.value, input.left + labelWidth, y, {
+        width: input.width - labelWidth,
+        align: "right",
+        lineBreak: false,
+      });
+      y += 14;
+    }
+    y += 4;
+    doc.moveTo(input.left, y).lineTo(input.right, y).lineWidth(1).strokeColor(RULE).stroke();
+    doc.lineWidth(1);
+    doc.fillColor(INK);
+    return y + 12;
+  }
+
+  private paintInspectionHeading(doc: PDFKit.PDFDocument, left: number, width: number, title: string) {
+    if (doc.y > doc.page.margins.top + 4) doc.y += 16;
+    this.ensureInspectionSpace(doc, 22);
+    const y = doc.y;
+    doc.save();
+    doc.rect(left, y + 1, 3, 11).fill(ACCENT);
+    doc.restore();
+    doc.fillColor(ACCENT).font("Helvetica-Bold").fontSize(9).text(title.toUpperCase(), left + 8, y, {
+      width: width - 8,
+      lineBreak: false,
+    });
+    doc.y = y + 18;
+    doc.x = left;
+    doc.fillColor(INK);
+  }
+
+  private paintInspectionFields(
+    doc: PDFKit.PDFDocument,
+    left: number,
+    width: number,
+    title: string,
+    rows: Array<{ label: string; value: string }>,
+  ) {
+    const visible = rows.flatMap((row) => {
+      const value = reportText(row.value);
+      return value ? [{ label: row.label, value }] : [];
+    });
+    if (!visible.length) return;
+    this.paintInspectionHeading(doc, left, width, title);
+    const colW = width / 2;
+    for (let index = 0; index < visible.length; index += 2) {
+      const pair = visible.slice(index, index + 2);
+      doc.font("Helvetica").fontSize(10);
+      const rowH = Math.max(
+        34,
+        ...pair.map((item) => doc.heightOfString(item.value, { width: colW - 16 }) + 18),
+      );
+      this.ensureInspectionSpace(doc, rowH);
+      const y = doc.y;
+      pair.forEach((item, column) => {
+        const x = left + column * colW;
+        doc.fillColor("#64748b").font("Helvetica-Bold").fontSize(8).text(item.label.toUpperCase(), x, y, {
+          width: colW - 16,
+        });
+        doc.fillColor(INK).font("Helvetica").fontSize(10).text(item.value, x, y + 12, {
+          width: colW - 16,
+        });
+      });
+      doc.y = y + rowH;
+      doc.x = left;
+    }
+  }
+
+  private paintInspectionParagraph(doc: PDFKit.PDFDocument, left: number, width: number, text: string, muted = false) {
+    doc.font("Helvetica").fontSize(10);
+    const height = doc.heightOfString(text, { width });
+    const remaining = this.inspectionContentBottom(doc) - doc.y;
+    if (height > remaining && remaining < 36) doc.addPage();
+    doc.fillColor(muted ? "#94a3b8" : INK).font("Helvetica").fontSize(10).text(text, left, doc.y, { width });
+    doc.x = left;
+    doc.moveDown(0.3);
+  }
+
+  private paintInspectionNarrative(doc: PDFKit.PDFDocument, left: number, width: number, title: string, text: string) {
+    this.paintInspectionHeading(doc, left, width, title);
+    const value = reportText(text);
+    this.paintInspectionParagraph(doc, left, width, value || "No findings recorded", !value);
+  }
+
+  private paintInspectionChip(
+    doc: PDFKit.PDFDocument,
+    x: number,
+    y: number,
+    label: string,
+    colors: { bg: string; fg: string; border: string },
+  ) {
+    doc.font("Helvetica-Bold").fontSize(8);
+    const w = doc.widthOfString(label) + 18;
+    doc.roundedRect(x, y, w, 16, 8).lineWidth(0.6).fillAndStroke(colors.bg, colors.border);
+    doc.fillColor(colors.fg).text(label, x + 9, y + 4, { lineBreak: false });
+    return w;
+  }
+
+  private async drawStyledInspectionReport(
+    doc: PDFKit.PDFDocument,
+    input: {
+      tenantId: string;
+      actorId: string;
+      actorRole: string;
+      company: string;
+      orgLines: string[];
+      reference: string;
+      inspectionDate: string;
+      severity: string;
+      completionLabel: string;
+      reportStatus: string;
+      inspectorName: string;
+      logo: Buffer | null;
+      clientRows: Array<{ label: string; value: string }>;
+      equipmentRows: Array<{ label: string; value: string }>;
+      findings: string;
+      workDetails: string;
+      recommendation: string;
+      parts: Array<{
+        id: string;
+        title: string;
+        description: string;
+        priority: string;
+        quantity: unknown;
+        inventoryItem?: { name?: string | null } | null;
+        catalogItem?: { name?: string | null } | null;
+      }>;
+      checklist: unknown;
+      measurements: unknown;
+      errorCodes: unknown;
+      calibration: string;
+      additionalFields: Array<{ label: string; value: string }>;
+      attachments: Array<{ fileId: string; caption?: string | null; file?: { originalName: string } }>;
+      remarks: string;
+    },
+  ) {
+    const left = doc.page.margins.left;
+    const right = doc.page.width - doc.page.margins.right;
+    const width = right - left;
+    const originTop = doc.page.margins.top;
+    let drawingHeader = false;
+    const paintHeader = () => {
+      if (drawingHeader) return;
+      drawingHeader = true;
+      const bottom = this.paintInspectionHeader(doc, {
+        top: originTop,
+        left,
+        right,
+        width,
+        company: input.company,
+        lines: input.orgLines,
+        reference: input.reference,
+        inspectionDate: input.inspectionDate,
+        logo: input.logo,
+      });
+      doc.page.margins.top = bottom;
+      doc.y = bottom;
+      doc.x = left;
+      drawingHeader = false;
+    };
+    const onPageAdded = () => paintHeader();
+    doc.on("pageAdded", onPageAdded);
+    paintHeader();
+
+    const priorityColors = (severity: string) => {
+      const value = severity.toLowerCase();
+      if (value === "high" || value === "critical") return { bg: "#fef2f2", fg: "#b91c1c", border: "#fecaca" };
+      if (value === "medium") return { bg: "#fffbeb", fg: "#b45309", border: "#fcd34d" };
+      return { bg: "#f1f5f9", fg: "#475569", border: "#e2e8f0" };
+    };
+    const completionColors = input.completionLabel.toLowerCase() === "completed"
+      ? { bg: "#f0fdf4", fg: "#15803d", border: "#bbf7d0" }
+      : { bg: "#fffbeb", fg: "#b45309", border: "#fcd34d" };
+
+    this.ensureInspectionSpace(doc, 52);
+    const barY = doc.y;
+    const barH = 42;
+    doc.roundedRect(left, barY, width, barH, 4).lineWidth(0.8).strokeColor(RULE).stroke();
+    let chipX = left + 10;
+    const severity = reportText(input.severity);
+    if (severity) {
+      chipX += this.paintInspectionChip(doc, chipX, barY + 13, prettyLabel(severity), priorityColors(severity)) + 6;
+    }
+    this.paintInspectionChip(doc, chipX, barY + 13, input.completionLabel, completionColors);
+    const pairs = [
+      ...(reportText(input.inspectorName) ? [{ label: "INSPECTOR", value: input.inspectorName }] : []),
+      { label: "REPORT STATUS", value: input.reportStatus },
+    ];
+    doc.font("Helvetica").fontSize(9);
+    const pairWidths = pairs.map((pair) => Math.max(doc.font("Helvetica-Bold").fontSize(7).widthOfString(pair.label), doc.font("Helvetica").fontSize(9).widthOfString(pair.value)));
+    let pairX = right - 10 - pairWidths.reduce((sum, item) => sum + item, 0) - Math.max(0, pairs.length - 1) * 16;
+    pairs.forEach((pair, index) => {
+      doc.fillColor("#64748b").font("Helvetica-Bold").fontSize(7).text(pair.label, pairX, barY + 10, {
+        width: pairWidths[index],
+        lineBreak: false,
+      });
+      doc.fillColor(INK).font("Helvetica").fontSize(9).text(pair.value, pairX, barY + 22, {
+        width: pairWidths[index],
+        lineBreak: false,
+      });
+      pairX += pairWidths[index] + 16;
+    });
+    doc.y = barY + barH + 4;
+    doc.x = left;
+    doc.fillColor(INK);
+
+    this.paintInspectionFields(doc, left, width, "Client Details", input.clientRows);
+    this.paintInspectionFields(doc, left, width, "Equipment", input.equipmentRows);
+    this.paintInspectionNarrative(doc, left, width, "Inspection Findings", input.findings);
+    if (reportText(input.workDetails)) {
+      this.paintInspectionHeading(doc, left, width, "Work Required");
+      this.paintInspectionParagraph(doc, left, width, reportText(input.workDetails));
+    }
+    this.paintInspectionNarrative(doc, left, width, "Recommendations", input.recommendation);
+
+    if (input.parts.length) {
+      this.paintInspectionHeading(doc, left, width, "Requested Parts & Services");
+      const columns = [
+        { label: "ITEM", w: width * 0.32 },
+        { label: "QUANTITY", w: width * 0.14 },
+        { label: "PRIORITY", w: width * 0.16 },
+        { label: "RECOMMENDED SPARE PART", w: width * 0.38 },
+      ];
+      const paintTableHeader = () => {
+        this.ensureInspectionSpace(doc, 22);
+        const y = doc.y;
+        doc.font("Helvetica-Bold").fontSize(7.5);
+        let x = left;
+        columns.forEach((column) => {
+          doc.fillColor("#64748b").text(column.label, x + 4, y + 4, { width: column.w - 8, lineBreak: false });
+          x += column.w;
+        });
+        doc.moveTo(left, y + 16).lineTo(right, y + 16).strokeColor(RULE).lineWidth(0.6).stroke();
+        doc.y = y + 18;
+        doc.x = left;
+      };
+      paintTableHeader();
+      for (const item of input.parts) {
+        const cells = [
+          reportText(item.title) || sparePartLabel(item),
+          formatReportQty(item.quantity),
+          reportText(item.priority) ? prettyLabel(item.priority) : "",
+          sparePartLabel(item),
+        ];
+        doc.font("Helvetica").fontSize(9);
+        const rowH = Math.max(
+          20,
+          ...cells.map((cell, index) => doc.heightOfString(cell || " ", { width: columns[index].w - 8 })),
+        ) + 8;
+        if (doc.y + rowH > this.inspectionContentBottom(doc)) {
+          doc.addPage();
+          paintTableHeader();
+        }
+        const y = doc.y;
+        let x = left;
+        cells.forEach((cell, index) => {
+          doc.fillColor(INK).font("Helvetica").fontSize(9).text(cell, x + 4, y + 3, { width: columns[index].w - 8 });
+          x += columns[index].w;
+        });
+        const lineY = y + rowH;
+        doc.moveTo(left, lineY).lineTo(right, lineY).strokeColor(RULE).lineWidth(0.4).stroke();
+        doc.y = lineY;
+        doc.x = left;
+      }
+      const notes = input.parts.map((item) => sparePartNote(item)).filter(Boolean);
+      if (notes.length) {
+        doc.moveDown(0.35);
+        for (const note of notes) {
+          this.paintInspectionParagraph(doc, left, width, note, true);
+        }
+      }
+    }
+
+    const checklist = visibleJsonFields(input.checklist);
+    if (checklist.length) this.paintInspectionFields(doc, left, width, "Checklist", checklist);
+    const measurements = visibleJsonFields(input.measurements);
+    if (measurements.length) this.paintInspectionFields(doc, left, width, "Measurements", measurements);
+    const codes = visibleErrorCodes(input.errorCodes);
+    if (codes.length) {
+      this.paintInspectionHeading(doc, left, width, "Error Codes");
+      let x = left;
+      let y = doc.y;
+      doc.font("Helvetica-Bold").fontSize(8);
+      for (const code of codes) {
+        const chipW = doc.widthOfString(code) + 16;
+        if (x > left && x + chipW > right) {
+          x = left;
+          y += 18;
+        }
+        if (y + 16 > this.inspectionContentBottom(doc)) {
+          doc.addPage();
+          y = doc.y;
+          x = left;
+        }
+        doc.roundedRect(x, y, chipW, 14, 3).lineWidth(0.5).strokeColor(RULE).stroke();
+        doc.fillColor(INK).text(code, x + 8, y + 3, { lineBreak: false });
+        x += chipW + 6;
+      }
+      doc.y = y + 20;
+      doc.x = left;
+    }
+    if (reportText(input.calibration)) {
+      this.paintInspectionHeading(doc, left, width, "Calibration");
+      this.paintInspectionParagraph(doc, left, width, reportText(input.calibration));
+    }
+    if (input.additionalFields.length) {
+      this.paintInspectionFields(doc, left, width, "Additional Fields", input.additionalFields);
+    }
+    if (input.attachments.length) {
+      this.paintInspectionHeading(doc, left, width, "Inspection Photos");
+      await this.drawInspectionPhotos(doc, input.tenantId, input.actorId, input.actorRole, input.attachments, {
+        left,
+        width,
+        bottom: this.inspectionContentBottom(doc),
+      });
+    }
+    if (reportText(input.remarks)) {
+      this.paintInspectionHeading(doc, left, width, "Remarks");
+      this.paintInspectionParagraph(doc, left, width, reportText(input.remarks));
+    }
+
+    doc.x = left;
+    doc.fillColor(INK);
+    doc.removeListener("pageAdded", onPageAdded);
+  }
+
   async generate(tenantId: string, actorId: string, kind: DocumentKind, entityId: string, actorRole = "admin") {
+    const inspectionMargin = (15 * 72) / 25.4;
     const doc = new PDFDocument({
       size: "A4",
-      margins: { top: 56, bottom: 56, left: 50, right: 50 },
+      margins: kind === "inspection-report"
+        ? { top: inspectionMargin, bottom: inspectionMargin, left: inspectionMargin, right: inspectionMargin }
+        : { top: 56, bottom: 56, left: 50, right: 50 },
       bufferPages: true,
       info: { Title: `${kind} ${entityId}` },
     });
+    let footerLayout: { left: number; right: number } | undefined;
     let reference = entityId;
     let filename = `${kind}-${entityId}.pdf`;
     let invoiceId: string | undefined;
@@ -893,12 +1403,16 @@ export class DocumentsService {
             { label: "Due date", value: fmtDate(invoice.dueAt) },
           ]
         : [
-            ...(invoice.job?.equipmentName
-              ? [{ label: "Equipment", value: invoice.job.equipmentName }]
-              : []),
-            ...(invoice.job?.equipment?.location
-              ? [{ label: "Location", value: invoice.job.equipment.location }]
-              : []),
+            ...(invoice.job?.equipment
+              ? equipmentIdentityRows({
+                  serialNumber: invoice.job.equipment.serialNumber,
+                  model: invoice.job.equipment.model,
+                  manufacturer: invoice.job.equipment.manufacturer,
+                  name: invoice.job.equipment.name || invoice.job.equipmentName,
+                })
+              : invoice.job?.equipmentName
+                ? [{ label: "Description", value: invoice.job.equipmentName }]
+                : []),
             { label: "Job", value: invoice.jobRef || "—" },
             { label: "Status", value: invoice.status },
           ];
@@ -944,12 +1458,6 @@ export class DocumentsService {
               customer: true,
               equipment: true,
               equipmentItems: true,
-              inspectionReport: {
-                include: {
-                  recommendations: { include: { inventoryItem: true, catalogItem: true } },
-                  attachments: { include: { file: true } },
-                },
-              },
             },
           },
         },
@@ -965,11 +1473,13 @@ export class DocumentsService {
       const ticket = job.serviceRequest;
       const customer = job.customer ?? ticket?.customer ?? null;
       const equipment = job.equipment ?? ticket?.equipment ?? null;
-      const report = ticket?.inspectionReport ?? null;
       const serviceStarted = narrativeLogs[0]?.startedAt ?? job.scheduledFor;
       const serviceEnded = job.completedAt ?? narrativeLogs[narrativeLogs.length - 1]?.endedAt ?? null;
       const team =
-        job.assignments.map((assignment) => assignment.user.name).filter(Boolean).join(", ") || job.engineer;
+        job.assignments
+          .map((assignment) => customerFacingPersonName(assignment.user.name))
+          .filter(Boolean)
+          .join(", ") || customerFacingPersonName(job.engineer);
       const siteAddress = [
         displayValue(customer?.address),
         displayValue(customer?.city),
@@ -1009,24 +1519,17 @@ export class DocumentsService {
 
       this.sectionHeading(doc, "Equipment");
       const equipmentRows: Array<{ label: string; value: string }> = equipment
-        ? [
-            { label: "Equipment", value: orDash(equipment.name || job.equipmentName) },
-            {
-              label: "Brand / model",
-              value: [displayValue(equipment.manufacturer), displayValue(equipment.model)].filter(Boolean).join(" · ") || "—",
-            },
-            { label: "Serial no.", value: orDash(equipment.serialNumber) },
-            { label: "Asset ID", value: orDash(equipment.assetTag) },
-            { label: "Location", value: orDash(equipment.location) },
-            { label: "Category", value: orDash(equipment.category) },
-          ]
-        : [{ label: "Equipment", value: orDash(job.equipmentName) }];
+        ? equipmentIdentityRows({
+            serialNumber: equipment.serialNumber,
+            model: equipment.model,
+            manufacturer: equipment.manufacturer,
+            name: equipment.name || job.equipmentName,
+          })
+        : [{ label: "Description", value: orDash(job.equipmentName) }];
       if (!equipment && ticket?.equipmentItems?.length) {
+        equipmentRows.length = 0;
         for (const item of ticket.equipmentItems) {
-          equipmentRows.push(
-            { label: "Equipment", value: orDash(item.equipmentName) },
-            { label: "Asset ID", value: orDash(item.assetTag) },
-          );
+          equipmentRows.push({ label: "Description", value: orDash(item.equipmentName) });
         }
       }
       this.keyValueRows(doc, equipmentRows);
@@ -1035,7 +1538,7 @@ export class DocumentsService {
       this.keyValueRows(doc, [
         { label: "Service type", value: serviceTypeLabel(job.type, job.typeOther) },
         { label: "Status", value: prettyLabel(String(job.status)) },
-        { label: "Engineer / team", value: orDash(team) },
+        ...(team ? [{ label: "Engineer / team", value: team }] : []),
         { label: "Ticket", value: orDash(job.requestRef) },
         { label: "Scheduled", value: fmtDate(job.scheduledFor) },
         { label: "Service date", value: fmtDateTime(serviceStarted) },
@@ -1047,74 +1550,15 @@ export class DocumentsService {
         this.bodyParagraph(doc, displayValue(ticket?.description));
       }
 
-      if (report) {
-        const split = splitInspectionFindings(report.findings);
-        const inspectorName = await this.resolveReporterName(tenantId, report.reportedBy);
-        this.sectionHeading(doc, "Inspection findings");
-        this.keyValueRows(doc, [
-          { label: "Inspection date", value: fmtDateTime(report.reportedAt) },
-          { label: "Inspector", value: orDash(inspectorName) },
-          { label: "Severity", value: prettyLabel(report.severity) },
-          { label: "Machine condition", value: orDash(report.machineCondition) },
-          { label: "Status", value: report.submittedAt ? "Submitted" : "Draft" },
-        ]);
-        this.bodyParagraph(doc, split.findings || "—");
-        if (split.workDetails) {
-          this.sectionHeading(doc, "Work required");
-          this.bodyParagraph(doc, split.workDetails);
-        }
-        if (displayValue(report.recommendation) || report.recommendations.length) {
-          this.sectionHeading(doc, "Inspection recommendations");
-          if (displayValue(report.recommendation)) this.bodyParagraph(doc, report.recommendation);
-          for (const item of report.recommendations) {
-            this.ensureSpace(doc, 22);
-            doc.x = LEFT;
-            const sku = item.inventoryItem?.sku || item.catalogItem?.code || "";
-            doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text(
-              `${item.title} · Qty ${Number(item.quantity)} · ${prettyLabel(item.priority)}${sku ? ` · ${sku}` : ""}`,
-              LEFT,
-              doc.y,
-              { width: WIDTH },
-            );
-            if (item.description) {
-              doc.font("Helvetica").fontSize(8.5).fillColor(MUTED).text(item.description, LEFT, doc.y, { width: WIDTH });
-            }
-            doc.moveDown(0.35);
-            doc.fillColor(INK);
-          }
-        }
-        this.renderJsonFields(doc, "Inspection checklist", report.checklist);
-        this.renderJsonFields(doc, "Inspection measurements", report.measurements);
-        this.renderJsonFields(doc, "Error codes", report.errorCodes);
-        if (report.calibrationStatus) {
-          this.sectionHeading(doc, "Inspection calibration");
-          this.bodyParagraph(doc, report.calibrationStatus);
-        }
-        if (report.technicianRemarks) {
-          this.sectionHeading(doc, "Inspection remarks");
-          this.bodyParagraph(doc, report.technicianRemarks);
-        }
-        const inspectionExtraFields = normalizeAdditionalFields(report.additionalFields);
-        if (inspectionExtraFields?.length) {
-          this.sectionHeading(doc, "Inspection additional fields");
-          this.keyValueRows(
-            doc,
-            inspectionExtraFields.map((field) => ({ label: field.label, value: orDash(field.value) })),
-          );
-        }
-        if (report.attachments.length) {
-          this.sectionHeading(doc, "Inspection photos");
-          await this.drawInspectionPhotos(doc, tenantId, actorId, actorRole, report.attachments);
-        }
-      }
-
       this.sectionHeading(doc, "Work performed");
       for (const log of narrativeLogs) {
         const { calibrationResult, recommendation } = splitWorkRecommendation(log.calibrationResult);
         this.ensureSpace(doc, 36);
         doc.x = LEFT;
+        const engineerName = customerFacingPersonName(log.user.name);
+        const workedAt = `${fmtDateTime(log.startedAt)}${log.endedAt ? ` to ${fmtDateTime(log.endedAt)}` : ""}`;
         doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text(
-          `${log.user.name} — ${fmtDateTime(log.startedAt)}${log.endedAt ? ` to ${fmtDateTime(log.endedAt)}` : ""}`,
+          engineerName ? `${engineerName} — ${workedAt}` : workedAt,
           LEFT,
           doc.y,
           { width: WIDTH },
@@ -1169,6 +1613,7 @@ export class DocumentsService {
         });
       }
       for (const extra of job.extras) {
+        if (isServiceChargeType(extra.type)) continue;
         takenRows.push({
           item: extra.status === "approved" ? extra.description : `${extra.description} (${prettyLabel(extra.status)})`,
           sku: extra.inventoryItem?.sku || "",
@@ -1185,7 +1630,9 @@ export class DocumentsService {
         this.bodyParagraph(doc, "No parts or products were recorded on this job.");
       }
 
-      const currentLines = (job.estimate?.lineItems ?? []).filter((line) => !line.revisionId);
+      const currentLines = (job.estimate?.lineItems ?? []).filter(
+        (line) => !line.revisionId && !isServiceChargeType(line.type),
+      );
       if (currentLines.length) {
         this.sectionHeading(doc, "Quoted items");
         this.drawUsageTable(
@@ -1292,132 +1739,84 @@ export class DocumentsService {
       const customer = sr.customer;
       const siteAddress = [customer?.address, customer?.city, customer?.country].filter(Boolean).join(", ");
       const inspectorName = await this.resolveReporterName(tenantId, report.reportedBy);
-
-      await this.header(doc, tenantId, "Inspection Report", reference);
-      this.keyValueRows(doc, [
-        { label: "Severity", value: report.severity.toUpperCase() },
-        { label: "Inspection date", value: fmtDateTime(report.reportedAt) },
-        { label: "Inspector", value: inspectorName },
-        { label: "Status", value: reportStatus },
-      ]);
-
-      this.sectionHeading(doc, "Customer");
-      this.keyValueRows(doc, [
-        { label: "Name", value: displayValue(customer?.name ?? sr.customerName) },
-        { label: "Phone", value: displayValue(customer?.phone) },
-        { label: "Email", value: displayValue(customer?.email) },
-        { label: "Site address", value: displayValue(siteAddress) },
-      ]);
-
-      this.sectionHeading(doc, "Organization details");
-      this.keyValueRows(doc, [
-        { label: "Company", value: displayValue(company) },
-        { label: "Address", value: displayValue(tenant?.settings?.companyAddress) },
-        { label: "Phone", value: displayValue(tenant?.settings?.companyPhone) },
-        { label: "Email", value: displayValue(tenant?.settings?.supportEmail) },
-        { label: "Website", value: displayValue(tenant?.settings?.companyWebsite) },
-      ]);
-
-      this.sectionHeading(doc, "Equipment");
+      const settings = tenant?.settings;
+      let logo: Buffer | null = null;
+      if (settings?.logoFileId) {
+        try {
+          const downloaded = await fileStorageService.download(tenantId, settings.logoFileId, "system", "admin");
+          logo = downloaded.buffer;
+        } catch {
+          logo = null;
+        }
+      }
       const equipmentRows: Array<{ label: string; value: string }> = [];
+      const pushEquipment = (label: string, value: unknown) => {
+        equipmentRows.push({ label, value: displayValue(value) });
+      };
       if (sr.equipment) {
-        const eq = sr.equipment;
-        equipmentRows.push(
-          { label: "Equipment", value: displayValue(eq.name) },
-          {
-            label: "Brand / Model",
-            value: [displayValue(eq.manufacturer), displayValue(eq.model)].filter(Boolean).join(" · "),
-          },
-          { label: "Serial no.", value: displayValue(eq.serialNumber) },
-          { label: "Asset ID", value: displayValue(eq.assetTag) },
-          { label: "Location", value: displayValue(eq.location) },
-          { label: "Condition", value: displayValue(report.machineCondition ?? eq.condition) },
-        );
+        for (const row of equipmentIdentityRows(sr.equipment)) {
+          pushEquipment(row.label, row.value);
+        }
       } else if (sr.equipmentItems.length) {
         for (const item of sr.equipmentItems) {
-          equipmentRows.push(
-            { label: "Equipment", value: displayValue(item.equipmentName) },
-            { label: "Asset ID", value: displayValue(item.assetTag) },
-          );
+          pushEquipment("Description", item.equipmentName);
         }
       } else {
-        equipmentRows.push(
-          { label: "Equipment", value: displayValue(sr.equipmentName) },
-          { label: "Condition", value: displayValue(report.machineCondition) },
-        );
+        pushEquipment("Description", sr.equipmentName);
       }
-      this.keyValueRows(doc, equipmentRows);
-
-      this.sectionHeading(doc, "Inspection Findings");
-      this.bodyParagraph(doc, split.findings);
-
-      if (split.workDetails) {
-        this.sectionHeading(doc, "Work Required");
-        this.bodyParagraph(doc, split.workDetails);
-      }
-
-      this.sectionHeading(doc, "Recommendations");
-      this.bodyParagraph(doc, report.recommendation);
-      if (report.recommendations.length) {
-        this.ensureSpace(doc, 30);
-        doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(8);
-        doc.text("REQUESTED PARTS & SERVICES", LEFT, doc.y);
-        doc.moveDown(0.5);
-        for (const item of report.recommendations) {
-          this.ensureSpace(doc, 20);
-          doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text(
-            `${item.title} · Qty ${Number(item.quantity)} · ${item.priority}`,
-          );
-          if (item.description) {
-            doc.font("Helvetica").fontSize(8.5).fillColor(MUTED).text(item.description);
-          }
-          doc.moveDown(0.4);
-        }
-        doc.fillColor(INK);
-      }
-
-      this.renderJsonFields(doc, "Checklist", report.checklist);
-      this.renderJsonFields(doc, "Measurements", report.measurements);
-      this.renderJsonFields(doc, "Error codes", report.errorCodes);
-      if (report.calibrationStatus) {
-        this.sectionHeading(doc, "Calibration");
-        this.bodyParagraph(doc, report.calibrationStatus);
-      }
-
-      const inspectionExtraFields = normalizeAdditionalFields(
-        (report as { additionalFields?: unknown }).additionalFields,
-      );
-      if (inspectionExtraFields?.length) {
-        this.sectionHeading(doc, "Additional fields");
-        this.keyValueRows(
-          doc,
-          inspectionExtraFields.map((field) => ({
-            label: field.label,
-            value: displayValue(field.value),
-          })),
-        );
-      }
-
-      if (report.attachments.length) {
-        const photoBlockHeight = Math.ceil(report.attachments.length / 2) * (120 + 28 + 12) + 24;
-        this.ensureSpace(doc, Math.min(photoBlockHeight, 140));
-        this.sectionHeading(doc, "Inspection Photos");
-        await this.drawInspectionPhotos(doc, tenantId, actorId, actorRole, report.attachments);
-      }
-
-      if (report.technicianRemarks) {
-        this.sectionHeading(doc, "Remarks");
-        this.bodyParagraph(doc, report.technicianRemarks);
-      }
-
-      this.inspectionSignatures(doc, inspectorName, company);
+      const extraFields = normalizeAdditionalFields((report as { additionalFields?: unknown }).additionalFields) ?? [];
+      const visibleExtra = extraFields.flatMap((field) => {
+        if (/signature/i.test(field.label) || field.value.startsWith("data:image")) return [];
+        return [{ label: field.label, value: field.value }];
+      });
+      footerLayout = {
+        left: doc.page.margins.left,
+        right: doc.page.width - doc.page.margins.right,
+      };
+      await this.drawStyledInspectionReport(doc, {
+        tenantId,
+        actorId,
+        actorRole,
+        company,
+        orgLines: [
+          reportText(settings?.companyAddress),
+          reportText(settings?.companyPhone),
+          reportText(settings?.supportEmail),
+          reportText(settings?.companyWebsite),
+        ].filter(Boolean),
+        reference,
+        inspectionDate: reportText(fmtDate(report.reportedAt)),
+        severity: report.severity,
+        completionLabel: report.submittedAt ? "Completed" : "Draft",
+        reportStatus,
+        inspectorName,
+        logo,
+        clientRows: [
+          { label: "Name", value: reportText(customer?.name) || reportText(sr.customerName) },
+          { label: "Phone", value: displayValue(customer?.phone) },
+          { label: "Email", value: displayValue(customer?.email) },
+          { label: "Site address", value: displayValue(siteAddress) },
+        ],
+        equipmentRows,
+        findings: split.findings,
+        workDetails: split.workDetails,
+        recommendation: report.recommendation ?? "",
+        parts: report.recommendations,
+        checklist: report.checklist,
+        measurements: report.measurements,
+        errorCodes: report.errorCodes,
+        calibration: report.calibrationStatus ?? "",
+        additionalFields: visibleExtra,
+        attachments: report.attachments,
+        remarks: report.technicianRemarks ?? "",
+      });
       kindLabel = "Inspection Report";
     } else {
       throw new AppError("Unsupported document kind", 400);
     }
 
     if (kind !== "invoice") {
-      this.stampFooters(doc, company, kindLabel, reference);
+      this.stampFooters(doc, company, kindLabel, reference, footerLayout);
     }
     const buffer = await toBuffer(doc);
     const file = await fileStorageService.saveBuffer(tenantId, actorId, {

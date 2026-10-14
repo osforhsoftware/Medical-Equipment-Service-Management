@@ -53,7 +53,7 @@ const SEVERITY_OPTIONS = [
   },
 ] as const;
 
-import { InspectionSignaturePanel } from "./InspectionSignaturePanel";
+const HIDDEN_SIGNATURE_LABELS = new Set(["Inspector Signature", "Admin Signature"]);
 
 interface InspectionReportFormProps {
   active: BackendServiceRequest;
@@ -479,45 +479,18 @@ export function InspectionReportForm({
       </InspectionSection>
 
       <InspectionSection
-        step="05"
-        title="Signatures"
-        description="Inspector & Admin / Coordinator digital signatures."
-        optional
-      >
-        <InspectionSignaturePanel
-          inspectorName={active.assignedName ?? "Inspector"}
-          signatures={(() => {
-            const insp = additionalFields.find((f) => f.label === "Inspector Signature")?.value;
-            const adm = additionalFields.find((f) => f.label === "Admin Signature")?.value;
-            return {
-              inspectorSignature: { name: active.assignedName ?? "Inspector", dataUrl: insp || null, capturedAt: insp ? new Date().toISOString() : null },
-              approvalSignature: { name: "Admin / Coordinator", dataUrl: adm || null, capturedAt: adm ? new Date().toISOString() : null },
-            };
-          })()}
-          onSave={(sigs) => {
-            setAdditionalFields((prev) => {
-              const filtered = prev.filter((f) => f.label !== "Inspector Signature" && f.label !== "Admin Signature");
-              const next = [...filtered];
-              if (sigs.inspectorSignature.dataUrl) {
-                next.push({ label: "Inspector Signature", value: sigs.inspectorSignature.dataUrl });
-              }
-              if (sigs.approvalSignature.dataUrl) {
-                next.push({ label: "Admin Signature", value: sigs.approvalSignature.dataUrl });
-              }
-              return next;
-            });
-          }}
-        />
-      </InspectionSection>
-
-      <InspectionSection
         title="Additional fields"
         description="Optional custom notes for the report and PDF."
         optional
       >
         <CustomerAdditionalFieldsEditor
-          value={additionalFields}
-          onChange={setAdditionalFields}
+          value={additionalFields.filter((field) => !HIDDEN_SIGNATURE_LABELS.has(field.label))}
+          onChange={(next) => {
+            setAdditionalFields((prev) => [
+              ...next,
+              ...prev.filter((field) => HIDDEN_SIGNATURE_LABELS.has(field.label)),
+            ]);
+          }}
           title="Additional inspection fields"
           description="Optional label/value rows (accessories received, site notes, meter readings, etc.)."
         />

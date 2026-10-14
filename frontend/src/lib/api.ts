@@ -435,10 +435,12 @@ export interface BackendInspectionRecommendation {
   estimatedCost: string | number;
   procurementStatus?: string | null;
   inventoryItem?: {
+    name?: string | null;
     sellingPrice?: string | number | null;
     unitCost?: string | number | null;
   } | null;
   catalogItem?: {
+    name?: string | null;
     unitPrice?: string | number | null;
   } | null;
 }
@@ -1382,28 +1384,6 @@ export interface UpdateSettingsInput {
   rbacMatrix?: Record<string, string[]>;
 }
 
-export interface DemoSeedCounts {
-  branches: number;
-  customers: number;
-  equipment: number;
-  serviceRequests: number;
-  estimates: number;
-  serviceJobs: number;
-  inventory: number;
-  suppliers: number;
-  purchaseOrders: number;
-  stockTransfers: number;
-  invoices: number;
-  auditLogs: number;
-  users: number;
-}
-
-export interface DemoSeedStatus {
-  seeded: boolean;
-  modules: string[];
-  counts: DemoSeedCounts;
-}
-
 export interface DashboardTrend {
   value: string;
   up: boolean;
@@ -1907,9 +1887,9 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  /** Soft-delete customer (status → inactive). Related records stay linked. */
+  /** Permanently delete a customer. Fails when related work or a portal login still exists. */
   deleteCustomer: (id: string) =>
-    request<BackendCustomer & { related?: { equipmentCount: number; activeJobs: number } }>(
+    request<{ id: string; deleted: true; name: string; reference: string }>(
       `/api/customers/${id}`,
       { method: "DELETE" },
     ),
@@ -2592,14 +2572,6 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
-
-  getDemoSeedStatus: () => request<DemoSeedStatus>("/api/settings/demo-seed"),
-
-  seedDemoData: () =>
-    request<DemoSeedStatus>("/api/settings/demo-seed", { method: "POST" }),
-
-  removeDemoData: () =>
-    request<DemoSeedStatus>("/api/settings/demo-seed", { method: "DELETE" }),
 
   listSuppliers: (params?: { page?: number; limit?: number; search?: string }) =>
     requestPaginated<BackendSupplier>(`/api/suppliers${buildListQuery(params)}`),

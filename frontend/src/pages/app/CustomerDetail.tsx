@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Building2, FileText, Loader2, Mail, MapPin, Pencil, Phone, RotateCcw, Trash2, User } from "lucide-react";
 import { z } from "zod";
 import {
@@ -121,6 +121,7 @@ export default function CustomerDetail() {
   const canAccessBilling =
     Boolean(user) &&
     (hasRole(SERVICE_BILLING_ROLES) || userCanAccessPath(user!, "/app/billing", rbacMatrix));
+  const navigate = useNavigate();
   const { id = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [customer, setCustomer] = useState<BackendCustomer | null>(null);
@@ -233,7 +234,7 @@ export default function CustomerDetail() {
   };
 
   const openDelete = () => {
-    if (!customer || !canEdit || customer.status === "inactive") return;
+    if (!customer || !canEdit) return;
     setDeleteOpen(true);
   };
 
@@ -241,14 +242,14 @@ export default function CustomerDetail() {
     if (!customer) return;
     setDeleting(true);
     try {
-      const removed = await api.deleteCustomer(customer.id);
-      setCustomer(removed);
+      await api.deleteCustomer(customer.id);
       setDeleteOpen(false);
-      toast.success("Customer removed", {
-        description: "Marked inactive. Related equipment and jobs remain available for history.",
+      toast.success("Customer deleted", {
+        description: `${customer.name} was permanently removed.`,
       });
+      navigate("/app/customers");
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to remove customer" });
+      toast.apiError(err, { fallback: "Unable to delete customer" });
     } finally {
       setDeleting(false);
     }
@@ -342,13 +343,13 @@ export default function CustomerDetail() {
                   <Pencil className="mr-1 h-4 w-4" /> Edit
                 </Button>
               ) : null}
-              {canEdit && customer.status !== "inactive" ? (
+              {canEdit ? (
                 <Button
                   variant="outline"
                   className="text-destructive hover:text-destructive"
                   onClick={openDelete}
                 >
-                  <Trash2 className="mr-1 h-4 w-4" /> Remove
+                  <Trash2 className="mr-1 h-4 w-4" /> Delete
                 </Button>
               ) : null}
               {canEdit && customer.status === "inactive" ? (
@@ -801,24 +802,25 @@ export default function CustomerDetail() {
           if (deleting) return;
           setDeleteOpen(open);
         }}
-        title="Remove customer?"
+        title="Delete customer?"
         description={
           <div className="space-y-2">
             <p>
-              This soft-removes{" "}
+              This permanently deletes{" "}
               <span className="font-medium text-foreground">{customer?.name}</span> ({customer?.reference}
-              ). The record is marked inactive — not permanently erased.
+              ). This cannot be undone.
             </p>
-            <p>
-              Related work stays linked for history
-              {customer
-                ? `: ${customer.equipmentCount} equipment · ${customer.activeJobs} active jobs`
-                : ""}
-              . Existing jobs, estimates, invoices, and sales are not deleted.
-            </p>
+            {customer && (customer.equipmentCount > 0 || customer.activeJobs > 0) ? (
+              <p>
+                This customer still has {customer.equipmentCount} equipment and {customer.activeJobs} active
+                jobs. Delete is blocked until that related work is removed.
+              </p>
+            ) : (
+              <p>Contacts for this customer are deleted with the record.</p>
+            )}
           </div>
         }
-        confirmLabel="Remove customer"
+        confirmLabel="Delete customer"
         loading={deleting}
         onConfirm={() => void confirmDelete()}
       />

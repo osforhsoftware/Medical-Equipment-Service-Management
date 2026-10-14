@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { Image, Loader2, Database, Trash2 } from "lucide-react";
+import { Image, Loader2 } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -14,20 +14,8 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Check, X, UserCog } from "lucide-react";
 import { Link } from "react-router-dom";
-import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { type DemoSeedStatus, type BackendUser } from "@/lib/api";
+import { type BackendUser } from "@/lib/api";
 import { useSettings } from "@/context/SettingsContext";
 import { RBAC_MODULES, RBAC_ROLES, buildDefaultRbacMatrix } from "@/config/defaultRbac";
 import { navItems } from "@/config/nav";
@@ -36,22 +24,6 @@ import type { Role } from "@/data/types";
 import { api } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { APPROVED_IMAGE_ACCEPT, uploadTypeErrorMessage } from "@/lib/uploadFileTypes";
-
-const DEMO_MODULE_ROWS: { label: string; countKey: keyof DemoSeedStatus["counts"] }[] = [
-  { label: "Customers", countKey: "customers" },
-  { label: "Equipment & Machines", countKey: "equipment" },
-  { label: "Service Requests", countKey: "serviceRequests" },
-  { label: "MRI Scanner (Siemens)", countKey: "equipment" },
-  { label: "Estimates & Approvals", countKey: "estimates" },
-  { label: "Service Jobs", countKey: "serviceJobs" },
-  { label: "Inventory", countKey: "inventory" },
-  { label: "Suppliers", countKey: "suppliers" },
-  { label: "Purchase Orders", countKey: "purchaseOrders" },
-  { label: "Stock Transfers", countKey: "stockTransfers" },
-  { label: "Billing & Invoicing", countKey: "invoices" },
-  { label: "Audit Logs", countKey: "auditLogs" },
-  { label: "User Management", countKey: "users" },
-];
 
 const AUTOMATION_KEYS = [
   { key: "lowStockAlerts" as const, title: "Low-stock alerts", desc: "Alert when items hit reorder level" },
@@ -101,11 +73,6 @@ export default function Settings() {
   const [defaultEstimatorUserId, setDefaultEstimatorUserId] = useState(NONE);
   const [defaultEngineerUserId, setDefaultEngineerUserId] = useState(NONE);
   const [savingAssignment, setSavingAssignment] = useState(false);
-  const [demoStatus, setDemoStatus] = useState<DemoSeedStatus | null>(null);
-  const [loadingDemo, setLoadingDemo] = useState(true);
-  const [seedingDemo, setSeedingDemo] = useState(false);
-  const [removingDemo, setRemovingDemo] = useState(false);
-  const [removeDemoOpen, setRemoveDemoOpen] = useState(false);
   const orgRef = useRef<HTMLDivElement>(null);
   const {
     errors: orgErrors,
@@ -121,61 +88,11 @@ export default function Settings() {
 
   const orgValues = () => ({ companyName, supportEmail, defaultTaxRate });
 
-  const loadDemoStatus = async () => {
-    setLoadingDemo(true);
-    try {
-      const status = await api.getDemoSeedStatus();
-      setDemoStatus(status);
-    } catch {
-      setDemoStatus(null);
-    } finally {
-      setLoadingDemo(false);
-    }
-  };
-
   useEffect(() => {
-    void loadDemoStatus();
     void api.listUsers({ isActive: true })
       .then(setStaffUsers)
       .catch(() => setStaffUsers([]));
   }, []);
-
-  const handleSeedDemo = async () => {
-    setSeedingDemo(true);
-    const loadingId = toast.loading("Seeding demo data...");
-    try {
-      const status = await api.seedDemoData();
-      setDemoStatus(status);
-      toast.success("Demo data seeded", {
-        id: loadingId,
-        description: "Sample records are now available across all modules.",
-        force: true,
-      });
-    } catch (err) {
-      toast.apiError(err, { id: loadingId, fallback: "Unable to seed demo data", force: true });
-    } finally {
-      setSeedingDemo(false);
-    }
-  };
-
-  const handleRemoveDemo = async () => {
-    setRemovingDemo(true);
-    const loadingId = toast.loading("Removing demo data...");
-    try {
-      const status = await api.removeDemoData();
-      setDemoStatus(status);
-      setRemoveDemoOpen(false);
-      toast.success("Demo data removed", {
-        id: loadingId,
-        description: "All seeded sample records have been deleted.",
-        force: true,
-      });
-    } catch (err) {
-      toast.apiError(err, { id: loadingId, fallback: "Unable to remove demo data", force: true });
-    } finally {
-      setRemovingDemo(false);
-    }
-  };
 
   useEffect(() => {
     if (!settings) return;
@@ -649,83 +566,6 @@ export default function Settings() {
         </Card>
 
         <Card className="shadow-card">
-          <CardHeader className="flex flex-row items-center justify-between gap-4">
-            <div>
-              <CardTitle className="text-base">Demo Data</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Insert or remove sample records for testing all modules (development only).
-              </p>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button size="sm" disabled={seedingDemo || loadingDemo}>
-                    {seedingDemo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
-                    Seed all
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Seed demo data?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will insert sample customers, equipment (including MRI Scanner), service requests,
-                      estimates, jobs, inventory, suppliers, purchase orders, stock transfers, invoices,
-                      audit logs, and demo user accounts. Demo user password: <span className="font-mono">demo@123</span>
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => void handleSeedDemo()}>Seed all modules</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={removingDemo || loadingDemo || !demoStatus?.seeded}
-                onClick={() => setRemoveDemoOpen(true)}
-              >
-                {removingDemo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                Remove all
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {loadingDemo ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading demo data status…
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Badge variant={demoStatus?.seeded ? "default" : "secondary"}>
-                    {demoStatus?.seeded ? "Demo data active" : "No demo data"}
-                  </Badge>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {DEMO_MODULE_ROWS.map((row) => (
-                    <div
-                      key={row.label}
-                      className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm"
-                    >
-                      <span>{row.label}</span>
-                      <Badge variant="outline" className="font-mono">
-                        {row.label === "MRI Scanner (Siemens)"
-                          ? demoStatus?.seeded
-                            ? "1"
-                            : "0"
-                          : (demoStatus?.counts[row.countKey] ?? 0)}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-card">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">User Accounts</CardTitle>
             <Button asChild variant="outline" size="sm">
@@ -819,15 +659,6 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-      <DeleteConfirmDialog
-        open={removeDemoOpen}
-        onOpenChange={setRemoveDemoOpen}
-        title="Remove all demo data?"
-        description="This permanently deletes all seeded sample records. Your admin account and organization settings are kept."
-        confirmLabel="Remove all demo data"
-        loading={removingDemo}
-        onConfirm={() => void handleRemoveDemo()}
-      />
       </div>
   );
 }
