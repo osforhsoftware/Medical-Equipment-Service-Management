@@ -129,7 +129,9 @@ export class NotificationsService {
         ? "In Progress"
         : status === "review"
           ? "QA (awaiting check)"
-          : status === "delivery"
+          : status === "completed"
+            ? "Complete"
+            : status === "delivery"
             ? "Delivery"
             : status.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase());
     await notificationsRepository.create(tenantId, {
@@ -137,14 +139,18 @@ export class NotificationsService {
       title:
         status === "review"
           ? "Job ready for QA"
-          : status === "delivery"
-            ? "Job ready for delivery"
+          : status === "completed"
+            ? "Job complete — ready for delivery"
+            : status === "delivery"
+            ? "Delivery confirmed"
             : "Job updated",
       body:
         status === "review"
           ? `${reference} was submitted for coordinator/admin QA.`
-          : status === "delivery"
-            ? `${reference} passed QA and is ready for delivery confirmation.`
+          : status === "completed"
+            ? `${reference} passed QA and is complete. Confirm delivery to hand off equipment.`
+            : status === "delivery"
+            ? `${reference} delivery was confirmed.`
             : `${reference} moved to ${label}.`,
       recipientRole: "coordinator",
     });

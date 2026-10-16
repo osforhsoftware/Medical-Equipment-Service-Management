@@ -11,6 +11,8 @@ router.use(authenticate, resolveTenant);
 router.use(requireStaff);
 
 router.get("/", settingsController.get);
+router.get("/asset-tag-report", requireRole("admin"), settingsController.assetTagReport);
+router.post("/asset-tag-report/assign-missing", requireRole("admin"), settingsController.assignMissingAssetTags);
 router.put("/", requireRole("admin"), validate(updateSettingsSchema), settingsController.update);
 
 router.get("/demo-seed", requireRole("admin"), settingsController.getDemoSeedStatus);

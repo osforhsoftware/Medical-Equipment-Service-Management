@@ -150,12 +150,20 @@ export default function EquipmentDetail() {
                   { label: "Asset tag", value: equipment.assetTag },
                 ]}
               />
+              <div className="mt-4 space-y-1">
+                <p className="text-sm font-medium">Part description</p>
+                <p className="whitespace-pre-wrap text-sm text-muted-foreground">{equipment.partDescription || "—"}</p>
+              </div>
               {equipment.purchaseSaleHistory ? (
                 <div className="mt-4 space-y-1">
                   <p className="text-sm font-medium">Purchase / sale history</p>
                   <p className="whitespace-pre-wrap text-sm text-muted-foreground">{equipment.purchaseSaleHistory}</p>
                 </div>
               ) : null}
+              <div className="mt-4 space-y-1">
+                <p className="text-sm font-medium">Additional note</p>
+                <p className="whitespace-pre-wrap text-sm text-muted-foreground">{equipment.additionalNote || "—"}</p>
+              </div>
             </DetailSection>
           ),
         },
@@ -241,7 +249,6 @@ export default function EquipmentDetail() {
       open={editOpen}
       onOpenChange={setEditOpen}
       equipment={equipment}
-      existingAssetTags={equipment ? [equipment.assetTag] : []}
       onSaved={(saved) => {
         setEquipment(saved);
         void load();

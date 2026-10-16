@@ -6,7 +6,7 @@ const serviceTypes = ["Repair", "Maintenance", "Calibration", "Inspection", "Ins
 
 
 
-const jobStatusEnum = z.enum(["scheduled", "inProgress", "partsPending", "review", "delivery", "completed"]);
+const jobStatusEnum = z.enum(["scheduled", "inProgress", "partsPending", "review", "completed", "delivery"]);
 
 
 

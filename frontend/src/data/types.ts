@@ -68,6 +68,8 @@ export interface Equipment {
   category: string;
   serialNumber: string;
   partNumber?: string | null;
+  partDescription?: string | null;
+  additionalNote?: string | null;
   customerId: string | null;
   customerName: string;
   branchId: string;

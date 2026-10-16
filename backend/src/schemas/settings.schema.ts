@@ -1,10 +1,28 @@
 import { z } from "zod";
 import { RBAC_ROLES } from "@/config/defaultRbac";
+import { isValidAssetTagPrefix, normalizeAssetTagPrefix } from "@/lib/assetTag";
 
 const optionalStaffId = z.string().cuid().nullable().optional();
 
 export const updateSettingsSchema = z.object({
   companyName: z.string().min(2).max(200).optional(),
+  assetTagPrefix: z
+    .string()
+    .trim()
+    .min(2)
+    .max(40)
+    .transform((value, ctx) => {
+      const prefix = normalizeAssetTagPrefix(value);
+      if (!isValidAssetTagPrefix(prefix)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Use 2–20 letters, numbers, and hyphens.",
+        });
+        return z.NEVER;
+      }
+      return prefix;
+    })
+    .optional(),
   logoFileId: z.string().cuid().nullable().optional(),
   supportEmail: z.string().email().optional(),
   companyAddress: z.string().max(500).nullable().optional(),

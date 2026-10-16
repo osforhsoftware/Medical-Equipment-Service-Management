@@ -226,7 +226,7 @@ export class ServiceTicketWorkflowService {
     }
 
     const job = await prisma.serviceJob.findFirst({
-      where: { tenantId, serviceRequestId: id, status: "completed" },
+      where: { tenantId, serviceRequestId: id, status: { in: ["completed", "delivery"] } },
     });
     if (!job) throw new AppError("A completed job is required before final approval", 409);
 
@@ -294,7 +294,7 @@ export class ServiceTicketWorkflowService {
         data: { status: nextStatus as never },
       });
       await tx.serviceJob.updateMany({
-        where: { tenantId, serviceRequestId: id, status: "completed" },
+        where: { tenantId, serviceRequestId: id, status: { in: ["completed", "delivery"] } },
         data: { status: "review" },
       });
     });

@@ -72,6 +72,9 @@ export function ScannedEquipmentDetails({
         <Field label="Location" value={equipment.location} icon={MapPin} />
         <Field label="Category" value={categoryName} />
         <Field label="Serial" value={equipment.serialNumber} />
+        <Field label="Part number" value={equipment.partNumber || "—"} />
+        <Field label="Part description" value={equipment.partDescription || "—"} />
+        <Field label="Additional note" value={equipment.additionalNote || "—"} />
         <Field label="Condition" value={conditionName} />
         <Field label="Installed" value={formatDate(equipment.installDate)} />
         <Field
@@ -125,7 +128,7 @@ function Field({ label, value, icon: Icon }: { label: string; value: string; ico
       <p className="flex items-center gap-1 text-xs text-muted-foreground">
         {Icon ? <Icon className="h-3 w-3" /> : null} {label}
       </p>
-      <p className="font-medium">{value || "—"}</p>
+      <p className="whitespace-pre-wrap break-words font-medium">{value || "—"}</p>
     </div>
   );
 }

@@ -33,13 +33,16 @@ const optionalNullableDate = z.preprocess(
 );
 
 export const createEquipmentSchema = z.object({
-  assetTag: z.string().min(2, "Asset tag is required").max(64),
+  // Ignored on create. The server assigns the next asset tag from company settings.
+  assetTag: z.string().trim().max(64).optional(),
   name: z.string().min(2, "Name is required").max(200),
   model: optionalText(120),
   manufacturer: optionalText(120),
   category: optionalText(80),
   serialNumber: z.string().min(1, "Serial number is required").max(120),
   partNumber: optionalNullableText(120),
+  partDescription: optionalNullableText(2000),
+  additionalNote: optionalNullableText(5000),
   customerId: optionalNullableId,
   branchId: z.string().optional(),
   location: z.string().max(200).optional(),

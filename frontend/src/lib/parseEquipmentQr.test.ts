@@ -13,4 +13,8 @@ describe("parseEquipmentQrValue", () => {
   it("reads a by-tag path segment", () => {
     expect(parseEquipmentQrValue("https://mesms.local/api/equipment/by-tag/MED-AX-1180")).toBe("MED-AX-1180");
   });
+
+  it("reads a configured prefix from the last path segment", () => {
+    expect(parseEquipmentQrValue("https://mesms.local/equipment/ACM-H-1001")).toBe("ACM-H-1001");
+  });
 });

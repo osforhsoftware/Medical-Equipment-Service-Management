@@ -242,6 +242,18 @@ export interface BackendBranch {
   updatedAt: string;
 }
 
+export interface CustomerDeleteResult {
+  id: string;
+  name: string;
+  reference: string;
+  deleted: boolean;
+  deactivated: boolean;
+  alreadyInactive: boolean;
+  status: string;
+  linked: string[];
+  summary: string;
+}
+
 export interface BackendCustomer {
   id: string;
   tenantId: string;
@@ -316,6 +328,8 @@ export interface BackendEquipment {
   category: string;
   serialNumber: string;
   partNumber?: string | null;
+  partDescription?: string | null;
+  additionalNote?: string | null;
   customerId: string | null;
   customerName: string;
   branchId: string;
@@ -391,13 +405,15 @@ export interface PortalDocument {
 }
 
 export interface CreateEquipmentInput {
-  assetTag: string;
+  assetTag?: string;
   name: string;
   model?: string;
   manufacturer?: string;
   category?: string;
   serialNumber: string;
   partNumber?: string | null;
+  partDescription?: string | null;
+  additionalNote?: string | null;
   customerId?: string | null;
   branchId?: string;
   location?: string;
@@ -1333,6 +1349,10 @@ export interface CreateDomainStockTransferInput {
 export interface BackendSettings {
   tenantId: string;
   companyName: string;
+  assetTagPrefix: string;
+  suggestedAssetTagPrefix: string;
+  assetTagNextSequence: number;
+  assetTagPreview: string;
   supportEmail: string;
   companyAddress?: string | null;
   companyPhone?: string | null;
@@ -1360,6 +1380,7 @@ export interface BackendSettings {
 
 export interface UpdateSettingsInput {
   companyName?: string;
+  assetTagPrefix?: string;
   supportEmail?: string;
   companyAddress?: string | null;
   companyPhone?: string | null;
@@ -1887,12 +1908,12 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  /** Permanently delete a customer. Fails when related work or a portal login still exists. */
+  /**
+   * Permanently deletes a customer with no linked records.
+   * Customers that still have equipment, jobs, estimates, invoices, payments, or other records are deactivated instead.
+   */
   deleteCustomer: (id: string) =>
-    request<{ id: string; deleted: true; name: string; reference: string }>(
-      `/api/customers/${id}`,
-      { method: "DELETE" },
-    ),
+    request<CustomerDeleteResult>(`/api/customers/${id}`, { method: "DELETE" }),
 
   restoreCustomer: (id: string) =>
     request<BackendCustomer>(`/api/customers/${id}/restore`, {
@@ -1972,7 +1993,7 @@ export const api = {
     }),
 
   deleteTaxonomy: (id: string) =>
-    request<{ deactivated: boolean; usageCount: number } | void>(`/api/taxonomy/${id}`, {
+    request<void>(`/api/taxonomy/${id}`, {
       method: "DELETE",
     }),
 
@@ -2442,6 +2463,26 @@ export const api = {
     ),
 
   getSettings: () => request<BackendSettings>("/api/settings"),
+
+  getAssetTagReport: () =>
+    request<{
+      companyName: string;
+      prefix: string;
+      prefixSource: "stored" | "suggested-from-company-name";
+      nextSequence: number;
+      preview: string;
+      equipmentCount: number;
+      blank: { id: string; name: string; assetTag: string }[];
+      duplicates: { assetTag: string; count: number }[];
+      preservedCount: number;
+      renamesApplied: number;
+      notes: string[];
+    }>("/api/settings/asset-tag-report"),
+
+  assignMissingAssetTags: () =>
+    request<{ id: string; name: string; assetTag: string }[]>("/api/settings/asset-tag-report/assign-missing", {
+      method: "POST",
+    }),
 
   getDashboard: (params?: { from?: string; to?: string }) =>
     request<DashboardData>(`/api/dashboard${queryString({ from: params?.from, to: params?.to })}`),

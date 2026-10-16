@@ -1519,7 +1519,7 @@ export class DomainService {
   async createInvoiceFromJob(tenantId: string, actor: Actor, input: any) {
     return prisma.$transaction(async (tx) => {
       const job = await tx.serviceJob.findFirst({
-        where: { id: input.jobId, tenantId, status: "completed" },
+        where: { id: input.jobId, tenantId, status: { in: ["completed", "delivery"] } },
         include: {
           estimate: { include: { lineItems: true } },
           extras: { where: { status: "approved" } },

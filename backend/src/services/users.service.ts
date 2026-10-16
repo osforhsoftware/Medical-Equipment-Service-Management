@@ -5,11 +5,17 @@ import { customersRepository } from "@/repositories/customers.repository";
 import { AppError } from "@/middleware/errorHandler";
 import { enrichUserWithRoles, ensureSystemRoles, syncUserRoleAssignments } from "@/utils/userRoles";
 import { normalizeUserPermissions, parseUserPermissions } from "@/lib/userPermissions";
+import { assertCustomerSelectable } from "@/lib/activeCustomer";
 
-async function assertLinkedCustomer(tenantId: string, customerId: string | null | undefined) {
+async function assertLinkedCustomer(
+  tenantId: string,
+  customerId: string | null | undefined,
+  currentCustomerId?: string | null,
+) {
   if (!customerId) return;
   const customer = await customersRepository.findById(customerId, tenantId);
   if (!customer) throw new AppError("Customer not found", 404);
+  assertCustomerSelectable(customer, currentCustomerId);
 }
 
 function resolveRoleSelection(data: { role?: string; roles?: string[]; primaryRole?: string }) {
@@ -150,7 +156,7 @@ export class UsersService {
     if (nextRoleKeys.includes("customer")) {
       const nextCustomerId = data.customerId !== undefined ? data.customerId : existing.customerId;
       if (!nextCustomerId) throw new AppError("Link this portal user to a customer record", 400);
-      await assertLinkedCustomer(tenantId, nextCustomerId);
+      await assertLinkedCustomer(tenantId, nextCustomerId, existing.customerId);
     }
 
     const passwordHash = data.password ? await bcrypt.hash(data.password, 10) : undefined;

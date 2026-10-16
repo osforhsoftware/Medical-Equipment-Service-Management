@@ -59,7 +59,7 @@ export const DEMO_JOBS = [
   { reference: "JOB-2026-0300", requestRef: "SR-2026-0140", customerName: "Brighton Diagnostics", equipmentName: "Blood Analyzer", engineer: "Marcus Bell", type: "Calibration" as const, status: "scheduled" as const, scheduledFor: "2026-06-05", progress: 0 },
   { reference: "JOB-2026-0299", requestRef: "SR-2026-0141", customerName: "St. Mary's Hospital", equipmentName: "CT Scanner", engineer: "Marcus Bell", type: "Maintenance" as const, status: "partsPending" as const, scheduledFor: "2026-06-06", progress: 30 },
   { reference: "JOB-2026-0298", requestRef: "SR-2026-0139", customerName: "Vista Research Institute", equipmentName: "Ultrasound", engineer: "Marcus Bell", type: "Inspection" as const, status: "review" as const, scheduledFor: "2026-06-02", progress: 90 },
-  { reference: "JOB-2026-0297", requestRef: "SR-2026-0137", customerName: "Lakeside Dental Group", equipmentName: "Dental X-Ray", engineer: "Marcus Bell", type: "Installation" as const, status: "completed" as const, scheduledFor: "2026-05-28", progress: 100 },
+  { reference: "JOB-2026-0297", requestRef: "SR-2026-0137", customerName: "Lakeside Dental Group", equipmentName: "Dental X-Ray", engineer: "Marcus Bell", type: "Installation" as const, status: "delivery" as const, scheduledFor: "2026-05-28", progress: 100 },
 ];
 
 export const DEMO_INVENTORY = [

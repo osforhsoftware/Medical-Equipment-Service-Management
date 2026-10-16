@@ -68,8 +68,9 @@ test("events cannot skip legal ticket transitions", () => {
   assert.equal(resolveTicketEventStatus("pending_final_approval", "finalApprovalRejected"), "assigned_engineer");
 });
 
-test("job can return from completed to review after final-approval reject", () => {
+test("job can return from complete or delivery to review after final-approval reject", () => {
   assert.doesNotThrow(() => assertJobTransition("completed", "review"));
+  assert.doesNotThrow(() => assertJobTransition("delivery", "review"));
 });
 
 test("revision request returns ticket to estimate stage", () => {
@@ -80,14 +81,15 @@ test("revision request returns ticket to estimate stage", () => {
   assert.equal(resolveTicketEventStatus("pending_approval", "estimatePendingApproval"), "pending_approval");
 });
 
-test("job transitions require QA then delivery before completed", () => {
+test("job transitions require QA then complete before delivery", () => {
   assert.doesNotThrow(() => assertJobTransition("scheduled", "inProgress"));
   assert.doesNotThrow(() => assertJobTransition("inProgress", "review"));
-  assert.doesNotThrow(() => assertJobTransition("review", "delivery"));
-  assert.doesNotThrow(() => assertJobTransition("delivery", "completed"));
+  assert.doesNotThrow(() => assertJobTransition("review", "completed"));
+  assert.doesNotThrow(() => assertJobTransition("completed", "delivery"));
   assert.doesNotThrow(() => assertJobTransition("review", "inProgress"));
-  expectAppError(() => assertJobTransition("review", "completed"), 409);
+  expectAppError(() => assertJobTransition("review", "delivery"), 409);
   expectAppError(() => assertJobTransition("scheduled", "completed"), 409);
   expectAppError(() => assertJobTransition("inProgress", "completed"), 409);
   expectAppError(() => assertJobTransition("completed", "inProgress"), 409);
+  expectAppError(() => assertJobTransition("delivery", "completed"), 409);
 });

@@ -73,8 +73,8 @@ const JOB_STATUS_OPTIONS = [
   { value: "inProgress", label: "In Progress" },
   { value: "partsPending", label: "Parts Pending" },
   { value: "review", label: "QA" },
+  { value: "completed", label: "Complete" },
   { value: "delivery", label: "Delivery" },
-  { value: "completed", label: "Completed" },
 ] as const;
 
 const ENGINEER_STATUS_OPTIONS = JOB_STATUS_OPTIONS.filter(
@@ -285,10 +285,12 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
   const canCreateRework = hasRole(["admin", "coordinator"]) && canMutate;
   const statusOptions = canApproveComplete ? JOB_STATUS_OPTIONS : ENGINEER_STATUS_OPTIONS;
   const awaitingQa = job?.status === "review";
-  const awaitingDelivery = job?.status === "delivery";
+  const awaitingDelivery = job?.status === "completed";
+  const jobDelivered = job?.status === "delivery";
+  const workComplete = Boolean(job && (job.status === "completed" || job.status === "delivery"));
   const canSubmitForReview =
     canUpdateJob && job && !["review", "delivery", "completed"].includes(job.status);
-  const canEditWorkReport = canUpdateJob && job && job.status !== "completed";
+  const canEditWorkReport = canUpdateJob && job && !workComplete;
   const hasWorkReport = Boolean(job && pickWorkReportLog(job.workLogs));
   const canDownloadServiceReport =
     hasRole(["engineer", "admin", "coordinator", "qa"]) && Boolean(job) && hasWorkReport;
@@ -559,7 +561,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
     if (!job) return;
     try {
       const updated = await api.updateJob(job.id, {
-        status: "delivery",
+        status: "completed",
         progress: Math.max(job.progress, 95),
         stageDetails: {
           qa: {
@@ -573,7 +575,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
       setJob(updated);
       toast({
         title: "QA passed",
-        description: "Job moved to Delivery. Confirm handoff to complete and continue to billing.",
+        description: "Job moved to Complete. Confirm delivery to hand off equipment.",
       });
       setSearchParams({ tab: "workflow" });
       await refreshActivities(job.id);
@@ -611,7 +613,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
     if (!job) return;
     try {
       const updated = await api.updateJob(job.id, {
-        status: "completed",
+        status: "delivery",
         progress: 100,
         stageDetails: {
           delivery: {
@@ -634,8 +636,8 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
       toast({
         title: "Delivery confirmed",
         description: canAccessBilling
-          ? "Job completed. Continue to billing to invoice and update service warranty."
-          : "Job completed. Billing staff can generate the invoice when ready.",
+          ? "Equipment handed off. Continue to billing to invoice and update service warranty."
+          : "Equipment handed off. Billing staff can generate the invoice when ready.",
       });
       await refreshActivities(job.id);
     } catch (err) {
@@ -1008,7 +1010,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                   <Link to={`/app/jobs/${job.originalJobId}`}>Open original job</Link>
                 </Button>
               ) : null}
-              {job.status === "completed" && canCreateRework ? (
+              {jobDelivered && canCreateRework ? (
                 <Button
                   variant="outline"
                   disabled={creatingRework}
@@ -1022,7 +1024,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                   {creatingRework ? "Creating…" : "Create rework"}
                 </Button>
               ) : null}
-              {job.status === "completed" && canAccessBilling ? (
+              {workComplete && canAccessBilling ? (
                 <Button variant="brand" asChild>
                   <Link to={`/app/billing/jobs/${job.id}`}>Continue to billing</Link>
                 </Button>
@@ -1058,7 +1060,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                   </Button>
                 </>
               ) : null}
-              {job.status !== "completed" ? (
+              {!jobDelivered ? (
                 <>
                   {canEditWorkReport ? (
                     <Button variant="outline" onClick={() => workReport.openReport(job)}>
@@ -1076,7 +1078,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                         QA Fail — Return to Repair
                       </Button>
                       <Button onClick={() => void approveQaPass()}>
-                        QA Pass — Send to Delivery
+                        QA Pass — Mark Complete
                       </Button>
                     </>
                   ) : awaitingQa ? (
@@ -1085,7 +1087,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                     </Button>
                   ) : awaitingDelivery && canApproveComplete ? (
                     <Button onClick={() => void confirmDelivery()}>
-                      Confirm Delivery & Complete
+                      Confirm Delivery
                     </Button>
                   ) : awaitingDelivery ? (
                     <Button disabled variant="outline">
@@ -1138,10 +1140,10 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                 )}
 
                 <DetailSection title="Workflow">
-                  <ol className="grid gap-3 sm:grid-cols-3">
+                  <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     {JOB_WORKFLOW_STAGES.map((stage, index) => {
-                      const done = activeStageIndex > index || job.status === "completed";
-                      const current = activeStageIndex === index && job.status !== "completed";
+                      const done = activeStageIndex > index || jobDelivered;
+                      const current = activeStageIndex === index && !jobDelivered;
                       return (
                         <li
                           key={stage.id}
@@ -1229,7 +1231,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
           },
           {
             id: "workflow",
-            label: "Repair / QA / Delivery",
+            label: "QA / Complete / Delivery",
             content: (
               <div className="space-y-4">
                 <DetailSection title="Repair">
@@ -1270,7 +1272,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
 
                 <DetailSection title="QA">
                   <p className="mb-3 text-sm text-muted-foreground">
-                    Quality check by coordinator, admin, or QA staff before equipment leaves for delivery.
+                    Quality check by coordinator, admin, or QA staff before the job is marked complete.
                   </p>
                   <div className="grid gap-3">
                     {awaitingQa && canApproveComplete && (
@@ -1353,7 +1355,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                           disabled={!Object.values(qaChecklist).every(Boolean)}
                           onClick={() => void approveQaPass()}
                         >
-                          Pass — Send to Delivery
+                          Pass — Mark Complete
                         </Button>
                       </div>
                     ) : awaitingQa ? (
@@ -1366,9 +1368,24 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                   </div>
                 </DetailSection>
 
+                <DetailSection title="Complete">
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    QA pass marks the service work complete. Stock is consumed and the ticket can move to billing review.
+                  </p>
+                  {job.status === "completed" ? (
+                    <p className="text-sm text-success">Work is complete. Confirm delivery to hand off equipment.</p>
+                  ) : jobDelivered ? (
+                    <p className="text-sm text-muted-foreground">Complete step finished for this job.</p>
+                  ) : awaitingQa ? (
+                    <p className="text-sm text-muted-foreground">Complete unlocks after QA pass.</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Complete follows QA in the service sequence.</p>
+                  )}
+                </DetailSection>
+
                 <DetailSection title="Delivery">
                   <p className="mb-3 text-sm text-muted-foreground">
-                    Confirm handoff to the customer. Completing delivery marks the job done and opens billing.
+                    Confirm handoff to the customer after the job is complete.
                   </p>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="grid gap-2 sm:col-span-1">
@@ -1463,16 +1480,16 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                   ) : null}
                   {awaitingDelivery && canApproveComplete ? (
                     <Button className="mt-3" onClick={() => void confirmDelivery()}>
-                      Confirm Delivery & Complete
+                      Confirm Delivery
                     </Button>
-                  ) : job.status === "completed" && canAccessBilling ? (
+                  ) : jobDelivered && canAccessBilling ? (
                     <Button className="mt-3" variant="brand" asChild>
                       <Link to={`/app/billing/jobs/${job.id}`}>Continue to billing</Link>
                     </Button>
                   ) : awaitingDelivery ? (
                     <p className="mt-3 text-sm text-muted-foreground">Waiting for coordinator/admin delivery confirmation.</p>
                   ) : (
-                    <p className="mt-3 text-sm text-muted-foreground">Delivery unlocks after QA pass.</p>
+                    <p className="mt-3 text-sm text-muted-foreground">Delivery unlocks after Complete.</p>
                   )}
                 </DetailSection>
               </div>
@@ -1590,7 +1607,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                                   <p className="text-xs text-muted-foreground">
                                     {line.sku} · Req {line.qtyRequested} · Appr {line.qtyApproved} · Issued {line.qtyIssued} · Used {line.qtyConsumed} · Ret {line.qtyReturned} · Scrap {line.qtyScrapped}
                                   </p>
-                                  {canUpdateJob && job.status !== "completed" && unused > 0 ? (
+                                  {canUpdateJob && !workComplete && unused > 0 ? (
                                     <div className="mt-2 flex flex-wrap gap-2">
                                       <Button size="sm" variant="outline" onClick={() => void openStockDialog(line.inventoryItemId, 1)}>
                                         Use
@@ -1626,7 +1643,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                             {typeof row.returnableQuantity === "number" ? ` · Unused ${row.returnableQuantity}` : ""}
                           </p>
                         </div>
-                        {canUpdateJob && job.status !== "completed" && (row.returnableQuantity ?? 0) > 0 ? (
+                        {canUpdateJob && !workComplete && (row.returnableQuantity ?? 0) > 0 ? (
                           <Button size="sm" variant="outline" onClick={() => openReturnDialog(row.inventoryItemId, row.returnableQuantity ?? 1)}>
                             <Undo2 className="mr-1 h-3.5 w-3.5" />
                             Return unused
@@ -1760,7 +1777,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {job.status === "completed" ? (
+                {jobDelivered ? (
                   <div className="space-y-3">
                     <p className="text-sm text-muted-foreground">
                       {canAccessBilling
@@ -1818,18 +1835,18 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                     {awaitingQa ? (
                       <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
                         {canApproveComplete
-                          ? "Work submitted for QA. Pass to send to Delivery, or fail to return to Repair."
-                          : "Work submitted for QA. A coordinator, admin, or QA staff member must pass QA before Delivery."}
+                          ? "Work submitted for QA. Pass to mark Complete, or fail to return to Repair."
+                          : "Work submitted for QA. A coordinator, admin, or QA staff member must pass QA before Complete."}
                       </p>
                     ) : null}
                     {awaitingDelivery ? (
                       <p className="rounded-md border border-info/30 bg-info/10 px-3 py-2 text-sm text-foreground">
                         {canAccessBilling
-                          ? "QA passed. Confirm Delivery to complete the job and continue to billing."
-                          : "QA passed. Confirm Delivery to complete the job."}
+                          ? "QA passed. The job is complete. Confirm Delivery to hand off equipment, then continue to billing."
+                          : "QA passed. The job is complete. Confirm Delivery to hand off equipment."}
                       </p>
                     ) : null}
-                    {(canUpdateJob || canApproveComplete) && job.status !== "completed" ? (
+                    {(canUpdateJob || canApproveComplete) && !jobDelivered ? (
                       <div className="space-y-2">
                         <Label>Update status</Label>
                         <Select
@@ -1846,7 +1863,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                         </Select>
                       </div>
                     ) : null}
-                    {canUpdateJob && job.status !== "completed" ? (
+                    {canUpdateJob && !workComplete ? (
                       <div className="grid grid-cols-2 gap-2">
                         <ActionBtn
                           icon={ClipboardList}
@@ -1864,13 +1881,13 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                           QA Fail — Return to Repair
                         </Button>
                         <Button className="w-full" onClick={() => void approveQaPass()}>
-                          QA Pass — Send to Delivery
+                          QA Pass — Mark Complete
                         </Button>
                       </div>
                     ) : null}
                     {awaitingDelivery && canApproveComplete ? (
                       <Button className="w-full" onClick={() => void confirmDelivery()}>
-                        Confirm Delivery & Complete
+                        Confirm Delivery
                       </Button>
                     ) : null}
                     {canSubmitForReview ? (

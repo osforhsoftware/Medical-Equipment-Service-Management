@@ -123,11 +123,11 @@ function buildWhere(tenantId: string, filters: Omit<JobListFilters, "skip" | "ta
     cutoff.setDate(cutoff.getDate() - COMPLETED_BOARD_RETENTION_DAYS);
     const archiveClause: Prisma.ServiceJobWhereInput =
       scope === "archive"
-        ? { status: "completed", completedAt: { lt: cutoff } }
+        ? { status: "delivery", completedAt: { lt: cutoff } }
         : {
             OR: [
-              { status: { not: "completed" } },
-              { status: "completed", OR: [{ completedAt: null }, { completedAt: { gte: cutoff } }] },
+              { status: { not: "delivery" } },
+              { status: "delivery", OR: [{ completedAt: null }, { completedAt: { gte: cutoff } }] },
             ],
           };
     if (where.AND) {

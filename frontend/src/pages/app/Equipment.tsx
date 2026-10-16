@@ -89,21 +89,6 @@ export default function EquipmentPage() {
   const categories = categoriesQuery.data ?? [];
   const conditions = conditionsQuery.data ?? [];
 
-  const assetTagsQuery = useQuery({
-    queryKey: ["equipment", "asset-tags"],
-    queryFn: () => api.listEquipmentOptions(),
-    staleTime: 30_000,
-    enabled: canManage,
-  });
-
-  const existingAssetTags = useMemo(
-    () => [
-      ...equipment.map((item) => item.assetTag),
-      ...(assetTagsQuery.data ?? []).map((item) => item.assetTag),
-    ],
-    [assetTagsQuery.data, equipment],
-  );
-
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<BackendEquipment | null>(null);
   const [ticketPrompt, setTicketPrompt] = useState<BackendEquipment | null>(null);
@@ -130,6 +115,16 @@ export default function EquipmentPage() {
           <p className="text-xs text-muted-foreground">
             {[e.manufacturer, e.model].filter(Boolean).join(" · ") || "—"}
           </p>
+          {e.partNumber || e.partDescription ? (
+            <p className="text-xs text-muted-foreground">
+              {[e.partNumber ? `PN ${e.partNumber}` : null, e.partDescription].filter(Boolean).join(" · ")}
+            </p>
+          ) : null}
+          {e.additionalNote ? (
+            <p className="line-clamp-2 text-xs text-muted-foreground" title={e.additionalNote}>
+              {e.additionalNote}
+            </p>
+          ) : null}
         </div>
       ),
     },
@@ -258,7 +253,7 @@ export default function EquipmentPage() {
         columns={columns}
         search={search}
         onSearchChange={setSearch}
-        searchPlaceholder="Search by name, asset tag, serial, customer…"
+        searchPlaceholder="Search by name, asset tag, serial, part, customer…"
         emptyMessage="No equipment found."
         emptyHint="Try changing your search or filters."
         filterValues={filters}
@@ -298,7 +293,6 @@ export default function EquipmentPage() {
           if (!open) setEditing(null);
         }}
         equipment={editing}
-        existingAssetTags={existingAssetTags}
         onSaved={(saved) => {
           void queryClient.invalidateQueries({ queryKey: ["equipment"] });
           void queryClient.invalidateQueries({ queryKey: ["customers", "options"] });

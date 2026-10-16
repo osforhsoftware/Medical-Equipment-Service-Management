@@ -1,6 +1,6 @@
 import { estimatesRepository } from "@/repositories/estimates.repository";
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
-import { customersRepository } from "@/repositories/customers.repository";
+import { requireActiveCustomer } from "@/lib/activeCustomer";
 import { AppError } from "@/middleware/errorHandler";
 import { parseCalendarDate } from "@/utils/calendarDate";
 import { generateReference } from "@/utils/reference";
@@ -50,8 +50,7 @@ export class EstimatesService {
       if (actorRole === "estimator") {
         throw new AppError("Estimate staff can only create quotations for service tickets", 403);
       }
-      const customer = await customersRepository.findById(data.customerId!, tenantId);
-      if (!customer) throw new AppError("Customer not found", 404);
+      const customer = await requireActiveCustomer(tenantId, data.customerId!);
 
       let equipmentName = "Sales quotation";
       if (data.equipmentId) {

@@ -38,14 +38,7 @@ export class TaxonomyController {
 
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      const result = await taxonomyService.delete(req.params.id, req.tenantId!);
-      if (result.deactivated) {
-        res.json(success(
-          `This term is used by ${result.usageCount} record${result.usageCount === 1 ? "" : "s"} and was deactivated instead of deleted.`,
-          result,
-        ));
-        return;
-      }
+      await taxonomyService.delete(req.params.id, req.tenantId!);
       res.status(204).send();
     } catch (err) {
       next(err);

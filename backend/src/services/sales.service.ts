@@ -6,6 +6,7 @@ import { generateReference } from "@/utils/reference";
 import { applyPriceCategory, assertCustomerCreditAllows, assertLineMargin, loadMarginRule } from "@/lib/commercialRules";
 import { calculateEstimateTotals } from "@/lib/estimateTotals";
 import { assertOwnSalesRecord, salesOwnerFilter } from "@/lib/salesScope";
+import { assertCustomerSelectable, inactiveCustomerMessage } from "@/lib/activeCustomer";
 
 const money = (value: Prisma.Decimal | number | string | null | undefined) =>
   new Prisma.Decimal(value ?? 0).toDecimalPlaces(2);
@@ -331,6 +332,7 @@ export class SalesService {
     return prisma.$transaction(async (tx) => {
       const customer = await tx.customer.findFirst({ where: { id: input.customerId, tenantId } });
       if (!customer) throw new AppError("Customer not found", 404);
+      if (customer.status !== "active") throw new AppError(inactiveCustomerMessage(customer.name), 422);
       const user = await tx.user.findFirst({ where: { id: actor.userId, tenantId } });
       const salespersonName = user?.name ?? actor.name ?? "Sales";
       const lines = await this.resolveSaleLines(tx, tenantId, input.lines, customer.priceCategory);
@@ -412,6 +414,7 @@ export class SalesService {
       }
       const customer = await tx.customer.findFirst({ where: { id: input.customerId, tenantId } });
       if (!customer) throw new AppError("Customer not found", 404);
+      assertCustomerSelectable(customer, order.customerId);
       const lines = await this.resolveSaleLines(tx, tenantId, input.lines, customer.priceCategory);
       await this.assertStockForLines(tx, tenantId, lines);
       const pendingTotals = this.totalsFromLines(lines);

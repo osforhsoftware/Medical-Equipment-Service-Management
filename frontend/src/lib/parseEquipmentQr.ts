@@ -16,7 +16,7 @@ export function parseEquipmentQrValue(raw: string): string {
       return decodeURIComponent(segments[marker + 1]);
     }
     const last = segments[segments.length - 1];
-    if (last && /^(MED-|EQ-|ASSET-)/i.test(last)) {
+    if (last && /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$/.test(last)) {
       return decodeURIComponent(last);
     }
   } catch {

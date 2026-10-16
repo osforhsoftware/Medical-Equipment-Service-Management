@@ -74,6 +74,9 @@ export default function PortalEquipment() {
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>Asset: {e.assetTag}</p>
                 <p>Serial: {e.serialNumber}</p>
+                {e.partNumber ? <p>Part number: {e.partNumber}</p> : null}
+                {e.partDescription ? <p className="whitespace-pre-wrap">Part description: {e.partDescription}</p> : null}
+                {e.additionalNote ? <p className="whitespace-pre-wrap">Note: {e.additionalNote}</p> : null}
                 <p>Status: {formatEquipmentCurrentStatus(e.currentStatus)}</p>
                 <p>Location: {e.location || "—"}</p>
                 <p>Machine warranty: {formatMachineWarrantyLabel(e)}</p>

@@ -242,12 +242,17 @@ export default function CustomerDetail() {
     if (!customer) return;
     setDeleting(true);
     try {
-      await api.deleteCustomer(customer.id);
+      const result = await api.deleteCustomer(customer.id);
       setDeleteOpen(false);
-      toast.success("Customer deleted", {
-        description: `${customer.name} was permanently removed.`,
-      });
-      navigate("/app/customers");
+      if (result.deactivated) {
+        setCustomer({ ...customer, status: "inactive" });
+        toast.success(result.alreadyInactive ? "Customer already inactive" : "Customer deactivated", {
+          description: result.summary,
+        });
+      } else {
+        toast.success("Customer deleted", { description: result.summary });
+        navigate("/app/customers");
+      }
     } catch (err) {
       toast.apiError(err, { fallback: "Unable to delete customer" });
     } finally {
@@ -261,8 +266,8 @@ export default function CustomerDetail() {
     try {
       const restored = await api.restoreCustomer(customer.id);
       setCustomer(restored);
-      toast.success("Customer restored", {
-        description: `${restored.name} is active again.`,
+      toast.success("Customer reactivated", {
+        description: `${restored.name} can be selected for new transactions again.`,
       });
     } catch (err) {
       toast.apiError(err, { fallback: "Unable to restore customer" });
@@ -359,17 +364,17 @@ export default function CustomerDetail() {
                   ) : (
                     <RotateCcw className="mr-1 h-4 w-4" />
                   )}
-                  Restore
+                  Reactivate
                 </Button>
               ) : null}
-              {canSell ? (
+              {canSell && customer.status === "active" ? (
                 <Button asChild>
                   <Link to="/app/sales?new=1">
                     <FileText className="mr-1 h-4 w-4" /> New sale
                   </Link>
                 </Button>
               ) : null}
-              {canQuote ? (
+              {canQuote && customer.status === "active" ? (
                 <Button variant={canSell || canEdit ? "outline" : "default"} asChild>
                   <Link to="/app/estimates">
                     <FileText className="mr-1 h-4 w-4" /> Service estimate
@@ -479,6 +484,14 @@ export default function CustomerDetail() {
                         <div>
                           <p className="font-medium">{e.name}</p>
                           <p className="font-mono text-xs text-muted-foreground">{e.assetTag}</p>
+                          {e.partNumber || e.partDescription ? (
+                            <p className="text-xs text-muted-foreground">
+                              {[e.partNumber ? `PN ${e.partNumber}` : null, e.partDescription].filter(Boolean).join(" · ")}
+                            </p>
+                          ) : null}
+                          {e.additionalNote ? (
+                            <p className="line-clamp-2 text-xs text-muted-foreground">{e.additionalNote}</p>
+                          ) : null}
                         </div>
                         <StatusBadge status={e.condition} label={termLabel(conditionsQuery.data, e.condition)} />
                       </Link>
@@ -802,25 +815,35 @@ export default function CustomerDetail() {
           if (deleting) return;
           setDeleteOpen(open);
         }}
-        title="Delete customer?"
+        title={
+          customer && (customer.equipmentCount > 0 || customer.activeJobs > 0)
+            ? "Deactivate customer?"
+            : "Delete customer?"
+        }
         description={
           <div className="space-y-2">
             <p>
-              This permanently deletes{" "}
-              <span className="font-medium text-foreground">{customer?.name}</span> ({customer?.reference}
-              ). This cannot be undone.
+              <span className="font-medium text-foreground">{customer?.name}</span> ({customer?.reference})
             </p>
             {customer && (customer.equipmentCount > 0 || customer.activeJobs > 0) ? (
               <p>
-                This customer still has {customer.equipmentCount} equipment and {customer.activeJobs} active
-                jobs. Delete is blocked until that related work is removed.
+                This customer has linked equipment or jobs, so they will be deactivated. Their details
+                and existing records stay unchanged, and they cannot be chosen for new transactions.
               </p>
             ) : (
-              <p>Contacts for this customer are deleted with the record.</p>
+              <p>
+                If this customer has no linked equipment, service jobs, estimates, invoices, payments, or
+                other records, they will be permanently deleted. If any of those records exist, the
+                customer is deactivated instead and the records are kept.
+              </p>
             )}
           </div>
         }
-        confirmLabel="Delete customer"
+        confirmLabel={
+          customer && (customer.equipmentCount > 0 || customer.activeJobs > 0)
+            ? "Deactivate"
+            : "Delete customer"
+        }
         loading={deleting}
         onConfirm={() => void confirmDelete()}
       />

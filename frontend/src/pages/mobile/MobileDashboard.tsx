@@ -46,15 +46,15 @@ function matchesFilter(status: string, filter: string): boolean {
     return ["in-progress", "parts-pending", "assigned_engineer", "change_pending_approval"].includes(s);
   }
   if (filter === "qa") return s === "review";
-  if (filter === "delivery") return s === "delivery";
   if (filter === "completed") return s === "completed";
+  if (filter === "delivery") return s === "delivery";
   if (filter === "billing") return ["pending_invoice", "invoiced", "sent"].includes(s);
   return true;
 }
 
 function progressForStatus(status: string): number {
-  if (status === "completed") return 100;
-  if (status === "delivery") return 95;
+  if (status === "delivery") return 100;
+  if (status === "completed") return 95;
   if (status === "review") return 85;
   if (status === "partsPending") return 55;
   if (status === "inProgress") return 40;

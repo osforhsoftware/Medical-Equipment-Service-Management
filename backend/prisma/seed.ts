@@ -1199,7 +1199,7 @@ async function main() {
       requestRef: "SR-2026-0004",
       estimateRef: "EST-2026-0003",
       engineerKey: "engineer1",
-      status: "completed" as const,
+      status: "delivery" as const,
       scheduledFor: daysAgo(8),
       progress: 100,
     },
@@ -1208,7 +1208,7 @@ async function main() {
       requestRef: "SR-2026-0006",
       estimateRef: null,
       engineerKey: "engineer2",
-      status: "completed" as const,
+      status: "delivery" as const,
       scheduledFor: daysAgo(15),
       progress: 100,
     },
@@ -1284,22 +1284,22 @@ async function main() {
       });
     }
 
-    if (j.status === "completed" || j.status === "inProgress") {
+    if (j.status === "completed" || j.status === "delivery" || j.status === "inProgress") {
       const logs = await prisma.jobWorkLog.count({ where: { jobId: job.id } });
       if (logs === 0) {
+        const finished = j.status === "completed" || j.status === "delivery";
         await prisma.jobWorkLog.create({
           data: {
             tenantId: TENANT_ID,
             jobId: job.id,
             userId: engineer.id,
-            startedAt: daysAgo(j.status === "completed" ? 9 : 1),
-            endedAt: j.status === "completed" ? daysAgo(8) : null,
-            minutes: j.status === "completed" ? 180 : 90,
-            workPerformed:
-              j.status === "completed"
-                ? "Completed scheduled service and verified equipment performance."
-                : "Diagnosed fault and began parts replacement.",
-            testingResult: j.status === "completed" ? "Pass" : "Pending",
+            startedAt: daysAgo(finished ? 9 : 1),
+            endedAt: finished ? daysAgo(8) : null,
+            minutes: finished ? 180 : 90,
+            workPerformed: finished
+              ? "Completed scheduled service and verified equipment performance."
+              : "Diagnosed fault and began parts replacement.",
+            testingResult: finished ? "Pass" : "Pending",
           },
         });
       }
@@ -1318,7 +1318,7 @@ async function main() {
       where: {
         tenantId: TENANT_ID,
         customerId: c.id,
-        status: { in: ["scheduled", "inProgress", "partsPending", "review"] },
+        status: { in: ["scheduled", "inProgress", "partsPending", "review", "completed"] },
       },
     });
     await prisma.customer.update({

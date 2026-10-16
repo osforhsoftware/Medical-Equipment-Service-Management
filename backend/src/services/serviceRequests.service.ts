@@ -1,5 +1,5 @@
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
-import { customersRepository } from "@/repositories/customers.repository";
+import { requireActiveCustomer } from "@/lib/activeCustomer";
 import { equipmentRepository } from "@/repositories/equipment.repository";
 import { usersRepository } from "@/repositories/users.repository";
 import { notificationsService } from "@/services/notifications.service";
@@ -303,8 +303,7 @@ export class ServiceRequestsService {
   }
 
   async create(tenantId: string, userId: string, data: CreateServiceRequestData) {
-    const customer = await customersRepository.findById(data.customerId, tenantId);
-    if (!customer) throw new AppError("Customer not found", 404);
+    const customer = await requireActiveCustomer(tenantId, data.customerId);
 
     const user = await usersRepository.findById(userId, tenantId);
     const createdBy = user?.name ?? userId;
@@ -608,7 +607,7 @@ export class ServiceRequestsService {
       const job = await prisma.serviceJob.findFirst({
         where: {
           tenantId,
-          status: "completed",
+          status: { in: ["completed", "delivery"] },
           OR: [{ serviceRequestId: id }, { requestRef: existing.reference }],
         },
       });

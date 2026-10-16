@@ -72,7 +72,7 @@ export default function ManagementReportsPage() {
     for (const job of jobsInRange) {
       const name = job.engineer?.trim() || "Unassigned";
       const current = groups.get(name) ?? { id: name, name, open: 0, completed: 0, minutes: 0 };
-      if (job.status === "completed") current.completed += 1;
+      if (job.status === "completed" || job.status === "delivery") current.completed += 1;
       if (OPEN_JOB_STATUSES.has(job.status)) current.open += 1;
       current.minutes += (job.workLogs ?? []).reduce((sum, log) => sum + (log.minutes || 0), 0);
       groups.set(name, current);

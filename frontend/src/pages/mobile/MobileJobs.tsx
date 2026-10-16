@@ -20,12 +20,15 @@ const FILTER_OPTIONS = [
   { value: "scheduled", label: "Assigned" },
   { value: "in-progress", label: "In Progress" },
   { value: "parts-pending", label: "Parts" },
-  { value: "review", label: "Review" },
-  { value: "completed", label: "Completed" },
+  { value: "review", label: "QA" },
+  { value: "completed", label: "Complete" },
+  { value: "delivery", label: "Delivery" },
 ];
 
 function jobToCard(job: BackendServiceJob, featured = false): ServiceJobCardData {
-  const overdue = job.scheduledFor ? new Date(job.scheduledFor) < new Date() && job.status !== "completed" : false;
+  const overdue = job.scheduledFor
+    ? new Date(job.scheduledFor) < new Date() && job.status !== "completed" && job.status !== "delivery"
+    : false;
   return {
     id: job.id,
     reference: job.reference,

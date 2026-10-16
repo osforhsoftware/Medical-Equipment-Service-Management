@@ -23,7 +23,9 @@ export class TaxonomyService {
       if (taxonomyType === "inventory_subcategory") {
         await this.ensureDefaults(tenantId, "inventory_category");
       }
+      const suppressed = await taxonomyRepository.suppressedSlugs(tenantId, asType(taxonomyType));
       for (const term of DEFAULT_TAXONOMY_TERMS[taxonomyType]) {
+        if (suppressed.has(term.slug)) continue;
         const existing = await taxonomyRepository.findBySlug(tenantId, asType(taxonomyType), term.slug);
         if (existing) continue;
         const nameTaken = await taxonomyRepository.findByName(tenantId, asType(taxonomyType), term.name);
@@ -88,6 +90,7 @@ export class TaxonomyService {
     const requestedSlug = data.slug?.trim() ? slugifyTerm(data.slug) : slugifyTerm(name);
     const slug = await this.uniqueSlug(tenantId, data.type, requestedSlug);
     const parentId = await this.resolveParentId(tenantId, data.type, data.parentId);
+    await taxonomyRepository.clearSuppression(tenantId, asType(data.type), slug);
 
     return taxonomyRepository.create({
       tenantId,
@@ -153,23 +156,23 @@ export class TaxonomyService {
     });
   }
 
-  async delete(id: string, tenantId: string): Promise<{ deactivated: boolean; usageCount: number }> {
+  async delete(id: string, tenantId: string): Promise<void> {
     const existing = await this.getById(id, tenantId);
-    const usageCount = await this.countUsage(tenantId, existing.type as TaxonomyTypeName, existing);
+    const type = existing.type as TaxonomyTypeName;
+    const breakdown = await this.usageBreakdown(tenantId, type, existing);
+    const usageCount = this.totalUsage(breakdown);
 
     if (usageCount > 0) {
-      if (existing.isActive) {
-        await taxonomyRepository.update(id, { isActive: false });
-        return { deactivated: true, usageCount };
-      }
-      throw new AppError(
-        `This term is used by ${usageCount} record${usageCount === 1 ? "" : "s"} and cannot be deleted. Deactivate it instead.`,
-        409,
-      );
+      throw new AppError(this.usageBlockMessage(existing.name, type, breakdown), 409);
     }
 
-    await taxonomyRepository.delete(id, tenantId);
-    return { deactivated: false, usageCount: 0 };
+    await taxonomyRepository.suppress(tenantId, existing.type, existing.slug);
+    try {
+      await taxonomyRepository.delete(id, tenantId);
+    } catch (err) {
+      await taxonomyRepository.clearSuppression(tenantId, existing.type, existing.slug);
+      throw err;
+    }
   }
 
   /**
@@ -295,10 +298,12 @@ export class TaxonomyService {
   private async harvestExistingValues(tenantId: string, type: TaxonomyTypeName): Promise<void> {
     const values = await this.distinctStoredValues(tenantId, type);
     const terms = await taxonomyRepository.findAll(tenantId, asType(type), false);
+    const suppressed = await taxonomyRepository.suppressedSlugs(tenantId, asType(type));
 
     for (const raw of values) {
       const value = raw.trim();
       if (!value) continue;
+      if (suppressed.has(value) || suppressed.has(slugifyTerm(value))) continue;
       const match = terms.find(
         (term) => term.slug === value || term.name === value,
       );
@@ -440,6 +445,18 @@ export class TaxonomyService {
         const term = terms.find((t) => t.slug === row.type || t.name === row.type);
         if (term) counts.set(term.id, (counts.get(term.id) ?? 0) + row._count._all);
       }
+      const otherRows = await prisma.customer.groupBy({
+        by: ["typeOther"],
+        where: { tenantId, typeOther: { not: null } },
+        _count: { _all: true },
+      });
+      for (const row of otherRows) {
+        const value = row.typeOther?.trim();
+        if (!value) continue;
+        const term = terms.find((t) => t.slug === value || t.name === value);
+        if (term) counts.set(term.id, (counts.get(term.id) ?? 0) + row._count._all);
+      }
+      await this.addChildUsage(tenantId, counts);
       return counts;
     }
 
@@ -453,6 +470,7 @@ export class TaxonomyService {
         const term = terms.find((t) => t.slug === row.category || t.name === row.category);
         if (term) counts.set(term.id, (counts.get(term.id) ?? 0) + row._count._all);
       }
+      await this.addChildUsage(tenantId, counts);
       return counts;
     }
 
@@ -469,6 +487,7 @@ export class TaxonomyService {
         const term = terms.find((t) => t.slug === value || t.name === value);
         if (term) counts.set(term.id, (counts.get(term.id) ?? 0) + row._count._all);
       }
+      await this.addChildUsage(tenantId, counts);
       return counts;
     }
 
@@ -482,6 +501,7 @@ export class TaxonomyService {
         const term = terms.find((t) => t.slug === row.category || t.name === row.category);
         if (term) counts.set(term.id, (counts.get(term.id) ?? 0) + row._count._all);
       }
+      await this.addChildUsage(tenantId, counts);
       return counts;
     }
 
@@ -494,7 +514,96 @@ export class TaxonomyService {
       const term = terms.find((t) => t.slug === row.condition || t.name === row.condition);
       if (term) counts.set(term.id, (counts.get(term.id) ?? 0) + row._count._all);
     }
+    await this.addChildUsage(tenantId, counts);
     return counts;
+  }
+
+  private async addChildUsage(tenantId: string, counts: Map<string, number>): Promise<void> {
+    const rows = await prisma.taxonomyTerm.groupBy({
+      by: ["parentId"],
+      where: { tenantId, parentId: { not: null } },
+      _count: { _all: true },
+    });
+    for (const row of rows) {
+      if (!row.parentId || !counts.has(row.parentId)) continue;
+      counts.set(row.parentId, (counts.get(row.parentId) ?? 0) + row._count._all);
+    }
+  }
+
+  private async usageBreakdown(
+    tenantId: string,
+    type: TaxonomyTypeName,
+    term: TaxonomyTerm,
+  ): Promise<{
+    equipment: number;
+    inventoryItems: number;
+    expenses: number;
+    customers: number;
+    children: number;
+  }> {
+    const equipment = type === "equipment_category" || type === "equipment_condition"
+      ? await this.countUsage(tenantId, type, term)
+      : 0;
+    const inventoryItems = type === "inventory_category" || type === "inventory_subcategory"
+      ? await this.countUsage(tenantId, type, term)
+      : 0;
+    const expenses = type === "expense_category" ? await this.countUsage(tenantId, type, term) : 0;
+    const customers = type === "customer_type" ? await this.countUsage(tenantId, type, term) : 0;
+    const children = await prisma.taxonomyTerm.count({
+      where: { tenantId, parentId: term.id },
+    });
+    return { equipment, inventoryItems, expenses, customers, children };
+  }
+
+  private totalUsage(breakdown: {
+    equipment: number;
+    inventoryItems: number;
+    expenses: number;
+    customers: number;
+    children: number;
+  }): number {
+    return (
+      breakdown.equipment +
+      breakdown.inventoryItems +
+      breakdown.expenses +
+      breakdown.customers +
+      breakdown.children
+    );
+  }
+
+  private usageBlockMessage(
+    name: string,
+    type: TaxonomyTypeName,
+    breakdown: {
+      equipment: number;
+      inventoryItems: number;
+      expenses: number;
+      customers: number;
+      children: number;
+    },
+  ): string {
+    const parts: string[] = [];
+    const push = (count: number, singular: string, plural: string) => {
+      if (count > 0) parts.push(`${count} ${count === 1 ? singular : plural}`);
+    };
+    push(breakdown.equipment, "equipment record", "equipment records");
+    push(breakdown.inventoryItems, "inventory item", "inventory items");
+    push(breakdown.expenses, "expense", "expenses");
+    push(breakdown.customers, "customer", "customers");
+    push(breakdown.children, "subcategory", "subcategories");
+    const list =
+      parts.length <= 1
+        ? (parts[0] ?? "linked records")
+        : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+    const noun =
+      type === "inventory_subcategory"
+        ? "subcategory"
+        : type === "equipment_condition"
+          ? "condition"
+          : type === "customer_type"
+            ? "customer type"
+            : "category";
+    return `${name} is used by ${list}. Reassign those records to another ${noun} before deleting it.`;
   }
 
   private async countUsage(

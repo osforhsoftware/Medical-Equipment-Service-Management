@@ -5,7 +5,7 @@ import { computeVerificationChecklist } from "@/services/billing.service";
 describe("billing verification checklist", () => {
   it("passes when all operational checkpoints are satisfied", () => {
     const result = computeVerificationChecklist({
-      status: "completed",
+      status: "delivery",
       workLogs: [{ id: "1" }],
       signature: { id: "sig" },
       stockMovements: [{ id: "m1" }],
@@ -23,7 +23,7 @@ describe("billing verification checklist", () => {
 
   it("still passes when optional customer signature is missing", () => {
     const result = computeVerificationChecklist({
-      status: "completed",
+      status: "delivery",
       workLogs: [{ id: "1" }],
       signature: null,
       stockMovements: [],
@@ -38,7 +38,7 @@ describe("billing verification checklist", () => {
 
   it("skips ticket-only checks for standalone jobs", () => {
     const result = computeVerificationChecklist({
-      status: "completed",
+      status: "delivery",
       workLogs: [{ id: "1" }],
       signature: null,
       stockMovements: [],

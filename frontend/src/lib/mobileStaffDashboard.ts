@@ -35,9 +35,9 @@ export const JOB_STATUS_ACTIONS = [
   { value: "scheduled", label: "Assigned", next: "inProgress", nextLabel: "Start Job" },
   { value: "inProgress", label: "In Progress", next: "partsPending", nextLabel: "Need Parts" },
   { value: "partsPending", label: "Waiting Parts", next: "inProgress", nextLabel: "Resume Work" },
-  { value: "review", label: "QA", next: "delivery", nextLabel: "QA Pass" },
-  { value: "delivery", label: "Delivery", next: "completed", nextLabel: "Confirm Delivery" },
-  { value: "completed", label: "Completed" },
+  { value: "review", label: "QA", next: "completed", nextLabel: "QA Pass" },
+  { value: "completed", label: "Complete", next: "delivery", nextLabel: "Confirm Delivery" },
+  { value: "delivery", label: "Delivery" },
 ] as const;
 
 export function roleQuickActions(role: Role): MobileQuickAction[] {

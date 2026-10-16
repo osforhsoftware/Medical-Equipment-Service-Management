@@ -39,6 +39,12 @@ function staffForRole(users: BackendUser[], role: Role) {
 
 const orgSchema = z.object({
   companyName: fieldRules.requiredString("Company name"),
+  assetTagPrefix: z
+    .string()
+    .trim()
+    .min(2, "Enter an asset tag prefix.")
+    .max(20, "Use 20 characters or fewer.")
+    .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/, "Use letters, numbers, and hyphens only."),
   supportEmail: fieldRules.email(true),
   defaultTaxRate: z.string().refine(
     (v) => !Number.isNaN(Number(v)) && Number(v) >= 0 && Number(v) <= 100,
@@ -49,6 +55,9 @@ const orgSchema = z.object({
 export default function Settings() {
   const { settings, loading, refresh, updateLocal } = useSettings();
   const [companyName, setCompanyName] = useState("");
+  const [assetTagPrefix, setAssetTagPrefix] = useState("");
+  const [assetTagReport, setAssetTagReport] = useState<Awaited<ReturnType<typeof api.getAssetTagReport>> | null>(null);
+  const [assigningTags, setAssigningTags] = useState(false);
   const [supportEmail, setSupportEmail] = useState("");
   const [companyAddress, setCompanyAddress] = useState("");
   const [companyPhone, setCompanyPhone] = useState("");
@@ -82,11 +91,11 @@ export default function Settings() {
     handleChange: handleOrgChange,
     applyApiErrors: applyOrgApiErrors,
   } = useFormValidation({
-    fieldOrder: ["companyName", "supportEmail", "defaultTaxRate"],
+    fieldOrder: ["companyName", "assetTagPrefix", "supportEmail", "defaultTaxRate"],
     schema: orgSchema,
   });
 
-  const orgValues = () => ({ companyName, supportEmail, defaultTaxRate });
+  const orgValues = () => ({ companyName, assetTagPrefix, supportEmail, defaultTaxRate });
 
   useEffect(() => {
     void api.listUsers({ isActive: true })
@@ -97,6 +106,7 @@ export default function Settings() {
   useEffect(() => {
     if (!settings) return;
     setCompanyName(settings.companyName);
+    setAssetTagPrefix(settings.assetTagPrefix ?? "");
     setSupportEmail(settings.supportEmail);
     setCompanyAddress(settings.companyAddress ?? "");
     setCompanyPhone(settings.companyPhone ?? "");
@@ -123,6 +133,12 @@ export default function Settings() {
     setDefaultEngineerUserId(settings.defaultEngineerUserId ?? NONE);
   }, [settings]);
 
+  useEffect(() => {
+    void api.getAssetTagReport()
+      .then(setAssetTagReport)
+      .catch(() => setAssetTagReport(null));
+  }, [settings?.assetTagPrefix, settings?.assetTagNextSequence]);
+
   const saveOrganization = async () => {
     if (!validateOrg(orgValues(), undefined, orgRef.current)) return;
     setSavingOrg(true);
@@ -134,6 +150,7 @@ export default function Settings() {
       }
       const updated = await api.updateSettings({
         companyName: companyName.trim(),
+        assetTagPrefix: assetTagPrefix.trim(),
         supportEmail: supportEmail.trim(),
         companyAddress: companyAddress.trim() || null,
         companyPhone: companyPhone.trim() || null,
@@ -312,6 +329,91 @@ export default function Settings() {
                     onBlur={() => handleOrgBlur("companyName", orgValues())}
                   />
                   {orgShouldShow("companyName") && <FormFieldError field="companyName" message={orgErrors.companyName} />}
+                </div>
+                <div className="grid gap-2 sm:col-span-2" data-field="assetTagPrefix">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label htmlFor="asset-tag-prefix" className={orgShouldShow("assetTagPrefix") ? "text-destructive" : undefined}>
+                      Asset tag prefix
+                      <RequiredMark />
+                    </Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const suggested = settings?.suggestedAssetTagPrefix;
+                        if (!suggested) return;
+                        if (companyName.trim() !== (settings?.companyName ?? "").trim()) {
+                          toast.error("Save the company name first, then apply its abbreviation.");
+                          return;
+                        }
+                        setAssetTagPrefix(suggested);
+                        handleOrgChange("assetTagPrefix", { ...orgValues(), assetTagPrefix: suggested });
+                      }}
+                    >
+                      Use company abbreviation
+                    </Button>
+                  </div>
+                  <Input
+                    id="asset-tag-prefix"
+                    name="assetTagPrefix"
+                    value={assetTagPrefix}
+                    className={fieldErrorClass(orgShouldShow("assetTagPrefix"), "font-mono uppercase")}
+                    {...fieldAria("assetTagPrefix", orgShouldShow("assetTagPrefix") ? orgErrors.assetTagPrefix : null)}
+                    onChange={(e) => {
+                      const value = e.target.value.toUpperCase();
+                      setAssetTagPrefix(value);
+                      handleOrgChange("assetTagPrefix", { ...orgValues(), assetTagPrefix: value });
+                    }}
+                    onBlur={() => handleOrgBlur("assetTagPrefix", orgValues())}
+                  />
+                  {orgShouldShow("assetTagPrefix") && <FormFieldError field="assetTagPrefix" message={orgErrors.assetTagPrefix} />}
+                  <p className="text-xs text-muted-foreground">
+                    New assets are numbered {settings?.assetTagPreview || "from this prefix"}. Changing the company name or this prefix leaves existing asset tags as they are.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    The abbreviation uses the first three letters of the first word and the initials of the next two words. The next number is {settings?.assetTagNextSequence ?? "1001"} and is not reused after deletion.
+                  </p>
+                  {assetTagReport && assetTagReport.preservedCount > 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      {assetTagReport.preservedCount} existing asset{assetTagReport.preservedCount === 1 ? "" : "s"} keep a tag outside the current prefix.
+                    </p>
+                  ) : null}
+                  {assetTagReport && assetTagReport.duplicates.length > 0 ? (
+                    <p className="text-xs text-destructive">
+                      Duplicate asset tags were found and were not changed. Resolve them explicitly before assigning new numbers.
+                    </p>
+                  ) : null}
+                  {assetTagReport && assetTagReport.blank.length > 0 ? (
+                    <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+                      <p className="text-xs text-muted-foreground">
+                        {assetTagReport.blank.length} equipment record{assetTagReport.blank.length === 1 ? "" : "s"} have no asset tag. Assigning numbers does not change records that already have one.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="mt-2"
+                        disabled={assigningTags}
+                        onClick={() => {
+                          setAssigningTags(true);
+                          void api.assignMissingAssetTags()
+                            .then(async (assigned) => {
+                              toast.success(
+                                assigned.length === 1 ? "Asset tag assigned" : `${assigned.length} asset tags assigned`,
+                              );
+                              await refresh();
+                            })
+                            .catch((err) => {
+                              toast.apiError(err, { fallback: "Unable to assign asset tags" });
+                            })
+                            .finally(() => setAssigningTags(false));
+                        }}
+                      >
+                        {assigningTags ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Assign tags to blank records
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="grid gap-2">
                   <Label>Tenant ID</Label>

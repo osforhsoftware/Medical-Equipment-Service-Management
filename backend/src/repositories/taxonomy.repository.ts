@@ -82,6 +82,26 @@ export class TaxonomyRepository {
   async delete(id: string, tenantId: string): Promise<void> {
     await prisma.taxonomyTerm.deleteMany({ where: { id, tenantId } });
   }
+
+  async suppressedSlugs(tenantId: string, type: TaxonomyType): Promise<Set<string>> {
+    const rows = await prisma.taxonomySuppression.findMany({
+      where: { tenantId, type },
+      select: { slug: true },
+    });
+    return new Set(rows.map((row) => row.slug));
+  }
+
+  async suppress(tenantId: string, type: TaxonomyType, slug: string): Promise<void> {
+    await prisma.taxonomySuppression.upsert({
+      where: { tenantId_type_slug: { tenantId, type, slug } },
+      create: { tenantId, type, slug },
+      update: {},
+    });
+  }
+
+  async clearSuppression(tenantId: string, type: TaxonomyType, slug: string): Promise<void> {
+    await prisma.taxonomySuppression.deleteMany({ where: { tenantId, type, slug } });
+  }
 }
 
 export const taxonomyRepository = new TaxonomyRepository();

@@ -1,6 +1,6 @@
 import { jobsRepository } from "@/repositories/jobs.repository";
 import { jobActionsRepository } from "@/repositories/jobActions.repository";
-import { customersRepository } from "@/repositories/customers.repository";
+import { requireActiveCustomer } from "@/lib/activeCustomer";
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
 import { usersRepository } from "@/repositories/users.repository";
 import { notificationsService } from "@/services/notifications.service";
@@ -10,6 +10,7 @@ import { prisma } from "@/db/prisma";
 import { Prisma } from "@prisma/client";
 import {
   assertJobTransition,
+  isJobWorkComplete,
   resolveTicketEventStatus,
 } from "@/services/workflow/serviceTicketStateMachine";
 import { APPROVED_IMAGE_TYPE_MESSAGE, fileStorageService } from "@/services/fileStorage.service";
@@ -381,7 +382,7 @@ export class JobsService {
     job: { id: string; reference: string; status: string; scheduledFor: Date; customerName: string },
     tenantId: string,
   ) {
-    if (job.status === "completed" || job.status === "delivery") return;
+    if (isJobWorkComplete(job.status)) return;
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     if (job.scheduledFor >= startOfToday) return;
@@ -454,8 +455,7 @@ export class JobsService {
     const ticketId = data.serviceRequestId?.trim();
 
     if (!ticketId) {
-      const customer = await customersRepository.findById(data.customerId!, tenantId);
-      if (!customer) throw new AppError("Customer not found", 404);
+      const customer = await requireActiveCustomer(tenantId, data.customerId!);
       const equipment = await prisma.equipment.findFirst({
         where: { id: data.equipmentId!, tenantId, customerId: customer.id },
       });
@@ -664,9 +664,11 @@ export class JobsService {
     }
 
     const advancingPastQa =
-      (data.status === "delivery" && existing.status !== "delivery") ||
-      (data.status === "completed" && existing.status !== "completed");
-    const returningFromQa = existing.status === "review" && data.status === "inProgress";
+      (data.status === "completed" && existing.status === "review") ||
+      (data.status === "delivery" && existing.status === "completed");
+    const returningFromQa =
+      (existing.status === "review" && data.status === "inProgress") ||
+      (isJobWorkComplete(existing.status) && data.status === "review");
     if (advancingPastQa || returningFromQa) {
       if (!isQaApprover) {
         throw new AppError(
@@ -685,7 +687,10 @@ export class JobsService {
       data.scheduledFor = new Date(data.scheduledFor as string);
     }
 
-    if (data.status === "completed" && existing.status !== "completed") {
+    const enteringComplete = data.status === "completed" && existing.status !== "completed";
+    const enteringDeliveryWithoutComplete =
+      data.status === "delivery" && existing.status !== "delivery" && !(existing as { completedAt?: Date | null }).completedAt;
+    if (enteringComplete || enteringDeliveryWithoutComplete) {
       const updated = await prisma.$transaction(async (tx) => {
         const job = await tx.serviceJob.findFirst({
           where: { id, tenantId },
@@ -729,10 +734,14 @@ export class JobsService {
         if (job.serviceRequestId) {
           const sr = await tx.serviceRequest.findFirst({ where: { id: job.serviceRequestId, tenantId } });
           if (sr) {
-            await tx.serviceRequest.update({
-              where: { id: sr.id },
-              data: { status: resolveTicketEventStatus(sr.status, "jobCompleted") as never },
-            });
+            try {
+              await tx.serviceRequest.update({
+                where: { id: sr.id },
+                data: { status: resolveTicketEventStatus(sr.status, "jobCompleted") as never },
+              });
+            } catch {
+              // Ticket may already be past job-complete (legacy in-flight jobs).
+            }
           }
         }
         // A service request may include multiple equipment items (`service_request_equipment`).
@@ -759,7 +768,19 @@ export class JobsService {
           data: { ...data, progress: 100, completedAt: new Date() } as never,
         });
       });
-      await notificationsService.notifyJobUpdated(tenantId, existing.reference, "completed");
+      const actor = actorId ? await usersRepository.findById(actorId, tenantId) : null;
+      await jobActionsRepository.addActivity(id, {
+        actor: actor?.name ?? actorId ?? "system",
+        action: enteringComplete ? "QA passed — Complete" : "Delivery confirmed",
+        note: enteringComplete
+          ? "Quality check approved. Confirm delivery to hand off equipment."
+          : "Equipment handed off. Continue to billing if needed.",
+      });
+      await notificationsService.notifyJobUpdated(
+        tenantId,
+        existing.reference,
+        enteringComplete ? "completed" : "delivery",
+      );
       return updated;
     }
 
@@ -785,8 +806,8 @@ export class JobsService {
         const actor = actorId ? await usersRepository.findById(actorId, tenantId) : null;
         await jobActionsRepository.addActivity(id, {
           actor: actor?.name ?? actorId ?? "system",
-          action: "QA passed — ready for delivery",
-          note: "Quality check approved. Confirm delivery to complete and hand off to billing.",
+          action: "Delivery confirmed",
+          note: "Equipment handed off. Continue to billing if needed.",
         });
       }
       await notificationsService.notifyJobUpdated(tenantId, existing.reference, String(data.status));
@@ -935,7 +956,7 @@ export class JobsService {
     },
   ) {
     const job = await this.getById(id, tenantId, actorId, actorRole);
-    if (job.status === "completed") {
+    if (isJobWorkComplete(job.status)) {
       throw new AppError("Completed jobs cannot update the work report", 409);
     }
 
@@ -1380,7 +1401,7 @@ export class JobsService {
     options?: { disposition?: "return" | "scrap"; lineId?: string; batchNumber?: string | null; serialNumbers?: string | null },
   ) {
     const job = await this.getById(id, tenantId, actorId, actorRole);
-    if (job.status === "completed") {
+    if (isJobWorkComplete(job.status)) {
       throw new AppError("Cannot return unused parts on a completed job", 409);
     }
     const actor = await usersRepository.findById(actorId, tenantId);

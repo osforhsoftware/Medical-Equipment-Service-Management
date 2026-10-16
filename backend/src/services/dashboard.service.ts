@@ -393,7 +393,7 @@ export class DashboardService {
             : {
                 ...jobScope,
                 ...assignedJobWhere(userId),
-                status: { not: "completed" },
+                status: { not: "delivery" },
               },
         orderBy: [{ scheduledFor: "asc" }, { updatedAt: "desc" }],
         take: 12,
@@ -421,7 +421,7 @@ export class DashboardService {
             : {
                 ...jobScope,
                 ...(staffRole === "engineer" ? assignedJobWhere(userId) : {}),
-                status: "completed",
+                status: { in: ["completed", "delivery"] },
                 updatedAt: { gte: mtdStart },
               },
       }),
@@ -890,7 +890,7 @@ export class DashboardService {
               j.status === "inProgress" ||
               j.status === "partsPending" ||
               j.status === "review" ||
-              j.status === "delivery",
+              j.status === "completed",
           ).length,
           dueToday: input.myJobs.filter((j) => {
             const d = j.scheduledFor;
@@ -903,7 +903,7 @@ export class DashboardService {
           overdue: input.myJobs.filter((j) => {
             const start = new Date();
             start.setHours(0, 0, 0, 0);
-            return j.scheduledFor < start && j.status !== "completed";
+            return j.scheduledFor < start && j.status !== "completed" && j.status !== "delivery";
           }).length,
         };
       case "qa":

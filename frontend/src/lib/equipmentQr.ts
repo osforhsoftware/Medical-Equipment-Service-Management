@@ -8,24 +8,6 @@ export const QR_LABEL_DPI = 300;
 /** 50 mm at 300 DPI ≈ 591 px */
 export const QR_LABEL_SIZE_PX = Math.round((QR_LABEL_SIZE_MM / 25.4) * QR_LABEL_DPI);
 
-function randomLetters(length: number) {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-  let out = "";
-  for (let i = 0; i < length; i += 1) {
-    out += alphabet[Math.floor(Math.random() * alphabet.length)];
-  }
-  return out;
-}
-
-export function generateEquipmentAssetTag(existing: string[] = []) {
-  const used = new Set(existing.map((tag) => tag.trim().toUpperCase()));
-  for (let i = 0; i < 40; i += 1) {
-    const tag = `MED-${randomLetters(2)}-${String(Math.floor(1000 + Math.random() * 9000))}`;
-    if (!used.has(tag)) return tag;
-  }
-  return `MED-${Date.now().toString(36).toUpperCase()}`;
-}
-
 export async function equipmentQrDataUrl(assetTag: string, width = 280) {
   const value = assetTag.trim();
   if (!value) return "";

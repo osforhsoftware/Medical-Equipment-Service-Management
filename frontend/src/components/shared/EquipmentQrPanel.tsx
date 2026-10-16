@@ -78,7 +78,9 @@ export function EquipmentQrPanel({
         <div className="min-w-0">
           <p className="text-sm font-semibold">Asset QR code</p>
           <p className="text-xs text-muted-foreground">
-            Enter a tag to preview the QR, then download a sticker for the machine.
+            {showInput
+              ? "The QR encodes this asset tag. Reprinting it does not assign a new number."
+              : "This code encodes the asset tag stored on the equipment. Downloading or printing it again keeps the same tag."}
           </p>
           <p className="mt-1 text-xs font-medium text-foreground">
             QR Label Size: {QR_LABEL_SIZE_MM} × {QR_LABEL_SIZE_MM} mm
@@ -116,7 +118,7 @@ export function EquipmentQrPanel({
                 value={assetTag}
                 onChange={(e) => onAssetTagChange?.(e.target.value)}
                 onBlur={onBlur}
-                placeholder="MED-AX-2207"
+                placeholder="Asset tag"
                 className={fieldErrorClass(Boolean(error), "font-mono")}
                 {...fieldAria("assetTag", error)}
               />

@@ -3,11 +3,13 @@ import { DEFAULT_RBAC_MATRIX } from "@/config/defaultRbac";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
+import { assertAssetTagPrefix, getAssetTagConfig } from "@/services/assetTag.service";
 import { ensureSystemRoles, findActiveStaffWithRole } from "@/utils/userRoles";
 import { APPROVED_IMAGE_TYPE_MESSAGE } from "@/services/fileStorage.service";
 
 type UpdateSettingsData = {
   companyName?: string;
+  assetTagPrefix?: string;
   logoFileId?: string | null;
   supportEmail?: string;
   companyAddress?: string | null;
@@ -104,10 +106,12 @@ export class SettingsService {
     await ensureSystemRoles(tenantId);
     const settings = await settingsRepository.ensureDefaults(tenantId);
     const companyName = await settingsRepository.getTenantName(tenantId);
+    const assetTags = await getAssetTagConfig(tenantId);
 
     return {
       tenantId,
       companyName,
+      ...assetTags,
       logoFileId: settings.logoFileId,
       logoUrl: settings.logoFileId ? `/api/files/${settings.logoFileId}/download` : null,
       supportEmail: settings.supportEmail,
@@ -142,6 +146,10 @@ export class SettingsService {
     }
 
     const updatePayload: Prisma.TenantSettingsUpdateInput = {};
+    // Prefix changes apply only to assets registered afterward. Existing tags stay as stored.
+    if (data.assetTagPrefix !== undefined) {
+      updatePayload.assetTagPrefix = assertAssetTagPrefix(data.assetTagPrefix);
+    }
     if (data.logoFileId !== undefined) {
       if (data.logoFileId === null) {
         updatePayload.logoFile = { disconnect: true };

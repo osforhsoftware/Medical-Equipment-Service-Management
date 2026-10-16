@@ -65,7 +65,7 @@ export default function QRTracking() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && void scan(query, "manual")}
-                placeholder="MED-AX-2207"
+                placeholder="Asset tag"
                 className="font-mono"
               />
               <Button onClick={() => void scan(query, "manual")} variant="brand" disabled={loading || !query.trim()}>

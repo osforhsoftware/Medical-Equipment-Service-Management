@@ -65,8 +65,8 @@ const JOB_STATUS_OPTIONS = [
   { value: "inProgress", label: "In Progress" },
   { value: "partsPending", label: "Parts Pending" },
   { value: "review", label: "QA" },
+  { value: "completed", label: "Complete" },
   { value: "delivery", label: "Delivery" },
-  { value: "completed", label: "Completed" },
 ] as const;
 
 const ENGINEER_STATUS_OPTIONS = JOB_STATUS_OPTIONS.filter(
@@ -172,7 +172,8 @@ export default function MobileJobDetail() {
     (hasRole(SERVICE_BILLING_ROLES) || userCanAccessPath(user!, "/app/billing", rbacMatrix));
   const statusOptions = canApproveComplete ? JOB_STATUS_OPTIONS : ENGINEER_STATUS_OPTIONS;
   const awaitingQa = job?.status === "review";
-  const awaitingDelivery = job?.status === "delivery";
+  const awaitingDelivery = job?.status === "completed";
+  const jobDelivered = job?.status === "delivery";
   const canSubmitForReview =
     canUpdateJob && job && !["review", "delivery", "completed"].includes(job.status);
   const hasWorkReport = Boolean(job && pickWorkReportLog(job.workLogs));
@@ -267,11 +268,11 @@ export default function MobileJobDetail() {
     if (!job) return;
     try {
       await api.updateJob(job.id, {
-        status: "delivery",
+        status: "completed",
         progress: Math.max(job.progress, 95),
         stageDetails: { qa: { result: "pass", checkedAt: new Date().toISOString() } },
       });
-      toast({ title: "QA passed", description: "Job moved to Delivery." });
+      toast({ title: "QA passed", description: "Job moved to Complete." });
       await load();
     } catch (err) {
       toast.apiError(err, { fallback: "Error" });
@@ -296,11 +297,11 @@ export default function MobileJobDetail() {
     if (!job) return;
     try {
       await api.updateJob(job.id, {
-        status: "completed",
+        status: "delivery",
         progress: 100,
         stageDetails: { delivery: { method: "site_return", deliveredAt: new Date().toISOString() } },
       });
-      toast({ title: "Delivery confirmed", description: canAccessBilling ? "Job completed — continue to billing." : "Job completed." });
+      toast({ title: "Delivery confirmed", description: canAccessBilling ? "Equipment handed off — continue to billing." : "Equipment handed off." });
       if (canAccessBilling) {
         navigate(`/app/billing/jobs/${job.id}`);
       } else {
@@ -647,7 +648,7 @@ export default function MobileJobDetail() {
             </dl>
           </CollapsibleSection>
 
-          {(canUpdateJob || canApproveComplete) && job.status !== "completed" && (
+          {(canUpdateJob || canApproveComplete) && !jobDelivered && (
             <CollapsibleSection title="Field Actions" icon={<Wrench className="h-4 w-4" />} defaultOpen>
               {awaitingQa ? (
                 <p className="mb-3 rounded-[14px] border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
@@ -708,7 +709,7 @@ export default function MobileJobDetail() {
                       {row.returnedQuantity ? ` · Returned ${row.returnedQuantity}` : ""}
                       {typeof row.returnableQuantity === "number" ? ` · Unused ${row.returnableQuantity}` : ""}
                     </p>
-                    {canUpdateJob && job.status !== "completed" && (row.returnableQuantity ?? 0) > 0 ? (
+                    {canUpdateJob && !jobDelivered && job.status !== "completed" && (row.returnableQuantity ?? 0) > 0 ? (
                       <button
                         type="button"
                         className="mt-2 text-xs font-medium text-primary"
@@ -745,7 +746,7 @@ export default function MobileJobDetail() {
           </CollapsibleSection>
         </div>
 
-        {job.status !== "completed" && (
+        {!jobDelivered && (
           <div className="mobile-sticky-footer mt-6 space-y-2">
             {canUpdateJob ? (
               <button
@@ -782,7 +783,7 @@ export default function MobileJobDetail() {
                   QA Fail — Return to Repair
                 </button>
                 <button type="button" className="mobile-btn-primary w-full" onClick={() => void approveQaPass()}>
-                  QA Pass — Send to Delivery
+                  QA Pass — Mark Complete
                 </button>
               </div>
             ) : awaitingQa ? (
@@ -791,7 +792,7 @@ export default function MobileJobDetail() {
               </button>
             ) : awaitingDelivery && canApproveComplete ? (
               <button type="button" className="mobile-btn-primary w-full" onClick={() => void confirmDelivery()}>
-                Confirm Delivery & Complete
+                Confirm Delivery
               </button>
             ) : awaitingDelivery ? (
               <button type="button" className="mobile-btn-secondary w-full" disabled>
@@ -800,7 +801,7 @@ export default function MobileJobDetail() {
             ) : null}
           </div>
         )}
-        {job.status === "completed" && canDownloadServiceReport ? (
+        {jobDelivered && canDownloadServiceReport ? (
           <div className="mobile-sticky-footer mt-6 space-y-2">
             <button
               type="button"

@@ -34,6 +34,7 @@ export type JobStageDetails = {
 export const JOB_WORKFLOW_STAGES = [
   { id: "repair", label: "Repair", description: "Field work & parts" },
   { id: "qa", label: "QA", description: "Quality check" },
+  { id: "complete", label: "Complete", description: "Work signed off" },
   { id: "delivery", label: "Delivery", description: "Handoff to customer" },
 ] as const;
 
@@ -56,10 +57,10 @@ export function parseJobStageDetails(value: unknown): JobStageDetails {
   };
 }
 
-/** Map job status → Repair / QA / Delivery stage (completed counts as delivery done). */
+/** Map job status → Repair / QA / Complete / Delivery. */
 export function jobWorkflowStage(status: string): JobWorkflowStageId | "done" {
-  if (status === "completed") return "done";
-  if (status === "delivery") return "delivery";
+  if (status === "delivery") return "done";
+  if (status === "completed") return "complete";
   if (status === "review") return "qa";
   return "repair";
 }

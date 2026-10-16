@@ -1,21 +1,25 @@
 import { equipmentRepository, type EquipmentListFilters } from "@/repositories/equipment.repository";
 import { customersRepository } from "@/repositories/customers.repository";
+import { assertCustomerSelectable, requireActiveCustomer } from "@/lib/activeCustomer";
+import { settingsRepository } from "@/repositories/settings.repository";
+import { allocateAssetTag } from "@/services/assetTag.service";
 import { taxonomyService } from "@/services/taxonomy.service";
 import { AppError } from "@/middleware/errorHandler";
 import { prisma } from "@/db/prisma";
 import { getDefaultBranchId } from "@/utils/defaultBranch";
 import { equipmentTicketLabel, syncEquipmentNameSnapshots } from "@/lib/equipmentLabel";
 import type { PaginatedResult } from "@/types";
-import type { Equipment } from "@prisma/client";
+import { Prisma, type Equipment } from "@prisma/client";
 
 type CreateEquipmentData = {
-  assetTag: string;
   name: string;
   model?: string;
   manufacturer?: string;
   category?: string;
   serialNumber: string;
   partNumber?: string | null;
+  partDescription?: string | null;
+  additionalNote?: string | null;
   customerId?: string | null;
   branchId?: string;
   location?: string;
@@ -61,8 +65,7 @@ export class EquipmentService {
 
   async create(tenantId: string, data: CreateEquipmentData) {
     const customerId = data.customerId?.trim() || null;
-    const customer = customerId ? await customersRepository.findById(customerId, tenantId) : null;
-    if (customerId && !customer) throw new AppError("Customer not found", 404);
+    const customer = customerId ? await requireActiveCustomer(tenantId, customerId) : null;
 
     const branchId = data.branchId ?? customer?.branchId ?? (await getDefaultBranchId(tenantId));
     const categorySlug = data.category?.trim() || "";
@@ -76,21 +79,17 @@ export class EquipmentService {
       conditionSlug,
     );
 
-    const assetTag = data.assetTag.trim();
-    const duplicate = await prisma.equipment.findFirst({
-      where: { tenantId, assetTag },
-      select: { id: true },
-    });
-    if (duplicate) throw new AppError("An asset with that tag already exists", 409);
+    await settingsRepository.ensureDefaults(tenantId);
 
-    const equipment = await equipmentRepository.create(tenantId, {
-      assetTag,
+    const record = {
       name: data.name,
       model: data.model?.trim() || "",
       manufacturer: data.manufacturer?.trim() || "",
       category,
       serialNumber: data.serialNumber,
       partNumber: data.partNumber?.trim() || null,
+      partDescription: data.partDescription?.trim() || null,
+      additionalNote: data.additionalNote?.trim() || null,
       customerId,
       customerName: customer?.name ?? "",
       branchId,
@@ -107,16 +106,31 @@ export class EquipmentService {
       currentStatus: (data.currentStatus ?? "in_service") as never,
       purchaseSaleHistory: data.purchaseSaleHistory?.trim() || null,
       lastServiceDate: parseOptionalDate(data.lastServiceDate),
-    });
+    };
 
-    if (customer) {
-      await prisma.customer.update({
-        where: { id: customer.id },
-        data: { equipmentCount: { increment: 1 } },
-      });
+    // The sequence counter and the equipment row commit together. A failed insert rolls both back.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await prisma.$transaction(async (tx) => {
+          const assetTag = await allocateAssetTag(tenantId, tx);
+          const equipment = await tx.equipment.create({
+            data: { ...record, assetTag, tenantId },
+          });
+          if (customer) {
+            await tx.customer.update({
+              where: { id: customer.id },
+              data: { equipmentCount: { increment: 1 } },
+            });
+          }
+          return equipment;
+        });
+      } catch (err) {
+        const retryable = err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002" && attempt < 2;
+        if (!retryable) throw err;
+      }
     }
 
-    return equipment;
+    throw new AppError("Unable to allocate a unique asset tag", 409);
   }
 
   async update(id: string, tenantId: string, data: Record<string, unknown>) {
@@ -129,8 +143,9 @@ export class EquipmentService {
       const customerId =
         typeof raw === "string" && raw.trim() ? raw.trim() : null;
       if (customerId) {
-        const customer = await customersRepository.findById(customerId, tenantId);
-        if (!customer) throw new AppError("Customer not found", 404);
+        const found = await customersRepository.findById(customerId, tenantId);
+        if (!found) throw new AppError("Customer not found", 404);
+        const customer = assertCustomerSelectable(found, previousCustomerId);
         next.customerId = customer.id;
         next.customerName = customer.name;
         if (typeof next.branchId !== "string") next.branchId = customer.branchId;
@@ -192,6 +207,16 @@ export class EquipmentService {
     } else if (next.partNumber === "") {
       next.partNumber = null;
     }
+    if (typeof next.partDescription === "string") {
+      next.partDescription = next.partDescription.trim() || null;
+    } else if (next.partDescription === "") {
+      next.partDescription = null;
+    }
+    if (typeof next.additionalNote === "string") {
+      next.additionalNote = next.additionalNote.trim() || null;
+    } else if (next.additionalNote === "") {
+      next.additionalNote = null;
+    }
     if (typeof next.purchaseSaleHistory === "string") {
       next.purchaseSaleHistory = next.purchaseSaleHistory.trim() || null;
     } else if (next.purchaseSaleHistory === "") {
@@ -219,14 +244,15 @@ export class EquipmentService {
       );
     }
 
-    if (typeof next.assetTag === "string") {
-      const assetTag = next.assetTag.trim();
-      next.assetTag = assetTag;
-      const duplicate = await prisma.equipment.findFirst({
-        where: { tenantId, assetTag, id: { not: id } },
-        select: { id: true },
-      });
-      if (duplicate) throw new AppError("An asset with that tag already exists", 409);
+    if ("assetTag" in next) {
+      const incoming = typeof next.assetTag === "string" ? next.assetTag.trim() : "";
+      if (incoming && incoming !== existing.assetTag) {
+        throw new AppError(
+          "Asset tags are permanent. A new company prefix applies only to assets registered after the change.",
+          400,
+        );
+      }
+      delete next.assetTag;
     }
 
     const updated = await equipmentRepository.update(id, tenantId, next);
@@ -259,6 +285,7 @@ export class EquipmentService {
 
   async delete(id: string, tenantId: string) {
     const item = await this.getById(id, tenantId);
+    // The sequence counter is left unchanged so this asset tag is never issued again.
     await equipmentRepository.delete(id, tenantId);
     if (item.customerId) {
       await prisma.customer.update({

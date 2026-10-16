@@ -131,7 +131,7 @@ export function computeVerificationChecklist(job: {
 
   const linkedEquipment = job.equipmentId || job.equipment;
   const warrantyUpdated = !linkedEquipment
-    ? job.status === "completed"
+    ? job.status === "completed" || job.status === "delivery"
     : hasServiceWarrantyCoverage(job.equipment);
 
   const checks: Record<string, boolean> = {
@@ -142,7 +142,7 @@ export function computeVerificationChecklist(job: {
     labourRecorded: !hasLabourInEstimate || workLogs.length > 0,
     serviceReportUploaded: !!job.serviceReportDoc,
     customerSignatureAvailable: !!job.signature,
-    equipmentReturned: job.status === "completed",
+    equipmentReturned: job.status === "delivery",
     warrantyUpdated,
     stockAdjusted: stockOk,
   };
@@ -216,7 +216,7 @@ export class BillingService {
     const take = Math.max(1, Math.min(Math.trunc(limit) || 200, 500));
     const [completedJobs, invoices] = await Promise.all([
       prisma.serviceJob.findMany({
-        where: { tenantId, status: "completed" },
+        where: { tenantId, status: { in: ["completed", "delivery"] } },
         include: {
           ...jobInclude,
           invoices: { where: { status: { not: "closed" } }, take: 1 },

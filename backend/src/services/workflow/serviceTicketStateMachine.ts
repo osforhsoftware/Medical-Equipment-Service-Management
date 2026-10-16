@@ -116,8 +116,8 @@ export const JOB_STATUS_ORDER = [
   "inProgress",
   "partsPending",
   "review",
-  "delivery",
   "completed",
+  "delivery",
 ] as const;
 
 export type JobStatus = (typeof JOB_STATUS_ORDER)[number];
@@ -125,15 +125,24 @@ export type JobStatus = (typeof JOB_STATUS_ORDER)[number];
 /** Allowed job status transitions (from → to[]). */
 export const JOB_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   scheduled: ["inProgress", "partsPending"],
-  /** Field work → QA (review) → Delivery → Completed (billing handoff). */
+  /** Field work → QA (review) → Complete → Delivery. */
   inProgress: ["partsPending", "review"],
   partsPending: ["inProgress", "review"],
-  /** QA pass → delivery; QA fail → back to repair. */
-  review: ["inProgress", "delivery"],
-  delivery: ["completed", "review"],
-  /** Final approval rejected — job returns to QA review so work can resume. */
-  completed: ["review"],
+  /** QA pass → complete; QA fail → back to repair. */
+  review: ["inProgress", "completed"],
+  /** Confirm delivery after complete; final-approval reject returns to QA. */
+  completed: ["delivery", "review"],
+  /** Delivery is terminal; reject/reopen returns to QA. */
+  delivery: ["review"],
 };
+
+export function isJobDelivered(status: string) {
+  return status === "delivery";
+}
+
+export function isJobWorkComplete(status: string) {
+  return status === "completed" || status === "delivery";
+}
 
 export const ESTIMATE_DECISION_FROM = [
   "pendingAdminApproval",

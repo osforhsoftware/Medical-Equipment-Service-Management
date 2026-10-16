@@ -62,6 +62,7 @@ model Tenant {
   stockPurchaseRequests  StockPurchaseRequest[]
   ticketChangeRequests   ServiceTicketChangeRequest[]
   taxonomyTerms          TaxonomyTerm[]
+  taxonomySuppressions   TaxonomySuppression[]
   salesOrders            SalesOrder[]
   salesEnquiries         SalesEnquiry[]
   supplierRFQs           SupplierRFQ[]
@@ -69,6 +70,7 @@ model Tenant {
   warrantyClaims         WarrantyClaim[]
   customerContacts       CustomerContact[]
   purchaseShipments      PurchaseShipment[]
+  assetTagSequences      AssetTagSequence[]
 
   @@map("tenants")
 }
@@ -98,6 +100,8 @@ model TenantSettings {
   defaultInspectorUserId                 String? @map("default_inspector_user_id")
   defaultEstimatorUserId                 String? @map("default_estimator_user_id")
   defaultEngineerUserId                  String? @map("default_engineer_user_id")
+  /// Prefix for newly registered equipment. Changing it does not rewrite existing asset tags.
+  assetTagPrefix        String?  @map("asset_tag_prefix") @db.VarChar(20)
   rbacMatrix            Json     @default("{}") @map("rbac_matrix")
   createdAt             DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
@@ -106,6 +110,21 @@ model TenantSettings {
   logoFile StoredFile? @relation("TenantLogo", fields: [logoFileId], references: [id], onDelete: SetNull)
 
   @@map("tenant_settings")
+}
+
+/// Per-prefix high-water mark for equipment asset tags. Never decremented, so deleted assets are not reused.
+model AssetTagSequence {
+  id           String   @id @default(cuid())
+  tenantId     String   @map("tenant_id")
+  prefix       String   @db.VarChar(20)
+  nextSequence Int      @default(1001) @map("next_sequence")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, prefix])
+  @@map("asset_tag_sequences")
 }
 
 // ── User ──────────────────────────────────────────────────────────────────────
@@ -314,6 +333,8 @@ model Equipment {
   category             String                 @default("")
   serialNumber         String                 @map("serial_number")
   partNumber           String?                @map("part_number")
+  partDescription      String?                @db.Text @map("part_description")
+  additionalNote       String?                @db.Text @map("additional_note")
   customerId           String?                @map("customer_id")
   customerName         String                 @default("") @map("customer_name")
   branchId             String                 @map("branch_id")
@@ -399,6 +420,21 @@ model TaxonomyTerm {
   @@index([tenantId, type, isActive])
   @@index([parentId])
   @@map("taxonomy_terms")
+}
+
+/// Slugs the tenant removed on purpose. Stops default lists from recreating them.
+model TaxonomySuppression {
+  id        String       @id @default(cuid())
+  tenantId  String       @map("tenant_id")
+  type      TaxonomyType
+  slug      String
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, type, slug])
+  @@index([tenantId, type])
+  @@map("taxonomy_suppressions")
 }
 
 // ── Tenant service catalog ────────────────────────────────────────────────────
@@ -1076,8 +1112,8 @@ enum JobStatus {
   inProgress   @map("in-progress")
   partsPending @map("parts-pending")
   review
-  delivery
   completed
+  delivery
 }
 
 // ── InventoryItem ─────────────────────────────────────────────────────────────

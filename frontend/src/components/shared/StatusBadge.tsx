@@ -25,7 +25,7 @@ const statusMap: Record<string, Tone> = {
   "assigned-engineer": "info",
   change_pending_approval: "warning",
   pending_final_approval: "warning",
-  completed: "success",
+  completed: "accent",
   pending_invoice: "accent",
   invoiced: "success",
   finished: "success",
@@ -65,7 +65,7 @@ const statusMap: Record<string, Tone> = {
   scheduled: "info",
   "parts-pending": "warning",
   review: "accent",
-  delivery: "info",
+  delivery: "success",
   verified: "success",
   passed: "info",
 };

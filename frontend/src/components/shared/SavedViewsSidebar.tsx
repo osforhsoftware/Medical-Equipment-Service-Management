@@ -137,7 +137,7 @@ export const JOBS_SAVED_VIEWS: SavedViewItem[] = [
   { key: "all", label: "All jobs", hint: "Full job board", icon: CheckCircle2 },
   { key: "overdue", label: "Overdue", hint: "Past scheduled date", icon: AlertCircle },
   { key: "approval", label: "Approval", hint: "Waiting QA review", icon: ClipboardCheck },
-  { key: "billing", label: "Billing", hint: "Ready for delivery / billing", icon: Receipt },
+  { key: "billing", label: "Billing", hint: "Complete — ready for delivery / billing", icon: Receipt },
   { key: "calendar", label: "Calendar", hint: "Month by schedule date", icon: CalendarDays },
 ];
 

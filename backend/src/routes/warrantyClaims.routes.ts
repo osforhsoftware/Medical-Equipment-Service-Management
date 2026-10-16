@@ -5,6 +5,7 @@ import { resolveTenant } from "@/middleware/tenant";
 import { validate } from "@/middleware/validate";
 import { createWarrantyClaimSchema, updateWarrantyClaimSchema, decideWarrantyClaimSchema } from "@/schemas/warrantyClaims.schema";
 import { success } from "@/utils/response";
+import { requireActiveCustomer } from "@/lib/activeCustomer";
 
 const router = Router();
 router.use(authenticate, resolveTenant);
@@ -42,6 +43,9 @@ router.get("/:id", canAccess, async (req: Request, res: Response, next: NextFunc
 router.post("/", canManage, validate(createWarrantyClaimSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const tenantId = req.tenantId!;
+    if (typeof req.body.customerId === "string" && req.body.customerId.trim()) {
+      await requireActiveCustomer(tenantId, req.body.customerId.trim());
+    }
     const year = new Date().getFullYear();
     const count = await prisma.warrantyClaim.count({ where: { tenantId } });
     const reference = `WC-${year}-${String(count + 1).padStart(4, "0")}`;
@@ -68,6 +72,12 @@ router.put("/:id", canManage, validate(updateWarrantyClaimSchema), async (req: R
     if (!existing) {
       res.status(404).json({ success: false, message: "Warranty claim not found", data: null });
       return;
+    }
+    if (typeof req.body.customerId === "string" && req.body.customerId.trim()) {
+      const nextCustomerId = req.body.customerId.trim();
+      if (nextCustomerId !== existing.customerId) {
+        await requireActiveCustomer(tenantId, nextCustomerId);
+      }
     }
 
     const updated = await prisma.warrantyClaim.update({

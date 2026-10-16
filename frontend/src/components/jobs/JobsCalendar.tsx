@@ -136,8 +136,8 @@ export function JobsCalendar({
             ["in-progress", "In Progress"],
             ["parts-pending", "Parts Pending"],
             ["review", "QA"],
+            ["completed", "Complete"],
             ["delivery", "Delivery"],
-            ["completed", "Completed"],
           ].map(([key, label]) => (
             <span key={key} className="inline-flex items-center gap-1.5">
               <span className={cn("h-2 w-2 rounded-full", STATUS_DOT[key])} />

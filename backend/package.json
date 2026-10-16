@@ -14,7 +14,8 @@
     "prisma:reset": "prisma migrate reset --force",
     "prisma:repair": "node scripts/repair-stuck-migrations.js",
     "seed": "ts-node prisma/seed.ts",
-    "db:clean": "ts-node -r tsconfig-paths/register prisma/clean.ts"
+    "db:clean": "ts-node -r tsconfig-paths/register prisma/clean.ts",
+    "asset-tag:report": "ts-node -r tsconfig-paths/register scripts/asset-tag-migration-report.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.14.0",

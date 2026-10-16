@@ -37,8 +37,8 @@ const JOB_STATUS_TO_STAGE: Record<string, WorkflowStageKey> = {
   partsPending: "service",
   "parts-pending": "service",
   review: "service",
-  delivery: "billing",
-  completed: "completed",
+  completed: "billing",
+  delivery: "completed",
 };
 
 export function resolveWorkflowStage(status: string, kind: "request" | "job" = "request"): WorkflowStageKey {
@@ -75,7 +75,8 @@ export function statusToChipVariant(status: string, overdue = false): WorkflowCh
   if (s === "inspection") return "inspection";
   if (s === "estimate") return "estimate";
   if (["approval", "pending_approval", "pending-approval", "review"].includes(status)) return "estimate";
-  if (status === "delivery") return "ready-billing";
+  if (status === "completed") return "ready-billing";
+  if (status === "delivery") return "completed";
   if (
     [
       "in-progress",

@@ -41,7 +41,7 @@ export function agingBucket(dueAt: string | Date | null | undefined, now = new D
   return "90+ days";
 }
 
-export const OPEN_JOB_STATUSES = new Set(["scheduled", "inProgress", "partsPending", "review", "delivery"]);
+export const OPEN_JOB_STATUSES = new Set(["scheduled", "inProgress", "partsPending", "review", "completed"]);
 export const CLOSED_TICKET_STATUSES = new Set(["completed", "invoiced", "closed", "finished", "cancelled"]);
 
 export type ReportExportRow = {

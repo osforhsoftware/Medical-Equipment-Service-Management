@@ -182,34 +182,73 @@ export class CustomersService {
   }
 
   /**
-   * Permanently delete a customer.
-   * Blocked while equipment, service work, sales, invoices, or a portal login still reference them.
+   * Permanently delete a customer who has no linked history.
+   * Customers with equipment, jobs, estimates, invoices, payments, or other
+   * records are deactivated instead. Only the status field changes.
    */
   async delete(id: string, tenantId: string) {
     const existing = await customersRepository.findById(id, tenantId);
     if (!existing) throw new AppError("Customer not found", 404);
 
-    const blockers = await this.deletionBlockers(id, tenantId);
-    if (blockers.length > 0) {
-      throw new AppError(
-        `This customer cannot be deleted while they still have ${formatList(blockers)}.`,
-        409,
-      );
+    const linked = await this.deletionBlockers(id, tenantId);
+    if (linked.length > 0) {
+      const alreadyInactive = existing.status === "inactive";
+      if (!alreadyInactive) {
+        await customersRepository.update(id, tenantId, { status: "inactive" });
+      }
+      const summary = alreadyInactive
+        ? `${existing.name} is already inactive. Linked records were not changed.`
+        : `${existing.name} was deactivated because they still have ${formatList(linked)}. Existing records were not changed.`;
+      return {
+        id,
+        name: existing.name,
+        reference: existing.reference,
+        deleted: false as const,
+        deactivated: true as const,
+        alreadyInactive,
+        status: "inactive" as const,
+        linked,
+        summary,
+      };
     }
 
     await customersRepository.delete(id, tenantId);
-    return { id, deleted: true as const, name: existing.name, reference: existing.reference };
+    return {
+      id,
+      name: existing.name,
+      reference: existing.reference,
+      deleted: true as const,
+      deactivated: false as const,
+      alreadyInactive: false,
+      status: existing.status,
+      linked: [] as string[],
+      summary: `${existing.name} was permanently removed.`,
+    };
   }
 
   private async deletionBlockers(id: string, tenantId: string): Promise<string[]> {
     const where = { tenantId, customerId: id };
-    const [equipment, serviceRequests, estimates, jobs, invoices, salesOrders, portalUsers] = await Promise.all([
+    const [
+      equipment,
+      serviceRequests,
+      estimates,
+      jobs,
+      invoices,
+      payments,
+      salesOrders,
+      referrals,
+      warrantyClaims,
+      portalUsers,
+    ] = await Promise.all([
       prisma.equipment.count({ where }),
       prisma.serviceRequest.count({ where }),
       prisma.estimate.count({ where }),
       prisma.serviceJob.count({ where }),
       prisma.invoice.count({ where }),
+      prisma.invoicePayment.count({ where: { tenantId, invoice: { customerId: id } } }),
       prisma.salesOrder.count({ where }),
+      prisma.referral.count({ where }),
+      prisma.warrantyClaim.count({ where }),
       prisma.user.count({ where }),
     ]);
 
@@ -217,10 +256,13 @@ export class CustomersService {
     if (equipment) parts.push(countLabel(equipment, "equipment record"));
     if (serviceRequests) parts.push(countLabel(serviceRequests, "service request"));
     if (estimates) parts.push(countLabel(estimates, "estimate"));
-    if (jobs) parts.push(countLabel(jobs, "job"));
+    if (jobs) parts.push(countLabel(jobs, "service job"));
     if (invoices) parts.push(countLabel(invoices, "invoice"));
+    if (payments) parts.push(countLabel(payments, "payment"));
     if (salesOrders) parts.push(countLabel(salesOrders, "sales order"));
-    if (portalUsers) parts.push(countLabel(portalUsers, "portal user"));
+    if (referrals) parts.push(countLabel(referrals, "referral"));
+    if (warrantyClaims) parts.push(countLabel(warrantyClaims, "warranty claim"));
+    if (portalUsers) parts.push(countLabel(portalUsers, "portal login"));
     return parts;
   }
 

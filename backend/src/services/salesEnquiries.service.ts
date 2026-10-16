@@ -3,6 +3,7 @@ import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
 import { getDefaultBranchId } from "@/utils/defaultBranch";
+import { inactiveCustomerMessage } from "@/lib/activeCustomer";
 
 function money(value: Prisma.Decimal | number): Prisma.Decimal {
   return value instanceof Prisma.Decimal ? value : new Prisma.Decimal(value);
@@ -196,6 +197,9 @@ export async function convertSalesEnquiryToQuotation(
   }
 
   const customer = await resolveCustomerForEnquiry(tenantId, enquiry);
+  if (customer.status !== "active") {
+    throw new AppError(inactiveCustomerMessage(customer.name), 422);
+  }
   const reference = await generateReference(tenantId, "EST", "estimate");
 
   const storedLines = readInterestLines(enquiry.interestLines);

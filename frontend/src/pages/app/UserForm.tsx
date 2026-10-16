@@ -604,9 +604,12 @@ export default function UserFormPage() {
                           <SelectValue placeholder="Select customer record" />
                         </SelectTrigger>
                         <SelectContent>
-                          {customers.map((customer) => (
+                          {customers
+                            .filter((customer) => customer.status === "active" || customer.id === form.customerId)
+                            .map((customer) => (
                             <SelectItem key={customer.id} value={customer.id}>
                               {customer.name} · {customer.reference}
+                              {customer.status === "inactive" ? " (inactive)" : ""}
                             </SelectItem>
                           ))}
                         </SelectContent>

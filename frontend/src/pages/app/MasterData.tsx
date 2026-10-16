@@ -14,6 +14,14 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -59,6 +67,15 @@ function isTaxonomyType(value: string | null): value is TaxonomyType {
   return TAXONOMY_TABS.some((tab) => tab.type === value);
 }
 
+function titled(singular: string) {
+  return singular.charAt(0).toUpperCase() + singular.slice(1);
+}
+
+function inUseWarning(name: string, count: number, singular: string) {
+  const records = count === 1 ? "record" : "records";
+  return `${name} is used by ${count} ${records}. Reassign the linked equipment or other records to another ${singular} before deleting it.`;
+}
+
 export default function MasterData() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -77,6 +94,7 @@ export default function MasterData() {
   const [saving, setSaving] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<BackendTaxonomyTerm | null>(null);
+  const [blockedTarget, setBlockedTarget] = useState<BackendTaxonomyTerm | null>(null);
   const [deleting, setDeleting] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -199,25 +217,34 @@ export default function MasterData() {
     }
   };
 
+  const requestDelete = (term: BackendTaxonomyTerm) => {
+    const usageCount = term.usageCount ?? 0;
+    if (usageCount > 0) {
+      setBlockedTarget(term);
+      toast.warning(`${titled(tab.singular)} is in use`, {
+        description: inUseWarning(term.name, usageCount, tab.singular),
+      });
+      return;
+    }
+    setDeleteTarget(term);
+  };
+
   const confirmDelete = async () => {
     if (!deleteTarget) return;
+    const removed = deleteTarget;
     setDeleting(true);
     try {
-      const result = await api.deleteTaxonomy(deleteTarget.id);
-      if (result?.deactivated) {
-        toast.success("Term deactivated", {
-          description: `${deleteTarget.name} is in use and was deactivated instead of deleted.`,
-        });
-      } else {
-        toast.success("Term deleted", {
-          description: `${deleteTarget.name} was removed.`,
-        });
-        if (editing?.id === deleteTarget.id) cancelEdit();
-      }
+      await api.deleteTaxonomy(removed.id);
+      if (editing?.id === removed.id) cancelEdit();
       setDeleteTarget(null);
       await queryClient.invalidateQueries({ queryKey: ["taxonomy"] });
+      toast.success(`${titled(tab.singular)} deleted`, {
+        description: `${removed.name} was removed.`,
+      });
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to delete term" });
+      toast.apiError(err, { fallback: `Unable to delete ${tab.singular}` });
+      setDeleteTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ["taxonomy"] });
     } finally {
       setDeleting(false);
     }
@@ -414,7 +441,7 @@ export default function MasterData() {
                               size="sm"
                               className="text-destructive hover:text-destructive"
                               disabled={pendingId === term.id || deleting}
-                              onClick={() => setDeleteTarget(term)}
+                              onClick={() => requestDelete(term)}
                             >
                               Delete
                             </Button>
@@ -440,24 +467,33 @@ export default function MasterData() {
           <div className="space-y-2">
             <p>
               This will permanently remove{" "}
-              <span className="font-medium text-foreground">{deleteTarget?.name}</span>
-              {(deleteTarget?.usageCount ?? 0) === 0 ? "." : null}
+              <span className="font-medium text-foreground">{deleteTarget?.name}</span>.
             </p>
-            {(deleteTarget?.usageCount ?? 0) > 0 ? (
-              <p>
-                It is used by {deleteTarget?.usageCount} record
-                {deleteTarget?.usageCount === 1 ? "" : "s"}, so it will be deactivated
-                instead of deleted.
-              </p>
-            ) : (
-              <p>This cannot be undone.</p>
-            )}
+            <p>This cannot be undone.</p>
           </div>
         }
-        confirmLabel={(deleteTarget?.usageCount ?? 0) > 0 ? "Deactivate" : "Delete"}
+        confirmLabel="Delete"
         loading={deleting}
         onConfirm={() => void confirmDelete()}
       />
+
+      <Dialog open={!!blockedTarget} onOpenChange={(open) => { if (!open) setBlockedTarget(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cannot delete {blockedTarget?.name}</DialogTitle>
+            <DialogDescription>
+              {blockedTarget
+                ? inUseWarning(blockedTarget.name, blockedTarget.usageCount ?? 0, tab.singular)
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" onClick={() => setBlockedTarget(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

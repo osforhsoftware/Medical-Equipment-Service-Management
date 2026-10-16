@@ -62,8 +62,8 @@ const columns = [
   { status: "in-progress", label: "In Progress" },
   { status: "parts-pending", label: "Parts Pending" },
   { status: "review", label: "QA" },
+  { status: "completed", label: "Complete" },
   { status: "delivery", label: "Delivery" },
-  { status: "completed", label: "Completed" },
 ] as const;
 
 const KANBAN_PAGE_SIZE = 5;
@@ -455,7 +455,7 @@ export default function Jobs() {
           nextParams.set("status", "review");
           nextParams.delete("qaScope");
         } else if (next === "billing") {
-          nextParams.set("status", "delivery");
+          nextParams.set("status", "completed");
           nextParams.delete("qaScope");
         } else {
           nextParams.delete("status");

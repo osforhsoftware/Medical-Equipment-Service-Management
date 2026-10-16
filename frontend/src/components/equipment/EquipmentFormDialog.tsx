@@ -28,7 +28,6 @@ import {
 import { api, type BackendEquipment, type CreateEquipmentInput } from "@/lib/api";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { fieldAria, fieldErrorClass, fieldRules, type FieldErrors } from "@/lib/formValidation";
-import { generateEquipmentAssetTag } from "@/lib/equipmentQr";
 import { EQUIPMENT_CURRENT_STATUS_OPTIONS } from "@/lib/equipmentWarranty";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/context/AuthContext";
@@ -47,6 +46,8 @@ type FormState = {
   category: string;
   serialNumber: string;
   partNumber: string;
+  partDescription: string;
+  additionalNote: string;
   customerId: string;
   location: string;
   installDate: string;
@@ -64,18 +65,18 @@ type FormState = {
 
 type UnitEntry = {
   key: string;
-  assetTag: string;
   serialNumber: string;
 };
 
 const equipmentSchema = z.object({
-  assetTag: fieldRules.requiredString("Asset tag"),
   name: fieldRules.requiredString("Equipment name"),
   model: fieldRules.optionalString(),
   manufacturer: fieldRules.optionalString(),
   category: fieldRules.optionalString(),
   serialNumber: fieldRules.requiredString("Serial number"),
   partNumber: fieldRules.optionalString(),
+  partDescription: fieldRules.optionalString(),
+  additionalNote: fieldRules.optionalString(),
   customerId: fieldRules.optionalString(),
   location: fieldRules.optionalString(),
   installDate: fieldRules.optionalString(),
@@ -89,8 +90,8 @@ const equipmentSchema = z.object({
   lastServiceDate: fieldRules.optionalString(),
 });
 
-/** Shared product fields when registering equipment (asset tag and serial are collected separately). */
-const sharedProductSchema = equipmentSchema.omit({ assetTag: true, serialNumber: true });
+/** Shared product fields when registering equipment (serial numbers are collected separately). */
+const sharedProductSchema = equipmentSchema.omit({ serialNumber: true });
 
 function toDateInput(value: string | null | undefined) {
   if (!value) return "";
@@ -105,6 +106,8 @@ const emptyForm = (): FormState => ({
   category: "",
   serialNumber: "",
   partNumber: "",
+  partDescription: "",
+  additionalNote: "",
   customerId: "",
   location: "",
   installDate: "",
@@ -129,6 +132,8 @@ function fromEquipment(item: BackendEquipment): FormState {
     category: item.category ?? "",
     serialNumber: item.serialNumber,
     partNumber: item.partNumber ?? "",
+    partDescription: item.partDescription ?? "",
+    additionalNote: item.additionalNote ?? "",
     customerId: item.customerId ?? "",
     location: item.location ?? "",
     installDate: toDateInput(item.installDate),
@@ -145,15 +150,16 @@ function fromEquipment(item: BackendEquipment): FormState {
   };
 }
 
-function toPayload(form: FormState, unit?: Pick<UnitEntry, "assetTag" | "serialNumber">): CreateEquipmentInput {
+function toPayload(form: FormState, unit?: Pick<UnitEntry, "serialNumber">): CreateEquipmentInput {
   return {
-    assetTag: (unit?.assetTag ?? form.assetTag).trim(),
     name: form.name.trim(),
     model: form.model.trim(),
     manufacturer: form.manufacturer.trim(),
     category: form.category,
     serialNumber: (unit?.serialNumber ?? form.serialNumber).trim(),
     partNumber: form.partNumber.trim() || null,
+    partDescription: form.partDescription.trim() || null,
+    additionalNote: form.additionalNote.trim() || null,
     customerId: form.customerId || null,
     location: form.location.trim(),
     installDate: form.installDate || null,
@@ -174,41 +180,20 @@ function newUnitKey() {
   return `unit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function createUnit(existingTags: string[]): UnitEntry {
+function createUnit(): UnitEntry {
   return {
     key: newUnitKey(),
-    assetTag: generateEquipmentAssetTag(existingTags),
     serialNumber: "",
   };
 }
 
-function validateUnits(units: UnitEntry[], reservedTags: string[]): FieldErrors {
+function validateUnits(units: UnitEntry[]): FieldErrors {
   const errors: FieldErrors = {};
-  const tagSeen = new Map<string, number>();
   const serialSeen = new Map<string, number>();
-  const reserved = new Set(reservedTags.map((tag) => tag.trim().toUpperCase()).filter(Boolean));
 
   units.forEach((unit, index) => {
-    const tag = unit.assetTag.trim();
     const serial = unit.serialNumber.trim();
-    const tagField = `unit_${index}_assetTag`;
     const serialField = `unit_${index}_serialNumber`;
-
-    if (!tag) {
-      errors[tagField] = "Asset tag is required";
-    } else {
-      const normalized = tag.toUpperCase();
-      if (reserved.has(normalized)) {
-        errors[tagField] = "An asset with that tag already exists";
-      }
-      const first = tagSeen.get(normalized);
-      if (first !== undefined) {
-        errors[tagField] = "Duplicate asset tag in this batch";
-        errors[`unit_${first}_assetTag`] = "Duplicate asset tag in this batch";
-      } else {
-        tagSeen.set(normalized, index);
-      }
-    }
 
     if (!serial) {
       errors[serialField] = "Serial number is required";
@@ -231,7 +216,6 @@ type EquipmentFormDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   equipment?: BackendEquipment | null;
-  existingAssetTags?: string[];
   defaultCustomerId?: string;
   defaultCustomerName?: string;
   defaultLocation?: string;
@@ -242,14 +226,13 @@ export function EquipmentFormDialog({
   open,
   onOpenChange,
   equipment = null,
-  existingAssetTags = [],
   defaultCustomerId = "",
   defaultCustomerName = "",
   defaultLocation = "",
   onSaved,
 }: EquipmentFormDialogProps) {
   const { user } = useAuth();
-  const { rbacMatrix } = useSettings();
+  const { settings, rbacMatrix, refresh: refreshSettings } = useSettings();
   const canManageMasterData = Boolean(
     user && userCanAccessModule(
       user,
@@ -260,11 +243,10 @@ export function EquipmentFormDialog({
   );
   const editing = Boolean(equipment);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [units, setUnits] = useState<UnitEntry[]>(() => [createUnit([])]);
+  const [units, setUnits] = useState<UnitEntry[]>(() => [createUnit()]);
   const [unitErrors, setUnitErrors] = useState<FieldErrors>({});
   const [unitsTouched, setUnitsTouched] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [usedAssetTags, setUsedAssetTags] = useState<string[]>([]);
   const dialogRef = useRef<HTMLDivElement>(null);
   const {
     errors,
@@ -278,9 +260,9 @@ export function EquipmentFormDialog({
   } = useFormValidation({
     fieldOrder: editing
       ? [
-          "assetTag",
           "serialNumber",
           "partNumber",
+          "partDescription",
           "name",
           "manufacturer",
           "model",
@@ -295,12 +277,14 @@ export function EquipmentFormDialog({
           "condition",
           "currentStatus",
           "purchaseSaleHistory",
+          "additionalNote",
         ]
       : [
           "name",
           "manufacturer",
           "model",
           "partNumber",
+          "partDescription",
           "category",
           "customerId",
           "location",
@@ -312,10 +296,8 @@ export function EquipmentFormDialog({
           "condition",
           "currentStatus",
           "purchaseSaleHistory",
-          ...Array.from({ length: 40 }, (_, index) => [
-            `unit_${index}_assetTag`,
-            `unit_${index}_serialNumber`,
-          ]).flat(),
+          "additionalNote",
+          ...Array.from({ length: 40 }, (_, index) => `unit_${index}_serialNumber`),
         ],
     schema: editing ? equipmentSchema : sharedProductSchema,
   });
@@ -342,8 +324,6 @@ export function EquipmentFormDialog({
   const customers = (customersQuery.data ?? []).filter((c) => c.status === "active");
   const activeCategories = activeTerms(categoriesQuery.data ?? []);
   const activeConditions = activeTerms(conditionsQuery.data ?? []);
-  const reservedTags = [...existingAssetTags, ...usedAssetTags];
-
   useEffect(() => {
     if (!open) return;
     if (equipment) {
@@ -355,11 +335,10 @@ export function EquipmentFormDialog({
         customerId: defaultCustomerId,
         location: defaultLocation,
       });
-      setUnits([createUnit(existingAssetTags)]);
+      setUnits([createUnit()]);
     }
     setUnitErrors({});
     setUnitsTouched(false);
-    setUsedAssetTags([]);
     resetValidation();
     // Reset only when the dialog opens, the edited record changes, or guided defaults change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -367,7 +346,7 @@ export function EquipmentFormDialog({
 
   const showUnitError = (field: string) => Boolean(unitErrors[field] && unitsTouched);
 
-  const updateUnit = (key: string, patch: Partial<Pick<UnitEntry, "assetTag" | "serialNumber">>) => {
+  const updateUnit = (key: string, patch: Partial<Pick<UnitEntry, "serialNumber">>) => {
     setUnits((current) => current.map((unit) => (unit.key === key ? { ...unit, ...patch } : unit)));
   };
 
@@ -399,7 +378,7 @@ export function EquipmentFormDialog({
       return;
     }
 
-    const nextUnitErrors = validateUnits(units, reservedTags);
+    const nextUnitErrors = validateUnits(units);
     const sharedOk = validateAll(form, nextUnitErrors, dialogRef.current);
     setUnitErrors(nextUnitErrors);
     setUnitsTouched(true);
@@ -418,22 +397,19 @@ export function EquipmentFormDialog({
           const saved = await api.createEquipment(toPayload(form, unit));
           created.push(saved);
           remaining = remaining.slice(1);
-          setUsedAssetTags((prev) => [...prev, saved.assetTag]);
         } catch (err) {
           const message =
             err instanceof Error ? err.message : "Unable to register this unit";
-          const apiUnitErrors: FieldErrors = {};
-          if (/asset/i.test(message) && /exist|duplicate|tag/i.test(message)) {
-            apiUnitErrors.unit_0_assetTag = message;
-          } else {
-            apiUnitErrors.unit_0_serialNumber = message;
-          }
+          const apiUnitErrors: FieldErrors = {
+            unit_0_serialNumber: message,
+          };
 
           setUnits(remaining);
           setUnitErrors(apiUnitErrors);
           setUnitsTouched(true);
 
           if (created.length > 0) {
+            void refreshSettings();
             toast({
               title: `Registered ${created.length} of ${totalRequested}`,
               description: `Stopped at unit ${index + 1}: ${message}. Fix the remaining rows and try again.`,
@@ -455,6 +431,7 @@ export function EquipmentFormDialog({
             ? `${created[0].name} (${created[0].assetTag}) was added successfully.`
             : `${created[0].name} — ${count} units with unique asset tags and serials were added.`,
       });
+      void refreshSettings();
       onOpenChange(false);
       resetValidation();
       onSaved?.(created[created.length - 1]);
@@ -489,7 +466,7 @@ export function EquipmentFormDialog({
             <p className="text-sm text-muted-foreground">
               {defaultCustomerId
                 ? `${defaultCustomerName || "This customer"} is already selected. Add the machine details, or change the customer if needed.`
-                : "Add asset tag and serial number first, then product details."}
+                : "Enter the serial number and product details. The asset tag and QR code are assigned when you register."}
             </p>
           ) : null}
         </DialogHeader>
@@ -503,17 +480,7 @@ export function EquipmentFormDialog({
         >
           {editing ? (
             <>
-              <EquipmentQrPanel
-                assetTag={form.assetTag}
-                required
-                error={shouldShow("assetTag") ? errors.assetTag : null}
-                onAssetTagChange={(assetTag) => {
-                  const next = { ...form, assetTag };
-                  setForm(next);
-                  handleChange("assetTag", next);
-                }}
-                onBlur={() => handleBlur("assetTag", form)}
-              />
+              <EquipmentQrPanel assetTag={form.assetTag} showInput={false} />
               <div className="grid gap-2" data-field="serialNumber">
                 <Label htmlFor="serial-number" className={shouldShow("serialNumber") ? "text-destructive" : undefined}>
                   Serial number
@@ -537,21 +504,19 @@ export function EquipmentFormDialog({
             </>
           ) : (
             <>
-              <div data-field="unit_0_assetTag">
-                <EquipmentQrPanel
-                  assetTag={units[0]?.assetTag ?? ""}
-                  required
-                  error={showUnitError("unit_0_assetTag") ? unitErrors.unit_0_assetTag : null}
-                  onAssetTagChange={(assetTag) => {
-                    if (!units[0]) return;
-                    updateUnit(units[0].key, { assetTag });
-                    setUnitErrors((prev) => {
-                      const next = { ...prev };
-                      delete next.unit_0_assetTag;
-                      return next;
-                    });
-                  }}
-                />
+              <div className="rounded-xl border border-border bg-muted/30 p-4">
+                <p className="text-sm font-semibold">Asset tag</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Assigned automatically from company settings when this equipment is saved. The same number is stored on the asset, its QR code, and related service records.
+                </p>
+                {settings?.assetTagPreview ? (
+                  <p className="mt-2 font-mono text-sm font-semibold">{settings.assetTagPreview}</p>
+                ) : null}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {settings?.assetTagPreview
+                    ? "Expected next tag. The saved tag is the one returned by the server."
+                    : "The saved tag is confirmed after registration."}
+                </p>
               </div>
               <div className="grid gap-2" data-field="unit_0_serialNumber">
                 <Label
@@ -652,6 +617,21 @@ export function EquipmentFormDialog({
               className="font-mono"
             />
           </div>
+          <div className="grid gap-2" data-field="partDescription">
+            <Label htmlFor="part-description">Part description (optional)</Label>
+            <Textarea
+              id="part-description"
+              value={form.partDescription}
+              onChange={(e) => {
+                const next = { ...form, partDescription: e.target.value };
+                setForm(next);
+                handleChange("partDescription", next);
+              }}
+              onBlur={() => handleBlur("partDescription", form)}
+              rows={3}
+              placeholder="Describe the part, component, or configuration"
+            />
+          </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2" data-field="category">
               <div className="flex items-center justify-between gap-2">
@@ -703,6 +683,13 @@ export function EquipmentFormDialog({
                   {defaultCustomerId && !customers.some((c) => c.id === defaultCustomerId) ? (
                     <SelectItem value={defaultCustomerId}>
                       {defaultCustomerName || "New customer"}
+                    </SelectItem>
+                  ) : null}
+                  {form.customerId
+                    && form.customerId !== defaultCustomerId
+                    && !customers.some((c) => c.id === form.customerId) ? (
+                    <SelectItem value={form.customerId}>
+                      {equipment?.customerName || "Current customer"} (inactive)
                     </SelectItem>
                   ) : null}
                   {customers.map((c) => (
@@ -927,6 +914,21 @@ export function EquipmentFormDialog({
               onBlur={() => handleBlur("purchaseSaleHistory", form)}
               rows={3}
               placeholder="e.g. Purchased 2022-03-15 from Siemens · Sold/transferred notes…"
+            />
+          </div>
+          <div className="grid gap-2" data-field="additionalNote">
+            <Label htmlFor="additional-note">Additional note (optional)</Label>
+            <Textarea
+              id="additional-note"
+              value={form.additionalNote}
+              onChange={(e) => {
+                const next = { ...form, additionalNote: e.target.value };
+                setForm(next);
+                handleChange("additionalNote", next);
+              }}
+              onBlur={() => handleBlur("additionalNote", form)}
+              rows={3}
+              placeholder="Any extra notes about this equipment"
             />
           </div>
 

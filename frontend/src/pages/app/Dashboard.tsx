@@ -101,8 +101,8 @@ const JOB_STATUS_ACTIONS = [
   { value: "inProgress", label: "In Progress" },
   { value: "partsPending", label: "Waiting for Spare Parts" },
   { value: "review", label: "Submit for QA" },
-  { value: "delivery", label: "QA Pass → Delivery" },
-  { value: "completed", label: "Confirm Delivery" },
+  { value: "completed", label: "QA Pass → Complete" },
+  { value: "delivery", label: "Confirm Delivery" },
 ] as const;
 
 type QuickAction = { label: string; to: string; icon: LucideIcon };
@@ -429,9 +429,9 @@ export default function Dashboard() {
     setUpdatingJobId(jobId);
     try {
       const progress =
-        status === "completed"
+        status === "delivery"
           ? 100
-          : status === "delivery"
+          : status === "completed"
             ? 95
             : status === "inProgress"
               ? 40

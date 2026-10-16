@@ -290,10 +290,14 @@ export default function Customers() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await api.deleteCustomer(deleteTarget.id);
-      toast.success("Customer deleted", {
-        description: `${deleteTarget.name} was permanently removed.`,
-      });
+      const result = await api.deleteCustomer(deleteTarget.id);
+      if (result.deactivated) {
+        toast.success(result.alreadyInactive ? "Customer already inactive" : "Customer deactivated", {
+          description: result.summary,
+        });
+      } else {
+        toast.success("Customer deleted", { description: result.summary });
+      }
       setDeleteTarget(null);
       await queryClient.invalidateQueries({ queryKey: ["customers"] });
     } catch (err) {
@@ -307,8 +311,8 @@ export default function Customers() {
     setRestoringId(customer.id);
     try {
       await api.restoreCustomer(customer.id);
-      toast.success("Customer restored", {
-        description: `${customer.name} is active again.`,
+      toast.success("Customer reactivated", {
+        description: `${customer.name} can be selected for new transactions again.`,
       });
       await queryClient.invalidateQueries({ queryKey: ["customers"] });
     } catch (err) {
@@ -410,7 +414,7 @@ export default function Customers() {
                     ) : (
                       <RotateCcw className="mr-1 h-3.5 w-3.5" />
                     )}
-                    Restore
+                    Reactivate
                   </Button>
                 ) : null}
                 <Button
@@ -789,25 +793,36 @@ export default function Customers() {
         onOpenChange={(open) => {
           if (!open) closeDelete();
         }}
-        title="Delete customer?"
+        title={
+          deleteTarget && (deleteTarget.equipmentCount > 0 || deleteTarget.activeJobs > 0)
+            ? "Deactivate customer?"
+            : "Delete customer?"
+        }
         description={
           <div className="space-y-2">
             <p>
-              This permanently deletes{" "}
               <span className="font-medium text-foreground">{deleteTarget?.name}</span> (
-              {deleteTarget?.reference}). This cannot be undone.
+              {deleteTarget?.reference})
             </p>
             {deleteTarget && (deleteTarget.equipmentCount > 0 || deleteTarget.activeJobs > 0) ? (
               <p>
-                This customer still has {deleteTarget.equipmentCount} equipment and{" "}
-                {deleteTarget.activeJobs} active jobs. Delete is blocked until that related work is removed.
+                This customer has linked equipment or jobs, so they will be deactivated. Their details
+                and existing records stay unchanged, and they cannot be chosen for new transactions.
               </p>
             ) : (
-              <p>Contacts for this customer are deleted with the record.</p>
+              <p>
+                If this customer has no linked equipment, service jobs, estimates, invoices, payments, or
+                other records, they will be permanently deleted. If any of those records exist, the
+                customer is deactivated instead and the records are kept.
+              </p>
             )}
           </div>
         }
-        confirmLabel="Delete customer"
+        confirmLabel={
+          deleteTarget && (deleteTarget.equipmentCount > 0 || deleteTarget.activeJobs > 0)
+            ? "Deactivate"
+            : "Delete customer"
+        }
         loading={deleting}
         onConfirm={() => void confirmDelete()}
       />
