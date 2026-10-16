@@ -1284,10 +1284,11 @@ async function main() {
       });
     }
 
-    if (j.status === "completed" || j.status === "delivery" || j.status === "inProgress") {
+    const jobStatus = j.status as string;
+    if (jobStatus === "completed" || jobStatus === "delivery" || jobStatus === "inProgress") {
       const logs = await prisma.jobWorkLog.count({ where: { jobId: job.id } });
       if (logs === 0) {
-        const finished = j.status === "completed" || j.status === "delivery";
+        const finished = jobStatus === "completed" || jobStatus === "delivery";
         await prisma.jobWorkLog.create({
           data: {
             tenantId: TENANT_ID,
