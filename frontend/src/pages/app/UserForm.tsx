@@ -46,6 +46,7 @@ const userSchema = z.object({
   primaryRole: z.string(),
   isActive: z.boolean(),
   accessMode: z.enum(["crud", "read"]),
+  customerId: z.string().optional(),
 });
 
 const multiAssignableRoles: Role[] = [
@@ -203,7 +204,7 @@ export default function UserFormPage() {
     handleChange,
     applyApiErrors,
     clearError,
-  } = useFormValidation({
+  } = useFormValidation<FormState>({
     fieldOrder: ["name", "username", "email", "phone", "password", "selectedRoles", "customerId", "accessMode"],
     schema: userSchema,
     validate: (values) => {

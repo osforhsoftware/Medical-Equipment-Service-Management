@@ -11,6 +11,7 @@ import {
   MapPin,
   PackageMinus,
   PlusCircle,
+  RotateCcw,
   Undo2,
   User,
   Wrench,
@@ -215,6 +216,23 @@ export default function MobileJobDetail() {
       await load();
     } catch (err) {
       toast.apiError(err, { fallback: "Error" });
+    }
+  };
+
+  const reopenJob = async () => {
+    if (!job) return;
+    try {
+      await api.updateJob(job.id, {
+        status: "inProgress",
+        progress: Math.min(job.progress, 80),
+      });
+      toast({
+        title: "Job reopened",
+        description: "Returned to Repair. Record parts, then submit for QA again.",
+      });
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to reopen job" });
     }
   };
 
@@ -801,21 +819,29 @@ export default function MobileJobDetail() {
             ) : null}
           </div>
         )}
-        {jobDelivered && canDownloadServiceReport ? (
+        {jobDelivered ? (
           <div className="mobile-sticky-footer mt-6 space-y-2">
-            <button
-              type="button"
-              className="mobile-btn-primary w-full"
-              disabled={downloadingReport}
-              onClick={() => void generateServiceReport()}
-            >
-              {downloadingReport ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
-              {downloadingReport ? "Generating…" : "Download Service Report"}
-            </button>
+            {canApproveComplete ? (
+              <button type="button" className="mobile-btn-secondary w-full" onClick={() => void reopenJob()}>
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Reopen Job
+              </button>
+            ) : null}
+            {canDownloadServiceReport ? (
+              <button
+                type="button"
+                className="mobile-btn-primary w-full"
+                disabled={downloadingReport}
+                onClick={() => void generateServiceReport()}
+              >
+                {downloadingReport ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                {downloadingReport ? "Generating…" : "Download Service Report"}
+              </button>
+            ) : null}
             {canAccessBilling ? (
               <button
                 type="button"

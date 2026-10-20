@@ -663,16 +663,40 @@ export class JobsService {
       }
     }
 
+    const reopeningFromDeliveredOrComplete =
+      isJobWorkComplete(existing.status) &&
+      (data.status === "review" || data.status === "inProgress");
+
+    if (reopeningFromDeliveredOrComplete) {
+      const openInvoice = await prisma.invoice.findFirst({
+        where: { tenantId, jobId: id, status: { not: "closed" } },
+        select: { id: true, reference: true },
+      });
+      if (openInvoice) {
+        throw new AppError(
+          `Cannot reopen job ${existing.reference}: invoice ${openInvoice.reference} already exists. Void/close the invoice first.`,
+          409,
+        );
+      }
+      // Clear completion markers so Use Parts / work report unlock and billing re-verifies.
+      data.completedAt = null;
+      data.billingVerifiedAt = null;
+      data.billingVerifiedBy = null;
+      if (data.progress === undefined) {
+        data.progress = data.status === "inProgress" ? 80 : 85;
+      }
+    }
+
     const advancingPastQa =
       (data.status === "completed" && existing.status === "review") ||
       (data.status === "delivery" && existing.status === "completed");
     const returningFromQa =
       (existing.status === "review" && data.status === "inProgress") ||
-      (isJobWorkComplete(existing.status) && data.status === "review");
+      reopeningFromDeliveredOrComplete;
     if (advancingPastQa || returningFromQa) {
       if (!isQaApprover) {
         throw new AppError(
-          "Only administrators, service coordinators, and quality assurance staff can approve QA or confirm delivery",
+          "Only administrators, service coordinators, and quality assurance staff can approve QA, confirm delivery, or reopen a completed job",
           403,
         );
       }
@@ -794,7 +818,17 @@ export class JobsService {
         existing.status,
         String(data.status),
       );
-      if (data.status === "review") {
+      if (reopeningFromDeliveredOrComplete) {
+        const actor = actorId ? await usersRepository.findById(actorId, tenantId) : null;
+        await jobActionsRepository.addActivity(id, {
+          actor: actor?.name ?? actorId ?? "system",
+          action: "Job reopened",
+          note:
+            data.status === "inProgress"
+              ? "Returned to Repair so parts usage or work can be corrected before QA and delivery again."
+              : "Returned to QA for review after reopen.",
+        });
+      } else if (data.status === "review") {
         const actor = actorId ? await usersRepository.findById(actorId, tenantId) : null;
         await jobActionsRepository.addActivity(id, {
           actor: actor?.name ?? actorId ?? "system",
@@ -817,11 +851,15 @@ export class JobsService {
 
   async delete(id: string, tenantId: string) {
     const job = await this.getById(id, tenantId);
-    const [invoices, stockDeductions, extras, workLogs] = await Promise.all([
+    const [invoices, stockDeductions, extras, workLogs, issuedParts] = await Promise.all([
       prisma.invoice.count({ where: { tenantId, jobId: id } }),
       prisma.jobStockDeduction.count({ where: { jobId: id } }),
       prisma.jobExtra.count({ where: { jobId: id } }),
       prisma.jobWorkLog.count({ where: { jobId: id } }),
+      prisma.jobPartsRequestLine.aggregate({
+        where: { request: { jobId: id }, qtyIssued: { gt: 0 } },
+        _sum: { qtyIssued: true },
+      }),
     ]);
 
     const blockers: string[] = [];
@@ -829,6 +867,7 @@ export class JobsService {
     if (stockDeductions > 0) blockers.push("stock deductions");
     if (extras > 0) blockers.push("parts/scope extras");
     if (workLogs > 0) blockers.push("work logs");
+    if ((issuedParts._sum.qtyIssued ?? 0) > 0) blockers.push("issued parts");
     if (job.status === "completed") blockers.push("completed status");
     if (job.status === "review") blockers.push("review status");
     if (job.status === "delivery") blockers.push("delivery status");

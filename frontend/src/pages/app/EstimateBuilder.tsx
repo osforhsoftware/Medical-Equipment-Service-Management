@@ -44,7 +44,7 @@ import {
 import { splitInspectionFindings } from "@/components/inspections/useInspectionReportEditor";
 import { canEditEstimate, estimateLevelDiscount, estimateStatusLabel, newEstimateLine, summarizeLines, workflowStepIndex } from "@/lib/estimates";
 import { useSettings } from "@/context/SettingsContext";
-import { defaultDatePlusDays, formatDate, parseAmount } from "@/lib/format";
+import { defaultDatePlusDays, formatCurrency, formatDate, parseAmount } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 const estimateSchema = z.object({
@@ -142,9 +142,8 @@ export default function EstimateBuilder() {
         api.listServiceCatalog(),
         api.listInventory({ limit: 100, page: 1, status: "active" }),
       ]);
-      const stock = stockResult.data;
+      let stock = stockResult.data;
       setCatalog(services.filter((s) => s.isActive));
-      setInventory(stock);
 
       if (!ticketId && customerIdParam) {
         const [customer, equipmentList] = await Promise.all([
@@ -157,6 +156,7 @@ export default function EstimateBuilder() {
         const matched = equipmentList.find((item) => item.id === equipmentIdParam);
         setEquipmentLabel(matched?.name ?? "Sales quotation");
         setEstimate(null);
+        setInventory(stock);
         return;
       }
 
@@ -204,8 +204,10 @@ export default function EstimateBuilder() {
         });
       };
 
+      let estimateLineIds: Array<string | null | undefined> = [];
       if (existing) {
         const full = await api.getEstimate(existing.id);
+        estimateLineIds = full.lineItems?.map((line) => line.inventoryItemId) ?? [];
         setEstimate(full);
         setValidUntil(full.validUntil?.slice(0, 10) || defaultDatePlusDays(14));
         setDiscount(estimateLevelDiscount(full));
@@ -235,6 +237,18 @@ export default function EstimateBuilder() {
           if (customer?.paymentTerms) setTerms(customer.paymentTerms);
         setLines(requestedItems.map(requestedEstimateLine));
       }
+
+      const neededIds = [
+        ...requestedItems.map((item) => item.inventoryItemId),
+        ...estimateLineIds,
+      ];
+      const have = new Set(stock.map((item) => item.id));
+      const missing = [...new Set(neededIds.filter((id): id is string => Boolean(id) && !have.has(id)))];
+      if (missing.length) {
+        const extras = await Promise.all(missing.map((id) => api.getInventoryItem(id).catch(() => null)));
+        stock = [...stock, ...extras.filter((item): item is BackendInventoryItem => Boolean(item))];
+      }
+      setInventory(stock);
     } catch (err) {
       toast({
         title: "Unable to load estimate builder",
@@ -260,11 +274,11 @@ export default function EstimateBuilder() {
     lines.forEach((line) => {
       if (!line.inventoryItemId) return;
       const item = inventory.find((i) => i.id === line.inventoryItemId);
-      if (!item) return;
-      const cost = Number(item.unitCost) || 0;
+      const cost = Number(item?.unitCost ?? line.costPrice) || 0;
+      if (!item && !line.costPrice) return;
       const price = line.unitPrice;
       if (price < cost) {
-        belowCost.push({ name: line.description || item.name, unitPrice: price, unitCost: cost });
+        belowCost.push({ name: line.description || item?.name || "Item", unitPrice: price, unitCost: cost });
       } else if (price > 0 && cost > 0) {
         const minimum = lineMarginMinimum({
           mode: settings?.marginMode,
@@ -276,7 +290,7 @@ export default function EstimateBuilder() {
         const margin = ((price - cost) / price) * 100;
         if (margin < minimum) {
           lowMargin.push({
-            name: line.description || item.name,
+            name: line.description || item?.name || "Item",
             marginPct: Math.round(margin),
             minimum: Math.round(minimum * 10) / 10,
           });
@@ -497,7 +511,7 @@ export default function EstimateBuilder() {
               <ul className="mt-1 list-disc pl-5 text-xs">
                 {marginAnalysis.belowCost.map((item, idx) => (
                   <li key={idx}>
-                    <strong>{item.name}</strong>: Unit Price ${item.unitPrice.toFixed(2)} vs Unit Cost ${item.unitCost.toFixed(2)}
+                    <strong>{item.name}</strong>: Unit Price {formatCurrency(item.unitPrice)} vs Unit Cost {formatCurrency(item.unitCost)}
                   </li>
                 ))}
               </ul>

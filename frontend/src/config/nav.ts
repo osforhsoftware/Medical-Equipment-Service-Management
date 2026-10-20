@@ -52,9 +52,9 @@ const SERVICE_TICKET_STAGES: NavChild[] = [
   { label: "Pending", to: "/app/service-tickets?status=new&view=table" },
   { label: "Inspection", to: "/app/service-tickets?status=inspection&view=table" },
   { label: "Estimate", to: "/app/service-tickets?status=estimate&view=table" },
-  { label: "Approval", to: "/app/service-tickets?status=pending_approval&view=table" },
-  { label: "In Progress", to: "/app/service-tickets?status=assigned_engineer&view=table" },
-  { label: "Completed", to: "/app/service-tickets?status=closed&view=table" },
+  { label: "Approval", to: "/app/service-tickets?status=approval&view=table" },
+  { label: "In Progress", to: "/app/service-tickets?status=in-progress&view=table" },
+  { label: "Completed", to: "/app/service-tickets?status=completed&view=table" },
 ];
 
 const PROJECT_STAGES: NavChild[] = [

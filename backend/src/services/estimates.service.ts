@@ -162,8 +162,37 @@ export class EstimatesService {
   }
 
   async delete(id: string, tenantId: string, actorId?: string, actorRole?: string) {
-    await this.getById(id, tenantId, actorId, actorRole);
-    return estimatesRepository.delete(id, tenantId);
+    const existing = await this.getById(id, tenantId, actorId, actorRole);
+    if (existing.status === "converted") {
+      throw new AppError("A converted quotation cannot be deleted", 409);
+    }
+    const linkedJobs = await prisma.serviceJob.count({ where: { tenantId, estimateId: id } });
+    if (linkedJobs > 0) {
+      throw new AppError("This estimate is linked to a job and cannot be deleted", 409);
+    }
+    return prisma.$transaction(async (tx) => {
+      const reservations = await tx.stockReservation.findMany({
+        where: { tenantId, estimateId: id, status: { in: ["active", "shortage"] } },
+      });
+      for (const reservation of reservations) {
+        const remaining = reservation.quantity - reservation.consumed - reservation.released;
+        if (remaining > 0) {
+          await tx.inventoryItem.update({
+            where: { id: reservation.inventoryItemId },
+            data: { reserved: { decrement: remaining } },
+          });
+        }
+        await tx.stockReservation.update({
+          where: { id: reservation.id },
+          data: {
+            released: { increment: Math.max(0, remaining) },
+            status: "released",
+            estimateId: null,
+          },
+        });
+      }
+      await tx.estimate.deleteMany({ where: { id, tenantId } });
+    });
   }
 }
 

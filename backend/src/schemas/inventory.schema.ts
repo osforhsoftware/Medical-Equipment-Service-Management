@@ -52,6 +52,19 @@ export const createInventorySchema = inventoryFields.superRefine(rejectInvertedS
 
 export const updateInventorySchema = inventoryFields.partial().superRefine(rejectInvertedStockLevels);
 
+/** Bulk product import (JSON rows after client parses Excel/ZIP). Max 2000 rows. */
+export const bulkImportInventorySchema = z.object({
+  items: z
+    .array(
+      inventoryFields.extend({
+        /** Spreadsheet row number (1-based data row) for error reporting. */
+        row: z.coerce.number().int().min(1).optional(),
+      }),
+    )
+    .min(1, "At least one item is required")
+    .max(2000, "Bulk import is limited to 2000 rows per upload"),
+});
+
 export const approvePartsRequestSchema = z.object({
   lines: z
     .array(

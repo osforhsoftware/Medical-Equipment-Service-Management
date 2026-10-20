@@ -37,7 +37,7 @@ export const JOB_STATUS_ACTIONS = [
   { value: "partsPending", label: "Waiting Parts", next: "inProgress", nextLabel: "Resume Work" },
   { value: "review", label: "QA", next: "completed", nextLabel: "QA Pass" },
   { value: "completed", label: "Complete", next: "delivery", nextLabel: "Confirm Delivery" },
-  { value: "delivery", label: "Delivery" },
+  { value: "delivery", label: "Delivery", next: undefined, nextLabel: undefined },
 ] as const;
 
 export function roleQuickActions(role: Role): MobileQuickAction[] {
@@ -325,14 +325,18 @@ export function filterQuickActionsByAccess(
   rbacMatrix: Record<string, Role[]>,
 ): MobileQuickAction[] {
   return actions.filter((action) => {
-    if (typeof userOrRoles === "object" && userOrRoles !== null && "role" in userOrRoles) {
-      return userCanAccessPath(userOrRoles, action.to, rbacMatrix);
-    }
-    const roles = Array.isArray(userOrRoles) ? userOrRoles : [userOrRoles];
     const module = moduleForPath(action.to);
-    if (!module) return true;
-    const allowed = rbacMatrix[module];
-    return allowed ? roles.some((role) => allowed.includes(role)) : true;
+    if (Array.isArray(userOrRoles)) {
+      if (!module) return true;
+      const allowed = rbacMatrix[module];
+      return allowed ? userOrRoles.some((role) => allowed.includes(role)) : true;
+    }
+    if (typeof userOrRoles === "string") {
+      if (!module) return true;
+      const allowed = rbacMatrix[module];
+      return allowed ? allowed.includes(userOrRoles) : true;
+    }
+    return userCanAccessPath(userOrRoles, action.to, rbacMatrix);
   });
 }
 

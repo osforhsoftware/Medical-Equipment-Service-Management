@@ -855,6 +855,7 @@ export interface EstimateLineInput {
   taxRate: number;
   discount: number;
   discountType?: "amount" | "percent";
+  costPrice?: number;
 }
 
 export interface BackendEstimateRevision {
@@ -1067,6 +1068,7 @@ export interface UpdateJobInput {
       notes?: string | null;
       checkedAt?: string | null;
       checkedBy?: string | null;
+      checklist?: unknown;
     };
     delivery?: {
       method?: string | null;
@@ -1074,6 +1076,7 @@ export interface UpdateJobInput {
       receivedBy?: string | null;
       deliveredAt?: string | null;
       confirmedBy?: string | null;
+      courier?: unknown;
     };
   } | null;
 }
@@ -1167,6 +1170,25 @@ export interface CreateInventoryInput {
   imageFileIds?: string[];
   additionalFields?: { label: string; value: string }[] | null;
 }
+
+export type InventoryBulkImportItemInput = CreateInventoryInput & { row?: number };
+
+export type InventoryBulkImportRowResult = {
+  row: number;
+  sku: string;
+  name: string;
+  status: "created" | "skipped" | "error";
+  message?: string;
+  id?: string;
+};
+
+export type InventoryBulkImportResult = {
+  created: number;
+  skipped: number;
+  failed: number;
+  total: number;
+  results: InventoryBulkImportRowResult[];
+};
 
 export interface BackendStockPurchaseRequest {
   id: string;
@@ -1966,7 +1988,7 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  updateEquipment: (id: string, data: CreateEquipmentInput) =>
+  updateEquipment: (id: string, data: Partial<CreateEquipmentInput>) =>
     request<BackendEquipment>(`/api/equipment/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
@@ -2270,6 +2292,18 @@ export const api = {
   getInventoryItem: (id: string) =>
     request<BackendInventoryItem>(`/api/inventory/${id}`),
 
+  getInventoryStats: () =>
+    request<{
+      itemCount: number;
+      lowStock: number;
+      reserved: number;
+      issued: number;
+      damaged: number;
+      totalValue: number;
+      sparePartsValue: number;
+      consumablesValue: number;
+    }>("/api/inventory/stats"),
+
   updateInventoryItem: (id: string, data: Partial<CreateInventoryInput>) =>
     request<BackendInventoryItem>(`/api/inventory/${id}`, {
       method: "PUT",
@@ -2278,6 +2312,12 @@ export const api = {
 
   createInventoryItem: (data: CreateInventoryInput) =>
     request<BackendInventoryItem>("/api/inventory", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  bulkImportInventoryItems: (data: { items: InventoryBulkImportItemInput[] }) =>
+    request<InventoryBulkImportResult>("/api/inventory/bulk", {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -2795,7 +2835,7 @@ export const api = {
     data: {
       inventoryItemId?: string | null;
       description: string;
-      type?: "product" | "equipment" | "machine" | "other";
+      type?: "product" | "equipment" | "machine" | "other" | "custom";
       reason: string;
       quantity: number;
       unitPrice: number;

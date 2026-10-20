@@ -156,7 +156,7 @@ function roleQuickActions(role: Role): QuickAction[] {
       ];
     case "coordinator":
       return [
-        { label: "New Request", to: "/app/service-requests", icon: ClipboardList },
+        { label: "New Request", to: "/app/service-tickets", icon: ClipboardList },
         { label: "Schedule Job", to: "/app/jobs", icon: CalendarClock },
         { label: "Inspections", to: "/app/inspections", icon: Search },
         { label: "Estimates", to: "/app/estimates", icon: FileText },
@@ -968,7 +968,7 @@ export default function Dashboard() {
                 <div
                   key={j.id}
                   className="flex cursor-pointer items-center gap-4 rounded-lg border border-border p-3 hover:bg-muted/30"
-                  onClick={() => navigate("/app/jobs")}
+                  onClick={() => navigate(`/app/jobs/${j.id}`)}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">

@@ -50,7 +50,15 @@ export class StockTransfersService {
   }
 
   async delete(id: string, tenantId: string) {
-    await this.getById(id, tenantId);
+    const existing = await this.getById(id, tenantId);
+    if (existing.status === "inTransit" || existing.status === "received") {
+      throw new AppError(
+        existing.status === "inTransit"
+          ? "Cannot delete an in-transit transfer. Receive it or keep the record for stock history."
+          : "Cannot delete a received transfer. Stock has already moved.",
+        409,
+      );
+    }
     return stockTransfersRepository.delete(id, tenantId);
   }
 }

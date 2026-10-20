@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, LogOut, PanelLeft, PanelLeftClose, Search, Settings, User } from "lucide-react";
+import { Bell, LogOut, PanelLeft, PanelLeftClose, RefreshCw, Search, Settings, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -100,6 +100,17 @@ export function Topbar({
       </div>
 
       <div className="ml-auto flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9 text-muted-foreground"
+          onClick={() => window.location.reload()}
+          aria-label="Refresh page"
+          title="Refresh page"
+        >
+          <RefreshCw className="h-[18px] w-[18px]" strokeWidth={1.75} />
+        </Button>
+
         <ThemeToggle />
 
         <Button

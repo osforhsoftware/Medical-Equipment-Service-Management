@@ -30,6 +30,13 @@ export class InventoryController {
     } catch (err) { next(err); }
   }
 
+  async getStats(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await inventoryService.getStats(req.tenantId!);
+      res.json(success("Inventory stats fetched successfully", data));
+    } catch (err) { next(err); }
+  }
+
   async getById(req: Request, res: Response, next: NextFunction) {
     try {
       const data = await inventoryService.getById(req.params.id, req.tenantId!);
@@ -44,9 +51,16 @@ export class InventoryController {
     } catch (err) { next(err); }
   }
 
+  async bulkImport(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await inventoryService.bulkImport(req.tenantId!, req.body.items ?? []);
+      res.status(201).json(success("Inventory bulk import completed", data));
+    } catch (err) { next(err); }
+  }
+
   async update(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await inventoryService.update(req.params.id, req.tenantId!, req.body);
+      const data = await inventoryService.update(req.params.id, req.tenantId!, req.body, req.user!.userId);
       res.json(success("Inventory item updated successfully", data));
     } catch (err) { next(err); }
   }

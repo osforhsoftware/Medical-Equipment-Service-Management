@@ -98,7 +98,7 @@ export function ReportCategoryDetailDialog({
     downloadSpreadsheet(
       `sales-report-${slug}`,
       [
-        { header: "Rank", value: (_row, idx) => Number(idx !== undefined ? idx + 1 : 1) },
+        { header: "Rank", value: (row) => filteredAndSortedRows.findIndex((entry) => entry === row) + 1 },
         { header: "Name / Description", value: (row) => row.name },
         { header: "Quantity Sold", value: (row) => row.quantity },
         { header: "Total Amount (₹)", value: (row) => row.amount },

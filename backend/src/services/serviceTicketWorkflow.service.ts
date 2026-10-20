@@ -11,6 +11,7 @@ import {
   type EstimateRejectTarget,
 } from "@/services/workflow/serviceTicketStateMachine";
 import { ESTIMATE_STAFF_APPROVER_ROLES } from "@/config/apiAccess";
+import { syncCustomerActiveJobs } from "@/services/serviceRequests.service";
 import { userHasAnyRoleKey } from "@/utils/userRoles";
 
 const ADMIN_ROLES = ["admin", "coordinator"] as const;
@@ -236,34 +237,37 @@ export class ServiceTicketWorkflowService {
       status: resolveTicketEventStatus("pending_final_approval", "finalApproved") as never,
     });
 
+    const dueAt = input?.dueAt ? new Date(input.dueAt) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    try {
+      await domainService.createInvoiceFromJob(tenantId, { userId: actorId, role: actorRole }, {
+        jobId: job.id,
+        currency: input?.currency ?? "INR",
+        dueAt,
+      });
+    } catch (err) {
+      const invoice = await prisma.invoice.findFirst({ where: { tenantId, serviceRequestId: id } });
+      if (invoice) {
+        await serviceRequestsRepository.addTimelineEvent(
+          id,
+          actor?.name ?? actorId,
+          "Final approval granted",
+          input?.note ?? "Proceeding to invoice generation",
+        );
+        await notificationsService.notifyWorkflowAdvanced(tenantId, sr.reference, "invoiced", actor?.name ?? actorId);
+        return serviceRequestsRepository.findById(id, tenantId);
+      }
+      await serviceRequestsRepository.update(id, tenantId, {
+        status: "pending_final_approval" as never,
+      });
+      throw err;
+    }
+
     await serviceRequestsRepository.addTimelineEvent(
       id,
       actor?.name ?? actorId,
       "Final approval granted",
       input?.note ?? "Proceeding to invoice generation",
     );
-
-    const dueAt = input?.dueAt ? new Date(input.dueAt) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    try {
-      await domainService.createInvoiceFromJob(tenantId, { userId: actorId, role: actorRole }, {
-        jobId: job.id,
-        currency: input?.currency ?? "USD",
-        dueAt,
-      });
-    } catch (err) {
-      if (err instanceof AppError && err.statusCode === 409) {
-        const invoice = await prisma.invoice.findFirst({ where: { tenantId, serviceRequestId: id } });
-        if (invoice) {
-          await serviceRequestsRepository.update(id, tenantId, {
-            status: resolveTicketEventStatus("pending_invoice", "invoiceGenerated") as never,
-          });
-        } else {
-          throw err;
-        }
-      } else {
-        throw err;
-      }
-    }
 
     await notificationsService.notifyWorkflowAdvanced(tenantId, sr.reference, "invoiced", actor?.name ?? actorId);
     return serviceRequestsRepository.findById(id, tenantId);
@@ -323,6 +327,7 @@ export class ServiceTicketWorkflowService {
     const actor = await usersRepository.findById(actorId, tenantId);
     const nextStatus = resolveTicketEventStatus(sr.status, "ticketCancelled");
     await serviceRequestsRepository.update(id, tenantId, { status: nextStatus as never });
+    await syncCustomerActiveJobs(sr.customerId, sr.status, nextStatus);
     await serviceRequestsRepository.addTimelineEvent(
       id,
       actor?.name ?? actorId,
@@ -362,9 +367,11 @@ export class ServiceTicketWorkflowService {
     }
 
     const actor = await usersRepository.findById(actorId, tenantId);
+    const nextStatus = resolveTicketEventStatus("invoiced", "ticketClosed");
     await serviceRequestsRepository.update(id, tenantId, {
-      status: resolveTicketEventStatus("invoiced", "ticketClosed") as never,
+      status: nextStatus as never,
     });
+    await syncCustomerActiveJobs(sr.customerId, sr.status, nextStatus);
     await serviceRequestsRepository.addTimelineEvent(
       id,
       actor?.name ?? actorId,

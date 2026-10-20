@@ -116,7 +116,7 @@ function parseMonthParam(value: string | null): Date {
 }
 
 /** Create-time assignment is intake only — Inspection Technician → Inspection flow. */
-const CREATE_ASSIGN_ROLE: Role = "inspector";
+const CREATE_ASSIGN_ROLE = "inspector" as const;
 
 const schema = z.object({
   customerId: z.string().min(1, "Select a customer"),

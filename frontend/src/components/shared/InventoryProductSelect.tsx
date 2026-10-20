@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { api, type BackendInventoryItem } from "@/lib/api";
 import {
   Command,
   CommandEmpty,
@@ -10,7 +11,6 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import type { BackendInventoryItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ProductThumb, productImageFileId } from "@/components/shared/ProductThumb";
 
@@ -55,16 +55,47 @@ export function InventoryProductSelect({
 }: InventoryProductSelectProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [remoteItems, setRemoteItems] = useState<BackendInventoryItem[]>([]);
+
+  useEffect(() => {
+    const q = search.trim();
+    if (!open || q.length < 2) {
+      setRemoteItems([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void api
+        .listInventory({ search: q, limit: 50, page: 1, status: "active" })
+        .then((result) => {
+          if (!cancelled) setRemoteItems(result.data);
+        })
+        .catch(() => {
+          if (!cancelled) setRemoteItems([]);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, search]);
+
+  const mergedItems = useMemo(() => {
+    const byId = new Map<string, BackendInventoryItem>();
+    for (const item of items) byId.set(item.id, item);
+    for (const item of remoteItems) byId.set(item.id, item);
+    return [...byId.values()];
+  }, [items, remoteItems]);
 
   const selected = useMemo(
-    () => items.find((item) => item.id === value) ?? null,
-    [items, value],
+    () => mergedItems.find((item) => item.id === value) ?? null,
+    [mergedItems, value],
   );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((item) => {
+    if (!q) return mergedItems;
+    return mergedItems.filter((item) => {
       const haystack = [
         item.name,
         item.sku,
@@ -78,7 +109,7 @@ export function InventoryProductSelect({
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [items, search]);
+  }, [mergedItems, search]);
 
   return (
     <Popover

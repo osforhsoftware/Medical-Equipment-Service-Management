@@ -71,6 +71,7 @@ test("events cannot skip legal ticket transitions", () => {
 test("job can return from complete or delivery to review after final-approval reject", () => {
   assert.doesNotThrow(() => assertJobTransition("completed", "review"));
   assert.doesNotThrow(() => assertJobTransition("delivery", "review"));
+  assert.doesNotThrow(() => assertJobTransition("delivery", "inProgress"));
 });
 
 test("revision request returns ticket to estimate stage", () => {

@@ -9,7 +9,8 @@ export type RefModel =
   | "purchaseOrder"
   | "stockTransfer"
   | "salesOrder"
-  | "customer";
+  | "customer"
+  | "invoice";
 
 type DbClient = Prisma.TransactionClient | typeof prisma;
 
@@ -50,6 +51,8 @@ async function findLastReference(
       return db.salesOrder.findFirst({ where, orderBy, select });
     case "customer":
       return db.customer.findFirst({ where, orderBy, select });
+    case "invoice":
+      return db.invoice.findFirst({ where, orderBy, select });
   }
 }
 
@@ -77,6 +80,8 @@ async function referenceExists(
       return db.salesOrder.findFirst({ where, select });
     case "customer":
       return db.customer.findFirst({ where, select });
+    case "invoice":
+      return db.invoice.findFirst({ where, select });
   }
 }
 

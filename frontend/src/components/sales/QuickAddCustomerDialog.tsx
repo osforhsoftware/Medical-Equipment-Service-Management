@@ -147,21 +147,24 @@ export function QuickAddCustomerDialog({
             <Input
               value={form.name}
               onChange={(e) => {
-                handleChange("name");
+                const next = { ...form, name: e.target.value };
                 set({ name: e.target.value });
+                handleChange("name", next);
               }}
               onBlur={() => handleBlur("name", form)}
               placeholder="Hospital or clinic"
             />
-            <FormFieldError message={shouldShow("name") ? errors.name : undefined} />
+            <FormFieldError field="name" message={shouldShow("name") ? errors.name : undefined} />
           </div>
           <div>
             <Label>Type</Label>
             <Select
               value={form.type || "__none__"}
               onValueChange={(value) => {
-                handleChange("type");
-                set({ type: value === "__none__" ? "" : value });
+                const type = value === "__none__" ? "" : value;
+                const next = { ...form, type };
+                set({ type });
+                handleChange("type", next);
               }}
             >
               <SelectTrigger>
@@ -176,33 +179,35 @@ export function QuickAddCustomerDialog({
                 ))}
               </SelectContent>
             </Select>
-            <FormFieldError message={shouldShow("type") ? errors.type : undefined} />
+            <FormFieldError field="type" message={shouldShow("type") ? errors.type : undefined} />
           </div>
           <div>
             <Label>Phone</Label>
             <Input
               value={form.phone}
               onChange={(e) => {
-                handleChange("phone");
+                const next = { ...form, phone: e.target.value };
                 set({ phone: e.target.value });
+                handleChange("phone", next);
               }}
               onBlur={() => handleBlur("phone", form)}
               placeholder="+91 …"
             />
-            <FormFieldError message={shouldShow("phone") ? errors.phone : undefined} />
+            <FormFieldError field="phone" message={shouldShow("phone") ? errors.phone : undefined} />
           </div>
           <div>
             <Label>Address</Label>
             <Input
               value={form.address}
               onChange={(e) => {
-                handleChange("address");
+                const next = { ...form, address: e.target.value };
                 set({ address: e.target.value });
+                handleChange("address", next);
               }}
               onBlur={() => handleBlur("address", form)}
               placeholder="Site / street"
             />
-            <FormFieldError message={shouldShow("address") ? errors.address : undefined} />
+            <FormFieldError field="address" message={shouldShow("address") ? errors.address : undefined} />
           </div>
           <div>
             <Label>Contact person</Label>

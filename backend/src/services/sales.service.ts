@@ -23,6 +23,49 @@ function startOfMonth(date = new Date()) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
+async function releaseEstimateReservations(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  estimateId: string,
+  actorId: string,
+  reason: string,
+) {
+  const active = await tx.stockReservation.findMany({
+    where: { tenantId, estimateId, status: { in: ["active", "shortage"] } },
+  });
+  for (const reservation of active) {
+    const remaining = reservation.quantity - reservation.consumed - reservation.released;
+    if (remaining > 0) {
+      await tx.inventoryItem.update({
+        where: { id: reservation.inventoryItemId },
+        data: { reserved: { decrement: remaining } },
+      });
+      const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id: reservation.inventoryItemId } });
+      await tx.stockMovement.create({
+        data: {
+          tenantId,
+          inventoryItemId: reservation.inventoryItemId,
+          reservationId: reservation.id,
+          type: "release",
+          quantity: remaining,
+          balanceAfter: item.inStock,
+          referenceType: "estimate",
+          referenceId: estimateId,
+          reason,
+          actorId,
+        },
+      });
+    }
+    await tx.stockReservation.update({
+      where: { id: reservation.id },
+      data: {
+        released: { increment: Math.max(0, remaining) },
+        status: "released",
+      },
+    });
+  }
+}
+
 function paymentLabel(balanceDue: number, total: number) {
   if (balanceDue <= 0) return "paid";
   if (balanceDue < total) return "partial";
@@ -491,6 +534,7 @@ export class SalesService {
       if (estimate.status === "converted" || estimate.status === "rejected") {
         throw new AppError("This quotation can no longer be edited", 409);
       }
+      await releaseEstimateReservations(tx, tenantId, estimateId, actor.userId, "Quotation revised");
 
       const customer = estimate.customerId
         ? await tx.customer.findFirst({ where: { id: estimate.customerId, tenantId } })
@@ -599,18 +643,19 @@ export class SalesService {
     const notes = note
       ? [estimate.notes?.trim(), `Customer rejected: ${note}`].filter(Boolean).join("\n")
       : estimate.notes;
-    const [updated] = await prisma.$transaction([
-      prisma.estimate.update({
+    return prisma.$transaction(async (tx) => {
+      await releaseEstimateReservations(tx, tenantId, estimate.id, actor.userId, "Quotation rejected");
+      const updated = await tx.estimate.update({
         where: { id: estimate.id },
         data: { status: "rejected", notes },
         include: { lineItems: true },
-      }),
-      prisma.salesEnquiry.updateMany({
+      });
+      await tx.salesEnquiry.updateMany({
         where: { tenantId, convertedEstimateId: estimate.id },
         data: { status: "lost" },
-      }),
-    ]);
-    return updated;
+      });
+      return updated;
+    });
   }
 
   async convertQuote(
@@ -634,6 +679,9 @@ export class SalesService {
       }
       if (estimate.status === "converted") {
         throw new AppError("This quotation is already a sales order", 409);
+      }
+      if (estimate.status !== "approved") {
+        throw new AppError("Only approved quotations can be converted to a sales order", 409);
       }
       if (!estimate.customerId) throw new AppError("Quotation is missing a customer", 422);
 
@@ -740,6 +788,7 @@ export class SalesService {
       if (order.deliveryStatus === "delivered") throw new AppError("Order is already delivered", 409);
 
       const reservations = order.reservations.filter((r) => r.status === "active" || r.status === "shortage");
+      const deductedByItem = new Map<string, number>();
       for (const reservation of reservations) {
         const remaining = reservation.quantity - reservation.consumed - reservation.released;
         if (remaining <= 0) continue;
@@ -775,27 +824,32 @@ export class SalesService {
             actorId,
           },
         });
+        deductedByItem.set(item.id, (deductedByItem.get(item.id) ?? 0) + remaining);
       }
 
-      const unreservedParts = order.lines.filter(
-        (line) => line.inventoryItemId && !reservations.some((r) => r.inventoryItemId === line.inventoryItemId),
-      );
-      for (const line of unreservedParts) {
+      const reservationCredit = new Map(deductedByItem);
+      for (const line of order.lines) {
+        if (!line.inventoryItemId) continue;
         const qty = Math.ceil(Number(line.quantity));
-        const item = await tx.inventoryItem.findFirst({ where: { id: line.inventoryItemId!, tenantId } });
-        if (!item) continue;
+        const credit = reservationCredit.get(line.inventoryItemId) ?? 0;
+        const applied = Math.min(qty, credit);
+        reservationCredit.set(line.inventoryItemId, credit - applied);
+        const leftover = qty - applied;
+        if (leftover <= 0) continue;
+        const item = await tx.inventoryItem.findFirst({ where: { id: line.inventoryItemId, tenantId } });
+        if (!item) throw new AppError("Inventory item not found", 404);
         const available = Math.max(0, item.inStock - item.reserved);
-        if (qty > available) {
-          throw new AppError(`Not enough stock for ${item.name}. Available ${available}, need ${qty}.`, 409);
+        if (leftover > available) {
+          throw new AppError(`Not enough stock for ${item.name}. Available ${available}, need ${leftover}.`, 409);
         }
-        const nextStock = item.inStock - qty;
+        const nextStock = item.inStock - leftover;
         await tx.inventoryItem.update({ where: { id: item.id }, data: { inStock: nextStock } });
         await tx.stockMovement.create({
           data: {
             tenantId,
             inventoryItemId: item.id,
             type: "issue",
-            quantity: -qty,
+            quantity: -leftover,
             balanceAfter: nextStock,
             referenceType: "sales_order",
             referenceId: order.id,
@@ -845,7 +899,7 @@ export class SalesService {
           customerId: order.customerId,
           estimateId: order.estimateId,
           salesOrderId: order.id,
-          reference: `INV-${Date.now().toString(36).toUpperCase()}`,
+          reference: await generateReference(tenantId, "INV", "invoice", tx),
           customerName: order.customerName,
           jobRef: order.reference,
           amount: order.subtotal.minus(order.discount),

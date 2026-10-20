@@ -55,6 +55,28 @@ type UpdateServiceRequestData = {
 
 type ServiceRequestRecord = Awaited<ReturnType<typeof serviceRequestsRepository.findById>>;
 
+const TERMINAL_ACTIVE_JOB_STATUSES = new Set(["closed", "cancelled", "finished"]);
+
+export async function syncCustomerActiveJobs(
+  customerId: string,
+  fromStatus: string,
+  toStatus: string,
+) {
+  const wasActive = !TERMINAL_ACTIVE_JOB_STATUSES.has(normalizeTicketStatus(fromStatus));
+  const nowInactive = TERMINAL_ACTIVE_JOB_STATUSES.has(normalizeTicketStatus(toStatus));
+  if (wasActive && nowInactive) {
+    await prisma.customer.updateMany({
+      where: { id: customerId, activeJobs: { gt: 0 } },
+      data: { activeJobs: { decrement: 1 } },
+    });
+  } else if (!wasActive && !nowInactive) {
+    await prisma.customer.update({
+      where: { id: customerId },
+      data: { activeJobs: { increment: 1 } },
+    });
+  }
+}
+
 export class ServiceRequestsService {
   /**
    * Statuses where field work is done (or ticket is closed). Equipment may accept a new ticket.
@@ -633,6 +655,7 @@ export class ServiceRequestsService {
         status: normalizeTicketStatus(targetStatus) as never,
       }),
     );
+    await syncCustomerActiveJobs(existing.customerId, existing.status, targetStatus);
 
     const label = targetStatus.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase());
     await serviceRequestsRepository.addTimelineEvent(id, actorName, `Moved to ${label}`, note);
@@ -664,6 +687,7 @@ export class ServiceRequestsService {
         status: normalizeTicketStatus(targetStatus) as never,
       }),
     );
+    await syncCustomerActiveJobs(existing.customerId, existing.status, targetStatus);
 
     await serviceRequestsRepository.addTimelineEvent(
       id,

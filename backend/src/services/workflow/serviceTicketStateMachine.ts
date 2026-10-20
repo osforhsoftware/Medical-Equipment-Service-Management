@@ -51,7 +51,7 @@ export const TICKET_TRANSITIONS: Record<TicketStatus, readonly TicketStatus[]> =
   assigned_engineer: ["change_pending_approval", "pending_final_approval", "cancelled"],
   change_pending_approval: ["assigned_engineer", "cancelled"],
   pending_final_approval: ["pending_invoice", "cancelled"],
-  pending_invoice: ["invoiced"],
+  pending_invoice: ["invoiced", "cancelled"],
   invoiced: ["closed"],
   closed: [],
   cancelled: [],
@@ -132,8 +132,8 @@ export const JOB_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   review: ["inProgress", "completed"],
   /** Confirm delivery after complete; final-approval reject returns to QA. */
   completed: ["delivery", "review"],
-  /** Delivery is terminal; reject/reopen returns to QA. */
-  delivery: ["review"],
+  /** Delivery is terminal; reject returns to QA, reopen can return to Repair for corrections (e.g. parts). */
+  delivery: ["review", "inProgress"],
 };
 
 export function isJobDelivered(status: string) {

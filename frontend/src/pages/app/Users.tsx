@@ -25,6 +25,7 @@ const filterRoles: (Role | "all")[] = [
   "engineer",
   "inventory",
   "billing",
+  "qa",
 ];
 
 function userMatchesRoleFilter(user: BackendUser, roleFilter: Role): boolean {

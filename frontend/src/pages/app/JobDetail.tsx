@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { Camera, ClipboardList, Download, Loader2, PackageMinus, Pencil, PlusCircle, Trash2, Undo2, UserPlus, Wrench } from "lucide-react";
+import { Camera, ClipboardList, Download, Loader2, PackageMinus, Pencil, PlusCircle, RotateCcw, Trash2, Undo2, UserPlus, Wrench } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
@@ -609,6 +609,25 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
     }
   };
 
+  const reopenJob = async () => {
+    if (!job) return;
+    try {
+      const updated = await api.updateJob(job.id, {
+        status: "inProgress",
+        progress: Math.min(job.progress, 80),
+      });
+      setJob(updated);
+      toast({
+        title: "Job reopened",
+        description: "Returned to Repair. Record parts usage, then submit for QA and delivery again.",
+      });
+      setSearchParams({ tab: "parts" });
+      await refreshActivities(job.id);
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to reopen job" });
+    }
+  };
+
   const confirmDelivery = async () => {
     if (!job) return;
     try {
@@ -1008,6 +1027,12 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
               {job.originalJobId ? (
                 <Button variant="outline" asChild>
                   <Link to={`/app/jobs/${job.originalJobId}`}>Open original job</Link>
+                </Button>
+              ) : null}
+              {jobDelivered && canApproveComplete ? (
+                <Button variant="outline" onClick={() => void reopenJob()}>
+                  <RotateCcw className="mr-1.5 h-4 w-4" />
+                  Reopen Job
                 </Button>
               ) : null}
               {jobDelivered && canCreateRework ? (
@@ -1784,6 +1809,12 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                         ? "Delivery is complete. Download the service report, or continue to Billing to generate the invoice and record service warranty on the equipment."
                         : "Delivery is complete. Download the service report if needed. Billing is handled by billing staff."}
                     </p>
+                    {canApproveComplete ? (
+                      <Button variant="outline" className="w-full" onClick={() => void reopenJob()}>
+                        <RotateCcw className="mr-1.5 h-4 w-4" />
+                        Reopen Job
+                      </Button>
+                    ) : null}
                     {canDownloadServiceReport ? (
                       <Button
                         variant="outline"

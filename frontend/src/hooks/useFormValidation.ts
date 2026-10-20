@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { ZodSchema } from "zod";
+import type { ZodTypeAny } from "zod";
 import {
   clearFieldError,
   focusFirstInvalidField,
@@ -11,7 +11,7 @@ import {
 
 type UseFormValidationOptions<T> = {
   fieldOrder: string[];
-  schema?: ZodSchema<T>;
+  schema?: ZodTypeAny;
   validate?: (values: T) => FieldErrors;
 };
 

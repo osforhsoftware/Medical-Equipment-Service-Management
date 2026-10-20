@@ -960,11 +960,14 @@ export class DomainService {
         include: { lineItems: { include: { sourceInventoryItem: true } } },
       });
       if (!transfer) throw new AppError("Pending stock transfer not found", 404);
+      const reservedByItem = new Map<string, number>();
       for (const line of transfer.lineItems) {
-        const available = line.sourceInventoryItem.inStock - line.sourceInventoryItem.reserved;
+        const alreadyQueued = reservedByItem.get(line.sourceInventoryItemId) ?? 0;
+        const available = line.sourceInventoryItem.inStock - line.sourceInventoryItem.reserved - alreadyQueued;
         if (available < line.quantity) {
           throw new AppError(`Insufficient available stock for ${line.description}. Available: ${Math.max(0, available)}`, 409);
         }
+        reservedByItem.set(line.sourceInventoryItemId, alreadyQueued + line.quantity);
         const item = await tx.inventoryItem.update({
           where: { id: line.sourceInventoryItemId },
           data: { inStock: { decrement: line.quantity } },
@@ -1571,10 +1574,15 @@ export class DomainService {
           ],
         },
       });
+      const customerId = job.serviceRequest?.customerId;
+      const customer = customerId
+        ? await tx.customer.findFirst({ where: { id: customerId, tenantId }, select: { name: true } })
+        : null;
+      const amcNames = [...new Set([job.customerName, customer?.name].filter(Boolean))] as string[];
       const amcCovered = await tx.amcContract.findFirst({
         where: {
           tenantId,
-          customerName: job.customerName,
+          customerName: { in: amcNames },
           status: { in: ["active", "expiring"] },
           startDate: { lte: now },
           endDate: { gte: now },

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { Plus, PackageCheck, Loader2, AlertTriangle, Boxes, Lock, Eye, Package, X, ChevronLeft, ChevronRight, ExternalLink, MapPin, PackageMinus, RefreshCw, IndianRupee, Pencil, Trash2, RotateCcw } from "lucide-react";
+import { Plus, PackageCheck, Loader2, AlertTriangle, Boxes, Lock, Eye, Package, X, ChevronLeft, ChevronRight, ExternalLink, MapPin, PackageMinus, RefreshCw, IndianRupee, Pencil, Trash2, RotateCcw, FileUp } from "lucide-react";
+import { InventoryBulkImportDialog } from "@/components/inventory/InventoryBulkImportDialog";
 import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
@@ -293,9 +294,44 @@ function InlineAddTerm({
   );
 }
 
+function ImageFilePreviews({
+  files,
+  onRemove,
+}: {
+  files: File[];
+  onRemove: (index: number) => void;
+}) {
+  const previews = useMemo(
+    () => files.map((file) => ({ name: file.name, url: URL.createObjectURL(file) })),
+    [files],
+  );
+  useEffect(() => {
+    return () => {
+      previews.forEach((preview) => URL.revokeObjectURL(preview.url));
+    };
+  }, [previews]);
+
+  return (
+    <div className="flex flex-wrap gap-2 pt-1">
+      {previews.map((preview, idx) => (
+        <div key={`${preview.name}-${idx}`} className="group relative h-14 w-14 overflow-hidden rounded-lg border border-border bg-muted">
+          <img src={preview.url} alt={preview.name} className="h-full w-full object-cover" />
+          <button
+            type="button"
+            className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity group-hover:opacity-100"
+            onClick={() => onRemove(idx)}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Inventory() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const stage = inventoryStageFromLocation("/app/inventory", searchParams.get("stage"));
   const { user, hasRole } = useAuth();
@@ -338,7 +374,7 @@ export default function Inventory() {
 
   const statsQuery = useQuery({
     queryKey: ["inventory", "stats"],
-    queryFn: () => api.listInventory({ limit: 100, page: 1, status: "active" }),
+    queryFn: () => api.getInventoryStats(),
     staleTime: 60_000,
   });
 
@@ -358,11 +394,12 @@ export default function Inventory() {
 
   const items = itemsQuery.data?.data ?? [];
   const pagination = itemsQuery.data?.meta ?? EMPTY_PAGINATION_META;
-  const statsItems = statsQuery.data?.data ?? items;
+  const stats = statsQuery.data;
   const categories = activeTerms(categoriesQuery.data);
   const suppliers = suppliersQuery.data ?? [];
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<BackendInventoryItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [addingTerm, setAddingTerm] = useState<"category" | "supplier" | null>(null);
@@ -419,15 +456,16 @@ export default function Inventory() {
 
   const loadItems = () => {
     void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    void queryClient.invalidateQueries({ queryKey: ["inventory", "stats"] });
   };
 
-  const lowStock = statsItems.filter((i) => i.inStock <= i.reorderLevel).length;
-  const reserved = statsItems.reduce((s, i) => s + i.reserved, 0);
-  const issued = statsItems.reduce((s, i) => s + (i.issued ?? 0), 0);
-  const damaged = statsItems.reduce((s, i) => s + (i.damaged ?? 0), 0);
-  const totalValue = statsItems.reduce((s, i) => s + i.inStock * Number(i.unitCost), 0);
-  const sparePartsValue = statsItems.filter((i) => i.itemClass === "spare_part").reduce((s, i) => s + i.inStock * Number(i.unitCost), 0);
-  const consumablesValue = statsItems.filter((i) => i.itemClass === "consumable").reduce((s, i) => s + i.inStock * Number(i.unitCost), 0);
+  const lowStock = stats?.lowStock ?? 0;
+  const reserved = stats?.reserved ?? 0;
+  const issued = stats?.issued ?? 0;
+  const damaged = stats?.damaged ?? 0;
+  const totalValue = stats?.totalValue ?? 0;
+  const sparePartsValue = stats?.sparePartsValue ?? 0;
+  const consumablesValue = stats?.consumablesValue ?? 0;
 
   const selectedCategory = categories.find((term) => term.slug === form.category);
 
@@ -678,6 +716,8 @@ export default function Inventory() {
         return (
           <div className="flex items-center py-0.5">
             <div
+              role={hasImage ? "button" : undefined}
+              tabIndex={hasImage ? 0 : undefined}
               className={cn(
                 "group relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-muted/50 via-muted/30 to-background shadow-2xs transition-all duration-200 hover:border-primary/60 hover:shadow-xs",
                 hasImage ? "cursor-pointer" : ""
@@ -685,6 +725,18 @@ export default function Inventory() {
               title={hasImage ? "Click to view image preview" : "No product image"}
               onClick={(e) => {
                 if (hasImage) {
+                  e.stopPropagation();
+                  setPreviewState({
+                    title: i.name,
+                    images: i.images!.map((img) => api.fileDownloadUrl(img.fileId)),
+                    index: 0,
+                  });
+                }
+              }}
+              onKeyDown={(e) => {
+                if (!hasImage) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
                   e.stopPropagation();
                   setPreviewState({
                     title: i.name,
@@ -889,9 +941,14 @@ export default function Inventory() {
           }
           actions={
             canManage && (stage === "parts" || stage === "overview") ? (
-              <Button onClick={openCreate} variant="brand">
-                <Plus className="mr-1 h-4 w-4" /> Add Item
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button onClick={() => setBulkImportOpen(true)} variant="outline">
+                  <FileUp className="mr-1 h-4 w-4" /> Bulk Import
+                </Button>
+                <Button onClick={openCreate} variant="brand">
+                  <Plus className="mr-1 h-4 w-4" /> Add Item
+                </Button>
+              </div>
             ) : undefined
           }
         />
@@ -918,6 +975,14 @@ export default function Inventory() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {canManage ? (
                 <ModuleQuickAction title="Add item" hint="Create a catalog SKU" icon={Plus} onClick={openCreate} />
+              ) : null}
+              {canManage ? (
+                <ModuleQuickAction
+                  title="Bulk import"
+                  hint="Excel / ZIP with images"
+                  icon={FileUp}
+                  onClick={() => setBulkImportOpen(true)}
+                />
               ) : null}
               {user && userCanOpenPage(user, "/app/stock-reservations", rbacMatrix) ? (
                 <ModuleQuickAction title="Reserve" hint="Hold stock for an order" icon={Lock} to="/app/stock-reservations" />
@@ -973,7 +1038,7 @@ export default function Inventory() {
                   </Button>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {(statsItems.slice(0, 5)).map((item) => (
+                  {(items.slice(0, 5)).map((item) => (
                     <button
                       key={item.id}
                       type="button"
@@ -990,7 +1055,7 @@ export default function Inventory() {
                       <span className="shrink-0 font-mono text-xs">{item.inStock} on hand</span>
                     </button>
                   ))}
-                  {statsItems.length === 0 ? (
+                  {items.length === 0 ? (
                     <p className="py-6 text-center text-sm text-muted-foreground">No inventory items yet.</p>
                   ) : null}
                 </CardContent>
@@ -1100,23 +1165,10 @@ export default function Inventory() {
                   </div>
                 ) : null}
                 {imageFiles.length > 0 ? (
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {imageFiles.map((file, idx) => {
-                      const url = URL.createObjectURL(file);
-                      return (
-                        <div key={idx} className="group relative h-14 w-14 overflow-hidden rounded-lg border border-border bg-muted">
-                          <img src={url} alt={file.name} className="h-full w-full object-cover" />
-                          <button
-                            type="button"
-                            className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity group-hover:opacity-100"
-                            onClick={() => setImageFiles((prev) => prev.filter((_, i) => i !== idx))}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <ImageFilePreviews
+                    files={imageFiles}
+                    onRemove={(idx) => setImageFiles((prev) => prev.filter((_, i) => i !== idx))}
+                  />
                 ) : null}
               </div>
               <div className="grid gap-2" data-field="sku">
@@ -1655,6 +1707,14 @@ export default function Inventory() {
             </form>
           </DialogContent>
         </Dialog>
+
+        <InventoryBulkImportDialog
+          open={bulkImportOpen}
+          onOpenChange={setBulkImportOpen}
+          onImported={() => {
+            void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+          }}
+        />
 
         <DeleteConfirmDialog
           open={!!deleteTarget}

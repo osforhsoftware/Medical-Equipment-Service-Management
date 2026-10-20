@@ -4,7 +4,7 @@
   "description": "MESMS REST API — Node.js + Express + TypeScript + Prisma + MySQL",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "nodemon src/index.ts",
+    "dev": "nodemon",
     "build": "tsc && tsc-alias",
     "start": "node -r tsconfig-paths/register dist/src/index.js",
     "test": "node --test -r ts-node/register -r tsconfig-paths/register \"src/tests/**/*.test.ts\"",
@@ -53,6 +53,7 @@
       "src"
     ],
     "ext": "ts",
-    "exec": "ts-node -r tsconfig-paths/register src/index.ts"
+    "delay": 750,
+    "exec": "ts-node --transpile-only -r tsconfig-paths/register src/index.ts"
   }
 }

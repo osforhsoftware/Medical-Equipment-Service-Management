@@ -122,7 +122,10 @@ export class PurchaseOrdersService {
   }
 
   async delete(id: string, tenantId: string) {
-    await this.getById(id, tenantId);
+    const existing = await this.getById(id, tenantId);
+    if (existing.status === "received" || existing.status === "partial") {
+      throw new AppError("Received purchase orders cannot be deleted. Keep them for the stock and cost audit trail.", 409);
+    }
     return purchaseOrdersRepository.delete(id, tenantId);
   }
 }

@@ -144,7 +144,6 @@ export async function resolveNotificationHref(notification: BackendNotification)
     if (notification.type === "stock") return "/app/inventory";
     if (notification.type === "job") return "/app/jobs";
     if (notification.type === "approval") return "/app/estimates";
-    if (notification.type === "amc") return "/app/customers";
     return "/app/service-tickets";
   } catch {
     if (title.includes("stock purchase")) return "/app/stock-purchase-requests";
