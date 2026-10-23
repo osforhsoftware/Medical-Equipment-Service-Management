@@ -3,8 +3,9 @@ import type { PaginationMeta, SortOrder } from "@/types";
 
 export const DEFAULT_PAGE = 1;
 export const DEFAULT_LIMIT = 25;
-export const MAX_LIMIT = 100;
-export const ALLOWED_PAGE_SIZES = [10, 25, 50, 100] as const;
+/** Upper bound for list endpoints; reports / finance screens request up to this size. */
+export const MAX_LIMIT = 200;
+export const ALLOWED_PAGE_SIZES = [10, 25, 50, 100, 200] as const;
 
 export interface ParsedPagination {
   page: number;

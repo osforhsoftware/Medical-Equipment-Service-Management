@@ -6,6 +6,7 @@ import { Eye, FilePenLine, MoreHorizontal, PackageX, ShoppingCart } from "lucide
 import { EstimateDecisionPanel } from "@/components/estimates/EstimateDecisionPanel";
 import { EstimateItemsTable } from "@/components/estimates/EstimateItemsTable";
 import { ReturnWithoutRepairDialog, type ReturnWithoutRepairData } from "@/components/estimates/ReturnWithoutRepairDialog";
+import { CustomerSummaryField } from "@/components/shared/CustomerSummaryField";
 import { ShareButtons } from "@/components/shared/ShareButtons";
 import {
   ActivityTimeline,
@@ -28,6 +29,7 @@ import { useAuth } from "@/context/AuthContext";
 import { ApiError, api, type BackendEstimate, type BackendUser, type EstimateLineInput } from "@/lib/api";
 import {
   canEditEstimate,
+  estimateLevelDiscount,
   estimateStatusLabel,
   isEstimatePendingDecision,
   totalsForEstimate,
@@ -309,6 +311,16 @@ export default function EstimateDetail() {
                     <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Tax</dt><dd className="font-medium">{formatCurrency(financials?.tax ?? 0)}</dd></div>
                     <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Total</dt><dd className="text-base font-semibold">{formatCurrency(financials?.total ?? 0)}</dd></div>
                   </dl>
+                </DetailSection>
+                <DetailSection title="Customer copy">
+                  <CustomerSummaryField
+                    id="estimate-customer-summary"
+                    value={estimate.customerSummary ?? ""}
+                    lines={viewLines}
+                    headerDiscount={estimateLevelDiscount(estimate)}
+                    total={financials?.total}
+                    readOnly
+                  />
                 </DetailSection>
                 {estimate.notes ? (
                   <DetailSection title="Notes">

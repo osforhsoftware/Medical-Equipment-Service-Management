@@ -183,7 +183,7 @@ export interface PurchaseOrder {
   supplier: string;
   items: number;
   total: number;
-  status: "draft" | "sent" | "received" | "partial" | "cancelled";
+  status: "draft" | "sent" | "partial" | "closed" | "cancelled";
   createdAt: string;
   expectedDate: string;
 }

@@ -1,4 +1,4 @@
-import { Minus, Plus, Trash2 } from "lucide-react";
+import { Minus, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -56,6 +56,8 @@ export function InvoiceLineEditor({
     if (catalogId === CUSTOM_CATALOG_VALUE) {
       updateLine(index, {
         type: "custom",
+        catalogItemId: null,
+        inventoryItemId: null,
         description: "",
         unitPrice: 0,
       });
@@ -65,6 +67,8 @@ export function InvoiceLineEditor({
     if (!item) return;
     updateLine(index, {
       type: "service",
+      catalogItemId: item.id,
+      inventoryItemId: null,
       description: item.name,
       unitPrice: Number(item.unitPrice) || 0,
       taxRate: Number(item.taxRate) || 0,
@@ -79,9 +83,25 @@ export function InvoiceLineEditor({
         : Number(item.deliveryCharge ?? 0);
     updateLine(index, {
       type: "product",
+      inventoryItemId: item.id,
+      catalogItemId: null,
       description: item.name,
       unitPrice: inventoryOriginUnitPrice(item) + delivery / Math.max(qty, 1),
     });
+  };
+
+  const clearCatalog = (index: number) => {
+    updateLine(index, { catalogItemId: null });
+  };
+
+  const clearInventory = (index: number) => {
+    updateLine(index, { inventoryItemId: null });
+  };
+
+  const catalogSelectValue = (line: InvoiceLineInput) => {
+    if (line.catalogItemId) return line.catalogItemId;
+    if (line.type === "custom" && !line.inventoryItemId) return CUSTOM_CATALOG_VALUE;
+    return undefined;
   };
 
   const typeOptions = (() => {
@@ -159,29 +179,58 @@ export function InvoiceLineEditor({
                         {...fieldAria(descKey, shouldShow?.(descKey) ? errors?.[descKey] : null)}
                       />
                       <div className="grid grid-cols-2 gap-2">
-                        <Select onValueChange={(value) => applyCatalog(index, value)}>
-                          <SelectTrigger id={catalogId} className="h-8 min-w-0 text-xs">
-                            <SelectValue placeholder="Catalog item" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value={CUSTOM_CATALOG_VALUE}>Custom…</SelectItem>
-                            {catalog.length === 0 ? (
-                              <SelectItem value="__empty_catalog" disabled>
-                                No catalog services
-                              </SelectItem>
-                            ) : (
-                              catalog.map((item) => (
-                                <SelectItem key={item.id} value={item.id}>
-                                  {item.name}
+                        <div className="relative min-w-0">
+                          <Select
+                            key={line.catalogItemId ?? `catalog-${line.id ?? index}`}
+                            value={catalogSelectValue(line)}
+                            onValueChange={(value) => applyCatalog(index, value)}
+                          >
+                            <SelectTrigger
+                              id={catalogId}
+                              className={cn("h-8 min-w-0 text-xs", line.catalogItemId && "pr-8")}
+                            >
+                              <SelectValue placeholder="Catalog item" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={CUSTOM_CATALOG_VALUE}>Custom…</SelectItem>
+                              {catalog.length === 0 ? (
+                                <SelectItem value="__empty_catalog" disabled>
+                                  No catalog services
                                 </SelectItem>
-                              ))
-                            )}
-                          </SelectContent>
-                        </Select>
+                              ) : (
+                                catalog.map((item) => (
+                                  <SelectItem key={item.id} value={item.id}>
+                                    {item.name}
+                                  </SelectItem>
+                                ))
+                              )}
+                            </SelectContent>
+                          </Select>
+                          {line.catalogItemId ? (
+                            <button
+                              type="button"
+                              className="absolute right-7 top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                              aria-label={`Clear catalog selection for line ${index + 1}`}
+                              onPointerDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                              }}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                clearCatalog(index);
+                              }}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          ) : null}
+                        </div>
                         <InventoryProductSelect
                           id={inventoryId}
                           items={inventory}
+                          value={line.inventoryItemId ?? ""}
                           onValueChange={(_id, item) => applyInventory(index, item)}
+                          onClear={() => clearInventory(index)}
                           placeholder="Inventory item"
                           emptyText="No inventory products"
                           triggerClassName="h-8 min-w-0 text-xs"

@@ -64,7 +64,6 @@ const customerSchema = z
     city: fieldRules.optionalString(),
     country: fieldRules.optionalString(),
     licenseGst: fieldRules.optionalString(),
-    paymentTerms: fieldRules.optionalString(),
     creditLimit: z
       .string()
       .trim()
@@ -87,7 +86,6 @@ type FormState = {
   city: string;
   country: string;
   licenseGst: string;
-  paymentTerms: string;
   creditLimit: string;
   priceCategory: string;
   deliveryAddress: string;
@@ -107,7 +105,6 @@ const emptyForm: FormState = {
   city: "",
   country: "",
   licenseGst: "",
-  paymentTerms: "",
   creditLimit: "",
   priceCategory: "",
   deliveryAddress: "",
@@ -203,7 +200,6 @@ export default function Customers() {
       "address",
       "city",
       "country",
-      "paymentTerms",
       "creditLimit",
       "priceCategory",
       "note",
@@ -249,7 +245,6 @@ export default function Customers() {
         city: form.city.trim(),
         country: form.country.trim(),
         licenseGst: form.licenseGst.trim() || null,
-        paymentTerms: form.paymentTerms.trim() || null,
         creditLimit: creditLimitValue ? Number(creditLimitValue) : null,
         priceCategory: form.priceCategory.trim() || null,
         deliveryAddress: form.address.trim() || null,
@@ -625,9 +620,9 @@ export default function Customers() {
             </div>
             <div className="grid gap-2" data-field="address">
               <Label htmlFor="site-address" className={shouldShow("address") ? "text-destructive" : undefined}>
-                Billing & delivery addresses
+                Address
               </Label>
-              <Input
+              <Textarea
                 id="site-address"
                 value={form.address}
                 onChange={(e) => {
@@ -639,6 +634,7 @@ export default function Customers() {
                 aria-invalid={shouldShow("address") || undefined}
                 className={cn(shouldShow("address") && "border-destructive focus-visible:ring-destructive")}
                 placeholder="1200 Medical Center Dr"
+                rows={3}
               />
               {shouldShow("address") && <FormFieldError field="address" message={errors.address} />}
             </div>
@@ -687,35 +683,19 @@ export default function Customers() {
                 placeholder="Optional — GST, trade license, VAT, TRN"
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2" data-field="paymentTerms">
-                <Label htmlFor="payment-terms">Payment terms</Label>
-                <Input
-                  id="payment-terms"
-                  value={form.paymentTerms}
-                  onChange={(e) => {
-                    const next = { ...form, paymentTerms: e.target.value };
-                    setForm(next);
-                    handleChange("paymentTerms", next);
-                  }}
-                  onBlur={() => handleBlur("paymentTerms", form)}
-                  placeholder="e.g. Net 30"
-                />
-              </div>
-              <div className="grid gap-2" data-field="priceCategory">
-                <Label htmlFor="price-category">Price category</Label>
-                <Input
-                  id="price-category"
-                  value={form.priceCategory}
-                  onChange={(e) => {
-                    const next = { ...form, priceCategory: e.target.value };
-                    setForm(next);
-                    handleChange("priceCategory", next);
-                  }}
-                  onBlur={() => handleBlur("priceCategory", form)}
-                  placeholder="e.g. Hospital / Dealer"
-                />
-              </div>
+            <div className="grid gap-2" data-field="priceCategory">
+              <Label htmlFor="price-category">Price category</Label>
+              <Input
+                id="price-category"
+                value={form.priceCategory}
+                onChange={(e) => {
+                  const next = { ...form, priceCategory: e.target.value };
+                  setForm(next);
+                  handleChange("priceCategory", next);
+                }}
+                onBlur={() => handleBlur("priceCategory", form)}
+                placeholder="e.g. Hospital / Dealer"
+              />
             </div>
             <div className="grid gap-2" data-field="creditLimit">
               <Label htmlFor="credit-limit">Credit limit</Label>

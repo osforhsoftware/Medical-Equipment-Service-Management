@@ -36,7 +36,14 @@ export default function FinancialReportsPage() {
 
   const dashboardQuery = useQuery({
     queryKey: ["dashboard", dateRange.from, dateRange.to],
-    queryFn: () => api.getDashboard({ from: dateRange.from, to: dateRange.to }),
+    queryFn: async () => {
+      try {
+        return await api.getDashboard({ from: dateRange.from, to: dateRange.to });
+      } catch {
+        // Charts/KPIs can fall back to invoice + sales aggregates when dashboard is unavailable.
+        return undefined;
+      }
+    },
   });
   const salesQuery = useQuery({
     queryKey: ["sales", "reports", dateRange.from, dateRange.to],
@@ -50,13 +57,7 @@ export default function FinancialReportsPage() {
   });
   const invoicesQuery = useQuery({
     queryKey: ["reports", "invoices"],
-    queryFn: async () => {
-      try {
-        return await api.listInvoices();
-      } catch {
-        return [];
-      }
-    },
+    queryFn: () => api.listInvoices(),
   });
 
   const dashboard = dashboardQuery.data;
@@ -252,10 +253,9 @@ export default function FinancialReportsPage() {
   }, [revenueRows, saleRevenue, serviceRevenue, marginRows, agingRows, customerRows, vatRows]);
 
   const loading = dashboardQuery.isLoading || salesQuery.isLoading || invoicesQuery.isLoading;
-  const firstError = dashboardQuery.error || salesQuery.error || invoicesQuery.error;
-  const error = firstError
-    ? firstError instanceof ApiError
-      ? firstError.message
+  const error = invoicesQuery.error
+    ? invoicesQuery.error instanceof ApiError
+      ? invoicesQuery.error.message
       : "Unable to load financial reports"
     : null;
 

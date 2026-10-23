@@ -206,15 +206,38 @@ export async function convertSalesEnquiryToQuotation(
   const legacyQty = Math.max(1, Number(enquiry.quantity) || 1);
   const legacyBudget = enquiry.estimatedBudget != null ? Number(enquiry.estimatedBudget) : 0;
   const legacyUnit = money(legacyBudget > 0 ? legacyBudget / legacyQty : 0);
+
+  // Re-read inventory sell prices when a stored line has no price yet.
+  const inventoryIds = storedLines
+    .map((line) => line.inventoryItemId)
+    .filter((id): id is string => Boolean(id));
+  const inventoryItems = inventoryIds.length
+    ? await prisma.inventoryItem.findMany({
+        where: { tenantId, id: { in: inventoryIds } },
+        select: { id: true, name: true, sku: true, sellingPrice: true, unitCost: true },
+      })
+    : [];
+  const inventoryById = new Map(inventoryItems.map((item) => [item.id, item]));
+
   const quoteLines = (storedLines.length
-    ? storedLines.map((line) => ({
-        type: line.source === "inventory" ? "part" : "other",
-        inventoryItemId: line.inventoryItemId,
-        description: line.description,
-        partNumber: line.sku,
-        quantity: line.quantity,
-        unitPrice: money(line.unitPrice),
-      }))
+    ? storedLines.map((line) => {
+        const item = line.inventoryItemId ? inventoryById.get(line.inventoryItemId) : undefined;
+        const unitPrice = money(
+          line.unitPrice > 0
+            ? line.unitPrice
+            : item
+              ? positivePrice(item.sellingPrice, item.unitCost)
+              : 0,
+        );
+        return {
+          type: line.source === "inventory" ? "part" : "other",
+          inventoryItemId: line.inventoryItemId,
+          description: item?.name?.trim() || line.description,
+          partNumber: item?.sku || line.sku,
+          quantity: line.quantity,
+          unitPrice,
+        };
+      })
     : [
         {
           type: "product",

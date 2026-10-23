@@ -20,6 +20,10 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
 import { APPROVED_IMAGE_ACCEPT, keepApprovedFiles } from "@/lib/uploadFileTypes";
 import { InspectionSection } from "./InspectionSection";
+import {
+  INSPECTION_SIGNATURE_LABELS,
+  InspectionSignaturePanel,
+} from "./InspectionSignaturePanel";
 import type { RequestedItemDraft } from "./useInspectionReportEditor";
 
 const SEVERITY_OPTIONS = [
@@ -52,8 +56,6 @@ const SEVERITY_OPTIONS = [
     selected: "border-primary bg-primary/10 text-primary",
   },
 ] as const;
-
-const HIDDEN_SIGNATURE_LABELS = new Set(["Inspector Signature", "Admin Signature"]);
 
 interface InspectionReportFormProps {
   active: BackendServiceRequest;
@@ -484,15 +486,28 @@ export function InspectionReportForm({
         optional
       >
         <CustomerAdditionalFieldsEditor
-          value={additionalFields.filter((field) => !HIDDEN_SIGNATURE_LABELS.has(field.label))}
+          value={additionalFields.filter((field) => !INSPECTION_SIGNATURE_LABELS.has(field.label))}
           onChange={(next) => {
             setAdditionalFields((prev) => [
               ...next,
-              ...prev.filter((field) => HIDDEN_SIGNATURE_LABELS.has(field.label)),
+              ...prev.filter((field) => INSPECTION_SIGNATURE_LABELS.has(field.label)),
             ]);
           }}
           title="Additional inspection fields"
           description="Optional label/value rows (accessories received, site notes, meter readings, etc.)."
+        />
+      </InspectionSection>
+
+      <InspectionSection
+        title="Signatures"
+        description="Draw or upload staff signatures for the inspector and admin approval."
+        optional
+      >
+        <InspectionSignaturePanel
+          inspectorName={active.assignedName ?? ""}
+          additionalFields={additionalFields}
+          onChange={setAdditionalFields}
+          showHeading={false}
         />
       </InspectionSection>
     </div>

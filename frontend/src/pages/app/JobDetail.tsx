@@ -18,7 +18,14 @@ import {
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { JobWorkReportPanel } from "@/components/jobs/JobWorkReportPanel";
 import { JobWorkbenchContextSection } from "@/components/jobs/JobWorkbenchContext";
+import { QaChecklistEditor } from "@/components/jobs/QaChecklistEditor";
 import { pickWorkReportLog, useJobWorkReportEditor } from "@/components/jobs/useJobWorkReportEditor";
+import {
+  allQaChecklistChecked,
+  buildQaChecklistFromDefaults,
+  resolveJobQaChecklist,
+  type QaChecklistItem,
+} from "@/lib/qaChecklist";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 import { ProductThumb, productImageFileId } from "@/components/shared/ProductThumb";
@@ -148,7 +155,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasRole, canMutate, user } = useAuth();
-  const { rbacMatrix } = useSettings();
+  const { settings, rbacMatrix } = useSettings();
   const isProject = variant === "project";
   const backTo = isProject ? "/app/projects" : "/app/jobs";
   const backLabel = isProject ? "Back to Projects" : "Back to Jobs";
@@ -212,14 +219,8 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
   const [stockQty, setStockQty] = useState(1);
   const [actionSaving, setActionSaving] = useState(false);
   const [qaNotes, setQaNotes] = useState("");
-  const [qaChecklistOpen, setQaChecklistOpen] = useState(false);
-  const [qaChecklist, setQaChecklist] = useState({
-    repairVerified: false,
-    testingPassed: false,
-    calibrationChecked: false,
-    cleanlinessOk: false,
-    docsReady: false,
-  });
+  const [qaChecklist, setQaChecklist] = useState<QaChecklistItem[]>([]);
+  const [qaSaving, setQaSaving] = useState(false);
   const [deliveryMethod, setDeliveryMethod] = useState("site_return");
   const [deliveryNote, setDeliveryNote] = useState("");
   const [deliveryReceivedBy, setDeliveryReceivedBy] = useState("");
@@ -334,6 +335,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
     if (!job) return;
     const details = parseJobStageDetails(job.stageDetails);
     setQaNotes(details.qa?.notes ?? "");
+    setQaChecklist(resolveJobQaChecklist(details.qa?.checklist, settings?.qaChecklistDefaults));
     setDeliveryMethod(details.delivery?.method || "site_return");
     setDeliveryNote(details.delivery?.note ?? "");
     setDeliveryReceivedBy(details.delivery?.receivedBy ?? "");
@@ -343,7 +345,16 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
       setDispatchDate(details.delivery.courier.dispatchDate ?? "");
       setEstimatedDeliveryDate(details.delivery.courier.estimatedDeliveryDate ?? "");
     }
+    // Settings seed empty checklists only; omit from deps so late settings load does not wipe in-progress checks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- job-driven hydrate
   }, [job?.id, job?.stageDetails, job?.status]);
+
+  useEffect(() => {
+    if (!settings?.qaChecklistDefaults?.length) return;
+    setQaChecklist((prev) =>
+      prev.length ? prev : buildQaChecklistFromDefaults(settings.qaChecklistDefaults),
+    );
+  }, [settings?.qaChecklistDefaults]);
 
   const overdueDays = useMemo(() => {
     if (!job || !job.scheduledFor || job.status === "completed" || job.status === "delivery") return 0;
@@ -557,8 +568,56 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
     }
   };
 
+  const sanitizedQaChecklist = () =>
+    qaChecklist
+      .map((item) => ({
+        ...item,
+        label: item.label.trim(),
+      }))
+      .filter((item) => item.label.length > 0);
+
+  const saveQaChecklist = async () => {
+    if (!job || !canApproveComplete) return;
+    const checklist = sanitizedQaChecklist();
+    if (!checklist.length) {
+      toast({ title: "Checklist required", description: "Add at least one QA check point.", variant: "destructive" });
+      return;
+    }
+    setQaSaving(true);
+    try {
+      const updated = await api.updateJob(job.id, {
+        stageDetails: {
+          qa: {
+            notes: qaNotes.trim() || null,
+            checklist,
+            ...(job.status === "review" ? {} : { checkedAt: new Date().toISOString() }),
+          },
+        },
+      });
+      setJob(updated);
+      toast({
+        title: "QA checklist saved",
+        description: "Updates stored. Download Service Report remains available.",
+      });
+      await refreshActivities(job.id);
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to save QA checklist" });
+    } finally {
+      setQaSaving(false);
+    }
+  };
+
   const approveQaPass = async () => {
     if (!job) return;
+    const checklist = sanitizedQaChecklist();
+    if (!allQaChecklistChecked(checklist)) {
+      toast({
+        title: "Complete the checklist",
+        description: "Check all QA points before marking pass.",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
       const updated = await api.updateJob(job.id, {
         status: "completed",
@@ -568,7 +627,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
             result: "pass",
             notes: qaNotes.trim() || null,
             checkedAt: new Date().toISOString(),
-            checklist: qaChecklist,
+            checklist,
           },
         },
       });
@@ -595,6 +654,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
             result: "fail",
             notes: qaNotes.trim() || null,
             checkedAt: new Date().toISOString(),
+            checklist: sanitizedQaChecklist(),
           },
         },
       });
@@ -1300,60 +1360,25 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                     Quality check by coordinator, admin, or QA staff before the job is marked complete.
                   </p>
                   <div className="grid gap-3">
-                    {awaitingQa && canApproveComplete && (
-                      <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-                        <Label className="text-xs font-semibold uppercase text-muted-foreground">
-                          QA Independent Quality Checklist (All Required)
-                        </Label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={qaChecklist.repairVerified}
-                              onChange={(e) => setQaChecklist({ ...qaChecklist, repairVerified: e.target.checked })}
-                              className="rounded"
-                            />
-                            <span>1. Repair & Part Replacement Verified</span>
-                          </label>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={qaChecklist.testingPassed}
-                              onChange={(e) => setQaChecklist({ ...qaChecklist, testingPassed: e.target.checked })}
-                              className="rounded"
-                            />
-                            <span>2. Functional Testing Passed</span>
-                          </label>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={qaChecklist.calibrationChecked}
-                              onChange={(e) => setQaChecklist({ ...qaChecklist, calibrationChecked: e.target.checked })}
-                              className="rounded"
-                            />
-                            <span>3. Calibration & Specs Checked</span>
-                          </label>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={qaChecklist.cleanlinessOk}
-                              onChange={(e) => setQaChecklist({ ...qaChecklist, cleanlinessOk: e.target.checked })}
-                              className="rounded"
-                            />
-                            <span>4. Cleanliness & Decontamination OK</span>
-                          </label>
-                          <label className="flex items-center gap-2 cursor-pointer sm:col-span-2">
-                            <input
-                              type="checkbox"
-                              checked={qaChecklist.docsReady}
-                              onChange={(e) => setQaChecklist({ ...qaChecklist, docsReady: e.target.checked })}
-                              className="rounded"
-                            />
-                            <span>5. Service Report & Documentation Ready</span>
-                          </label>
-                        </div>
-                      </div>
-                    )}
+                    {(awaitingQa || stageDetails.qa?.result === "pass" || stageDetails.qa?.checklist?.length) &&
+                    canApproveComplete ? (
+                      <QaChecklistEditor
+                        items={qaChecklist}
+                        onChange={setQaChecklist}
+                        disabled={!canApproveComplete || jobDelivered}
+                        title="QA quality checklist"
+                        description="Defaults come from Admin → Settings. + adds an optional point for this job only."
+                      />
+                    ) : awaitingQa && qaChecklist.length ? (
+                      <QaChecklistEditor
+                        items={qaChecklist}
+                        onChange={setQaChecklist}
+                        disabled
+                        allowExtras={false}
+                        title="QA quality checklist"
+                        description="Waiting for coordinator, admin, or QA approval."
+                      />
+                    ) : null}
                     <div className="grid gap-2">
                       <Label htmlFor="qa-notes">QA notes</Label>
                       <Textarea
@@ -1361,7 +1386,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                         value={qaNotes}
                         onChange={(e) => setQaNotes(e.target.value)}
                         placeholder="Checks performed, issues found…"
-                        disabled={!awaitingQa || !canApproveComplete}
+                        disabled={(!awaitingQa && stageDetails.qa?.result !== "pass") || !canApproveComplete || jobDelivered}
                         rows={3}
                       />
                     </div>
@@ -1371,17 +1396,25 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                         {stageDetails.qa.notes ? ` — ${stageDetails.qa.notes}` : ""}
                       </p>
                     ) : null}
-                    {awaitingQa && canApproveComplete ? (
+                    {canApproveComplete && (awaitingQa || stageDetails.qa?.result === "pass") && !jobDelivered ? (
                       <div className="flex flex-wrap gap-2">
-                        <Button variant="outline" onClick={() => void failQaReturnToRepair()}>
-                          Fail — Return to Repair
+                        <Button variant="outline" disabled={qaSaving} onClick={() => void saveQaChecklist()}>
+                          {qaSaving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+                          Save checklist
                         </Button>
-                        <Button
-                          disabled={!Object.values(qaChecklist).every(Boolean)}
-                          onClick={() => void approveQaPass()}
-                        >
-                          Pass — Mark Complete
-                        </Button>
+                        {awaitingQa ? (
+                          <>
+                            <Button variant="outline" onClick={() => void failQaReturnToRepair()}>
+                              Fail — Return to Repair
+                            </Button>
+                            <Button
+                              disabled={!allQaChecklistChecked(sanitizedQaChecklist())}
+                              onClick={() => void approveQaPass()}
+                            >
+                              Pass — Mark Complete
+                            </Button>
+                          </>
+                        ) : null}
                       </div>
                     ) : awaitingQa ? (
                       <p className="text-sm text-muted-foreground">Waiting for coordinator, admin, or QA approval.</p>

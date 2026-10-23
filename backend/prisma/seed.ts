@@ -360,7 +360,14 @@ async function main() {
     create: {
       tenantId: TENANT_ID,
       supportEmail: "support@mesms.io",
-      defaultTaxRate: 8,
+      defaultTaxRate: 0,
+      qaChecklistDefaults: [
+        "Repair & Part Replacement Verified",
+        "Functional Testing Passed",
+        "Calibration & Specs Checked",
+        "Cleanliness & Decontamination OK",
+        "Service Report & Documentation Ready",
+      ],
       rbacMatrix: DEFAULT_RBAC_MATRIX as never,
     },
   });

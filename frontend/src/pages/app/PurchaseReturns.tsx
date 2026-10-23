@@ -59,7 +59,7 @@ export default function PurchaseReturns() {
   });
 
   const rows = rowsQuery.data ?? [];
-  const returnableOrders = (ordersQuery.data ?? []).filter((order) => order.status === "received" || order.status === "partial");
+  const returnableOrders = (ordersQuery.data ?? []).filter((order) => order.status === "closed" || order.status === "partial");
 
   const [createOpen, setCreateOpen] = useState(false);
   const [purchaseOrderId, setPurchaseOrderId] = useState("");

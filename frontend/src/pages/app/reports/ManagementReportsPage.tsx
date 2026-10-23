@@ -28,17 +28,17 @@ export default function ManagementReportsPage() {
 
   const jobsQuery = useQuery({
     queryKey: ["reports", "jobs"],
-    queryFn: () => api.listJobs({ limit: 100, page: 1, completedScope: "all" }),
+    queryFn: () => api.listJobs({ limit: 200, page: 1, completedScope: "all" }),
   });
   const ticketsQuery = useQuery({
     queryKey: ["reports", "tickets"],
-    queryFn: () => api.listServiceRequests({ limit: 100, page: 1, completedScope: "all" }),
+    queryFn: () => api.listServiceRequests({ limit: 200, page: 1, completedScope: "all" }),
   });
   const estimatesQuery = useQuery({
     queryKey: ["reports", "estimates"],
     queryFn: async () => {
       try {
-        return await api.listEstimates({ limit: 100, page: 1 });
+        return await api.listEstimates({ limit: 200, page: 1 });
       } catch {
         return { data: [] as BackendEstimate[] };
       }

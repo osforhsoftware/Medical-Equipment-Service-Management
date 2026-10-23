@@ -123,6 +123,7 @@ export class BillingController {
       const result = await billingService.updateInvoice(req.tenantId!, req.params.id, actor(req), {
         dueAt,
         lineItems: req.body.lineItems,
+        customerSummary: req.body.customerSummary,
       });
       res.json(success("Invoice updated successfully", result));
     } catch (err) { next(err); }

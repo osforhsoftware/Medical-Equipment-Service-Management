@@ -27,6 +27,7 @@ import { PhotoCaptionTile } from "@/components/shared/PhotoCaptionTile";
 import { InventoryProductSelect } from "@/components/shared/InventoryProductSelect";
 import { JobWorkReportPanel } from "@/components/jobs/JobWorkReportPanel";
 import { JobWorkbenchContext } from "@/components/jobs/JobWorkbenchContext";
+import { QaChecklistEditor } from "@/components/jobs/QaChecklistEditor";
 import { pickWorkReportLog, useJobWorkReportEditor } from "@/components/jobs/useJobWorkReportEditor";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { QA_APPROVER_ROLES, SERVICE_BILLING_ROLES } from "@/config/roles";
@@ -57,6 +58,13 @@ import { api, type BackendInventoryItem, type BackendServiceJob, type JobPhotoIn
 import { formatFixedOption, SERVICE_TYPE_OPTIONS } from "@/lib/fixedOptions";
 import { defaultDatePlusDays, formatDate, formatDateTime, formatJobStatus } from "@/lib/format";
 import { formatInventoryItemClass, inventoryMatchesExtraType, requestableStock } from "@/lib/inventoryItemClass";
+import { parseJobStageDetails } from "@/lib/jobStages";
+import {
+  allQaChecklistChecked,
+  buildQaChecklistFromDefaults,
+  resolveJobQaChecklist,
+  type QaChecklistItem,
+} from "@/lib/qaChecklist";
 import { downloadServiceReportPdf } from "@/lib/serviceReport";
 import { toast } from "@/lib/toast";
 import { APPROVED_IMAGE_ACCEPT, keepApprovedFiles } from "@/lib/uploadFileTypes";
@@ -109,7 +117,7 @@ export default function MobileJobDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { hasRole, canMutate, user } = useAuth();
-  const { rbacMatrix } = useSettings();
+  const { settings, rbacMatrix } = useSettings();
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const [job, setJob] = useState<BackendServiceJob | null>(null);
@@ -133,6 +141,9 @@ export default function MobileJobDetail() {
   const [escalating, setEscalating] = useState(false);
   const [actionSaving, setActionSaving] = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
+  const [qaNotes, setQaNotes] = useState("");
+  const [qaChecklist, setQaChecklist] = useState<QaChecklistItem[]>([]);
+  const [qaSaving, setQaSaving] = useState(false);
   const photosDrawerRef = useRef<HTMLDivElement>(null);
   const scopeDrawerRef = useRef<HTMLDivElement>(null);
   const stockDrawerRef = useRef<HTMLDivElement>(null);
@@ -200,6 +211,21 @@ export default function MobileJobDetail() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!job) return;
+    const details = parseJobStageDetails(job.stageDetails);
+    setQaNotes(details.qa?.notes ?? "");
+    setQaChecklist(resolveJobQaChecklist(details.qa?.checklist, settings?.qaChecklistDefaults));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- job-driven hydrate
+  }, [job?.id, job?.stageDetails, job?.status]);
+
+  useEffect(() => {
+    if (!settings?.qaChecklistDefaults?.length) return;
+    setQaChecklist((prev) =>
+      prev.length ? prev : buildQaChecklistFromDefaults(settings.qaChecklistDefaults),
+    );
+  }, [settings?.qaChecklistDefaults]);
 
   useMobilePullRefresh(load);
 
@@ -282,13 +308,63 @@ export default function MobileJobDetail() {
     }
   };
 
+  const sanitizedQaChecklist = () =>
+    qaChecklist
+      .map((item) => ({ ...item, label: item.label.trim() }))
+      .filter((item) => item.label.length > 0);
+
+  const saveQaChecklist = async () => {
+    if (!job || !canApproveComplete) return;
+    const checklist = sanitizedQaChecklist();
+    if (!checklist.length) {
+      toast({ title: "Checklist required", description: "Add at least one QA check point.", variant: "destructive" });
+      return;
+    }
+    setQaSaving(true);
+    try {
+      await api.updateJob(job.id, {
+        stageDetails: {
+          qa: {
+            notes: qaNotes.trim() || null,
+            checklist,
+          },
+        },
+      });
+      toast({
+        title: "QA checklist saved",
+        description: "Updates stored. Download Service Report remains available.",
+      });
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to save QA checklist" });
+    } finally {
+      setQaSaving(false);
+    }
+  };
+
   const approveQaPass = async () => {
     if (!job) return;
+    const checklist = sanitizedQaChecklist();
+    if (!allQaChecklistChecked(checklist)) {
+      toast({
+        title: "Complete the checklist",
+        description: "Check all QA points before marking pass.",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
       await api.updateJob(job.id, {
         status: "completed",
         progress: Math.max(job.progress, 95),
-        stageDetails: { qa: { result: "pass", checkedAt: new Date().toISOString() } },
+        stageDetails: {
+          qa: {
+            result: "pass",
+            notes: qaNotes.trim() || null,
+            checkedAt: new Date().toISOString(),
+            checklist,
+          },
+        },
       });
       toast({ title: "QA passed", description: "Job moved to Complete." });
       await load();
@@ -302,7 +378,14 @@ export default function MobileJobDetail() {
     try {
       await api.updateJob(job.id, {
         status: "inProgress",
-        stageDetails: { qa: { result: "fail", checkedAt: new Date().toISOString() } },
+        stageDetails: {
+          qa: {
+            result: "fail",
+            notes: qaNotes.trim() || null,
+            checkedAt: new Date().toISOString(),
+            checklist: sanitizedQaChecklist(),
+          },
+        },
       });
       toast({ title: "Returned to Repair", description: "QA failed — continue work and resubmit." });
       await load();
@@ -796,11 +879,44 @@ export default function MobileJobDetail() {
                 Submit for QA & Report
               </button>
             ) : awaitingQa && canApproveComplete ? (
-              <div className="space-y-2">
+              <div className="space-y-3">
+                <QaChecklistEditor
+                  items={qaChecklist}
+                  onChange={setQaChecklist}
+                  title="QA checklist"
+                  description="Defaults from Admin → Settings. + adds a job-only check."
+                />
+                <div className="grid gap-1.5">
+                  <Label htmlFor="mobile-qa-notes" className="text-xs text-muted-foreground">
+                    QA notes
+                  </Label>
+                  <Textarea
+                    id="mobile-qa-notes"
+                    value={qaNotes}
+                    onChange={(e) => setQaNotes(e.target.value)}
+                    placeholder="Checks performed, issues found…"
+                    rows={2}
+                    className="rounded-[14px]"
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="mobile-btn-secondary w-full"
+                  disabled={qaSaving}
+                  onClick={() => void saveQaChecklist()}
+                >
+                  {qaSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Save checklist
+                </button>
                 <button type="button" className="mobile-btn-secondary w-full" onClick={() => void failQaReturnToRepair()}>
                   QA Fail — Return to Repair
                 </button>
-                <button type="button" className="mobile-btn-primary w-full" onClick={() => void approveQaPass()}>
+                <button
+                  type="button"
+                  className="mobile-btn-primary w-full"
+                  disabled={!allQaChecklistChecked(sanitizedQaChecklist())}
+                  onClick={() => void approveQaPass()}
+                >
                   QA Pass — Mark Complete
                 </button>
               </div>

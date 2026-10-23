@@ -126,7 +126,6 @@ export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Pr
           compatibleModels: row.compatibleModels || null,
           inStock: row.inStock,
           reorderLevel: row.reorderLevel,
-          maxLevel: row.maxLevel,
           binLocation: row.binLocation,
           unitCost: row.unitCost,
           sellingPrice: row.sellingPrice,

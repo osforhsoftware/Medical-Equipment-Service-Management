@@ -18,7 +18,6 @@ const inventoryFields = z.object({
   branchId: z.string().min(1).optional(),
   inStock: z.coerce.number().int().min(0).optional().default(0),
   reorderLevel: z.coerce.number().int().min(0).optional().default(0),
-  maxLevel: z.coerce.number().int().min(0).optional().default(0),
   binLocation: z.string().max(120).optional().default(""),
   trackBatches: z.coerce.boolean().optional().default(false),
   trackSerials: z.coerce.boolean().optional().default(false),
@@ -33,24 +32,9 @@ const inventoryFields = z.object({
   additionalFields: z.array(additionalFieldSchema).max(30).optional().nullable(),
 });
 
-function rejectInvertedStockLevels(
-  data: { reorderLevel?: number; maxLevel?: number },
-  ctx: z.RefinementCtx,
-) {
-  const minLevel = data.reorderLevel ?? 0;
-  const maxLevel = data.maxLevel ?? 0;
-  if (maxLevel > 0 && minLevel > maxLevel) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["maxLevel"],
-      message: "Max level must be greater than or equal to min level.",
-    });
-  }
-}
+export const createInventorySchema = inventoryFields;
 
-export const createInventorySchema = inventoryFields.superRefine(rejectInvertedStockLevels);
-
-export const updateInventorySchema = inventoryFields.partial().superRefine(rejectInvertedStockLevels);
+export const updateInventorySchema = inventoryFields.partial();
 
 /** Bulk product import (JSON rows after client parses Excel/ZIP). Max 2000 rows. */
 export const bulkImportInventorySchema = z.object({

@@ -7,18 +7,28 @@ import { failure } from "@/utils/response";
 export class AppError extends Error {
   constructor(
     public readonly message: string,
-    public readonly statusCode: number = 500
+    public readonly statusCode: number = 500,
+    /** Optional `"field: message"` entries for form field mapping on the client */
+    public readonly errors?: string[],
   ) {
     super(message);
     this.name = "AppError";
   }
 }
 
-function uniqueConstraintMessage(target: unknown): string {
-  const fields = (Array.isArray(target) ? target : [])
+export const EQUIPMENT_SERIAL_TAKEN_MESSAGE =
+  "Serial number already taken. Please check.";
+
+function uniqueConstraintFields(target: unknown): string[] {
+  return (Array.isArray(target) ? target : [])
     .map((field) => String(field).toLowerCase().replace(/_/g, ""));
+}
+
+function uniqueConstraintMessage(target: unknown): string {
+  const fields = uniqueConstraintFields(target);
   const joined = fields.join(" ");
 
+  if (joined.includes("serialnumber")) return EQUIPMENT_SERIAL_TAKEN_MESSAGE;
   if (joined.includes("assettag")) return "An asset with that tag already exists";
   if (joined.includes("sku")) return "An inventory item with that SKU already exists in this branch";
   if (joined.includes("email")) return "Email already registered";
@@ -28,6 +38,14 @@ function uniqueConstraintMessage(target: unknown): string {
   if (joined.includes("slug")) return "A term with that slug already exists";
   if (joined.includes("name") && joined.includes("type")) return "A term with that name already exists";
   return "A record with that value already exists";
+}
+
+function uniqueConstraintFieldErrors(target: unknown, message: string): string[] | undefined {
+  const fields = uniqueConstraintFields(target);
+  if (fields.some((field) => field.includes("serialnumber"))) {
+    return [`serialNumber: ${message}`];
+  }
+  return undefined;
 }
 
 /**
@@ -42,14 +60,22 @@ export const errorHandler = (
 ): void => {
   // Known application error
   if (err instanceof AppError) {
-    res.status(err.statusCode).json(failure(err.message));
+    res.status(err.statusCode).json({
+      ...failure(err.message),
+      ...(err.errors?.length ? { errors: err.errors } : {}),
+    });
     return;
   }
 
   // Prisma unique constraint violation
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     if (err.code === "P2002") {
-      res.status(409).json(failure(uniqueConstraintMessage(err.meta?.target)));
+      const message = uniqueConstraintMessage(err.meta?.target);
+      const errors = uniqueConstraintFieldErrors(err.meta?.target, message);
+      res.status(409).json({
+        ...failure(message),
+        ...(errors?.length ? { errors } : {}),
+      });
       return;
     }
     if (err.code === "P2025") {

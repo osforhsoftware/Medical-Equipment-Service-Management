@@ -5,6 +5,7 @@ const supplierFields = {
   contact: z.string().trim().max(120).optional().default(""),
   email: z.string().trim().max(254).optional().default(""),
   phone: z.string().trim().max(30).optional().default(""),
+  address: z.string().trim().max(2000).optional().nullable(),
   category: z.string().trim().max(100).optional().default(""),
   currency: z.string().trim().max(8).optional(),
   paymentTerms: z.string().trim().max(120).optional().nullable(),

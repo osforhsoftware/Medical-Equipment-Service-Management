@@ -21,6 +21,7 @@ export const estimateRevisionSchema = z.object({
   body: z.object({
     terms: z.string().max(10000).nullable().optional(),
     notes: z.string().max(10000).nullable().optional(),
+    customerSummary: z.string().trim().max(200).nullable().optional(),
     currency: z.string().trim().min(3).max(10).optional(),
     warranty: z.string().trim().max(500).nullable().optional(),
     estimatedCompletion: z.string().nullable().optional(),
@@ -138,7 +139,7 @@ export const createReservationSchema = z.object({
   body: z.object({
     inventoryItemId: z.string().cuid(),
     quantity: positiveInt,
-    purpose: z.string().trim().min(1).max(500),
+    purpose: z.string().trim().max(500).optional(),
   }),
 });
 

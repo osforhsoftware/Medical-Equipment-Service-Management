@@ -18,9 +18,11 @@ import {
   Landmark,
   Receipt,
   Undo2,
+  Share2,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { PurchaseStageNav, purchaseStageFromLocation } from "@/components/purchase/PurchaseStageNav";
+import { SupplierQuoteShareDialog } from "@/components/purchase/SupplierQuoteShareDialog";
 import { ModuleQuickAction } from "@/components/shared/ModuleFlowStrip";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { RequiredMark } from "@/components/shared/RequiredMark";
@@ -123,6 +125,7 @@ export interface SupplierRFQData {
   createdBy: string;
   createdAt: string;
   quotes?: SupplierQuoteData[];
+  supplierRecord?: Pick<BackendSupplier, "id" | "name" | "email" | "phone" | "address"> | null;
 }
 
 export default function RFQs() {
@@ -143,6 +146,10 @@ export default function RFQs() {
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
   const [selectedRfq, setSelectedRfq] = useState<SupplierRFQData | null>(null);
   const [expandedRfqs, setExpandedRfqs] = useState<Record<string, boolean>>({});
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareTarget, setShareTarget] = useState<{ rfq: SupplierRFQData; quote: SupplierQuoteData } | null>(
+    null,
+  );
 
   // New RFQ form state
   const [rfqForm, setRfqForm] = useState({
@@ -330,6 +337,11 @@ export default function RFQs() {
     setQuoteDialogOpen(true);
   };
 
+  const openQuoteShare = (rfq: SupplierRFQData, quote: SupplierQuoteData) => {
+    setShareTarget({ rfq, quote });
+    setShareOpen(true);
+  };
+
   const handleSubmitQuote = async () => {
     if (!selectedRfq) return;
     if (!quoteForm.currency.trim()) {
@@ -369,7 +381,7 @@ export default function RFQs() {
       return;
     }
     try {
-      await api.post(`/rfqs/${selectedRfq.id}/quotes`, {
+      const res = await api.post<SupplierQuoteData>(`/rfqs/${selectedRfq.id}/quotes`, {
         rfqId: selectedRfq.id,
         currency: quoteForm.currency.trim(),
         warranty: quoteForm.warranty.trim(),
@@ -389,8 +401,12 @@ export default function RFQs() {
           notes: l.notes,
         })),
       });
-      toast.success("Supplier quote recorded");
+      toast.success("Supplier quote recorded — print or share the PDF");
       setQuoteDialogOpen(false);
+      setExpandedRfqs((prev) => ({ ...prev, [selectedRfq.id]: true }));
+      if (res.data) {
+        openQuoteShare(selectedRfq, res.data);
+      }
       refetch();
     } catch (err) {
       toast.apiError(err, { fallback: "Failed to submit quote" });
@@ -507,7 +523,7 @@ export default function RFQs() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {user && userCanOpenPage(user, "/app/purchase-orders?stage=stock", rbacMatrix) ? (
-                <ModuleQuickAction title="Stock (received)" hint="Landed-cost valued POs" icon={PackageCheck} to="/app/purchase-orders?stage=stock" />
+                <ModuleQuickAction title="Stock (closed)" hint="Fully received & closed POs" icon={PackageCheck} to="/app/purchase-orders?stage=stock" />
               ) : null}
               {user && userCanOpenPage(user, "/app/purchase-returns", rbacMatrix) ? (
                 <ModuleQuickAction title="Purchase returns" hint="Return to supplier" icon={Undo2} to="/app/purchase-returns" />
@@ -743,8 +759,12 @@ export default function RFQs() {
                                     ))}
                                   </div>
                                   {q.notes && <p className="text-xs text-muted-foreground italic">Notes: {q.notes}</p>}
-                                  {canConvertToPo && rfq.status !== "cancelled" ? (
-                                    <div className="pt-1">
+                                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                                    <Button size="sm" variant="outline" onClick={() => openQuoteShare(rfq, q)}>
+                                      <Share2 className="mr-1 h-3.5 w-3.5" />
+                                      Print / PDF · Share
+                                    </Button>
+                                    {canConvertToPo && rfq.status !== "cancelled" ? (
                                       <Button
                                         size="sm"
                                         variant="outline"
@@ -758,8 +778,8 @@ export default function RFQs() {
                                         )}
                                         Convert to PO
                                       </Button>
-                                    </div>
-                                  ) : null}
+                                    ) : null}
+                                  </div>
                                 </div>
                               );
                             })}
@@ -1296,6 +1316,18 @@ export default function RFQs() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <SupplierQuoteShareDialog
+          open={shareOpen}
+          onOpenChange={(open) => {
+            setShareOpen(open);
+            if (!open) setShareTarget(null);
+          }}
+          rfq={shareTarget?.rfq ?? null}
+          quote={shareTarget?.quote ?? null}
+          supplierEmail={shareTarget?.rfq.supplierRecord?.email}
+          supplierPhone={shareTarget?.rfq.supplierRecord?.phone}
+        />
       </div>
     </RoleGuard>
   );

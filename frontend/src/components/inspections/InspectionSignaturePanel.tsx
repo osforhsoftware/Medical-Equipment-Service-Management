@@ -1,183 +1,148 @@
-import { useState } from "react";
-import { CheckCircle2, PenLine, RotateCcw, Shield } from "lucide-react";
+import { CheckCircle2, PenLine, Shield } from "lucide-react";
 import { SignaturePad } from "@/components/shared/SignaturePad";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import type { CustomerAdditionalField } from "@/lib/customerFields";
 
-interface SignatureEntry {
-  name: string;
-  dataUrl: string | null;
-  capturedAt: string | null;
+export const INSPECTOR_SIGNATURE_LABEL = "Inspector Signature";
+export const ADMIN_SIGNATURE_LABEL = "Admin Signature";
+
+export const INSPECTION_SIGNATURE_LABELS = new Set([
+  INSPECTOR_SIGNATURE_LABEL,
+  ADMIN_SIGNATURE_LABEL,
+]);
+
+export function getSignatureFieldValue(
+  fields: CustomerAdditionalField[] | undefined | null,
+  label: string,
+): string | null {
+  const value = fields?.find((field) => field.label === label)?.value?.trim();
+  return value?.startsWith("data:image") ? value : null;
 }
 
-export interface InspectionSignatures {
-  inspectorSignature: SignatureEntry;
-  approvalSignature: SignatureEntry;
+export function upsertSignatureField(
+  fields: CustomerAdditionalField[],
+  label: string,
+  dataUrl: string | null,
+): CustomerAdditionalField[] {
+  const without = fields.filter((field) => field.label !== label);
+  if (!dataUrl) return without;
+  return [...without, { label, value: dataUrl }];
 }
 
 interface InspectionSignaturePanelProps {
   inspectorName?: string;
-  signatures?: InspectionSignatures | null;
-  onSave?: (signatures: InspectionSignatures) => void;
+  additionalFields: CustomerAdditionalField[];
+  onChange?: (fields: CustomerAdditionalField[]) => void;
   readOnly?: boolean;
+  /** When false, omit the panel heading (e.g. parent section already titles it). */
+  showHeading?: boolean;
 }
 
-const emptyEntry = (name = ""): SignatureEntry => ({
-  name,
-  dataUrl: null,
-  capturedAt: null,
-});
+function SignaturePreview({
+  dataUrl,
+  emptyLabel,
+  alt,
+}: {
+  dataUrl: string | null;
+  emptyLabel: string;
+  alt: string;
+}) {
+  if (!dataUrl) {
+    return <p className="text-sm text-muted-foreground">{emptyLabel}</p>;
+  }
+  return (
+    <img
+      src={dataUrl}
+      alt={alt}
+      className="h-24 w-full rounded-lg border border-border bg-white object-contain"
+    />
+  );
+}
 
 export function InspectionSignaturePanel({
   inspectorName = "",
-  signatures,
-  onSave,
+  additionalFields,
+  onChange,
   readOnly = false,
+  showHeading = true,
 }: InspectionSignaturePanelProps) {
-  const [inspectorSig, setInspectorSig] = useState<string | null>(
-    signatures?.inspectorSignature?.dataUrl ?? null,
-  );
-  const [approvalSig, setApprovalSig] = useState<string | null>(
-    signatures?.approvalSignature?.dataUrl ?? null,
-  );
+  const inspectorSig = getSignatureFieldValue(additionalFields, INSPECTOR_SIGNATURE_LABEL);
+  const approvalSig = getSignatureFieldValue(additionalFields, ADMIN_SIGNATURE_LABEL);
 
-  const saved = Boolean(signatures?.inspectorSignature?.capturedAt);
+  if (readOnly && !inspectorSig && !approvalSig) return null;
 
-  const handleSave = () => {
-    if (!onSave) return;
-    const now = new Date().toISOString();
-    onSave({
-      inspectorSignature: {
-        name: inspectorName,
-        dataUrl: inspectorSig,
-        capturedAt: inspectorSig ? now : null,
-      },
-      approvalSignature: {
-        name: "Admin / Coordinator",
-        dataUrl: approvalSig,
-        capturedAt: approvalSig ? now : null,
-      },
-    });
+  const setSignature = (label: string, dataUrl: string | null) => {
+    onChange?.(upsertSignatureField(additionalFields, label, dataUrl));
   };
-
-  if (readOnly && !saved) return null;
 
   return (
     <section className="space-y-4">
-      <h2 className="section-title flex items-center gap-2">
-        <PenLine className="h-4 w-4 text-primary" />
-        Inspection Signatures
-      </h2>
+      {showHeading ? (
+        <>
+          <h2 className="section-title flex items-center gap-2">
+            <PenLine className="h-4 w-4 text-primary" />
+            Inspection Signatures
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Draw on screen or upload a signature image. Signatures are saved with the inspection report.
+          </p>
+        </>
+      ) : null}
       <div className="grid gap-4 md:grid-cols-2">
-        {/* Inspector Signature */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Shield className="h-4 w-4 text-muted-foreground" />
               Inspector Signature
-              {signatures?.inspectorSignature?.capturedAt && (
-                <CheckCircle2 className="ml-auto h-4 w-4 text-green-500" />
-              )}
+              {inspectorSig ? <CheckCircle2 className="ml-auto h-4 w-4 text-green-500" /> : null}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {readOnly ? (
-              signatures?.inspectorSignature?.dataUrl ? (
-                <img
-                  src={signatures.inspectorSignature.dataUrl}
-                  alt="Inspector signature"
-                  className="h-24 w-full rounded-lg border border-border object-contain bg-white"
-                />
-              ) : (
-                <p className="text-sm text-muted-foreground">Not yet signed</p>
-              )
+              <SignaturePreview
+                dataUrl={inspectorSig}
+                emptyLabel="Not yet signed"
+                alt="Inspector signature"
+              />
             ) : (
-              <SignaturePad onChange={setInspectorSig} />
+              <SignaturePad
+                value={inspectorSig}
+                ariaLabel="inspector signature"
+                onChange={(dataUrl) => setSignature(INSPECTOR_SIGNATURE_LABEL, dataUrl)}
+              />
             )}
-            {signatures?.inspectorSignature?.name && (
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                {signatures.inspectorSignature.name}
-                {signatures.inspectorSignature.capturedAt &&
-                  ` · ${new Date(signatures.inspectorSignature.capturedAt).toLocaleDateString()}`}
-              </p>
-            )}
+            {inspectorName ? (
+              <p className="mt-1.5 text-xs text-muted-foreground">{inspectorName}</p>
+            ) : null}
           </CardContent>
         </Card>
 
-        {/* Approval Signature */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
               Admin / Approval Signature
-              {signatures?.approvalSignature?.capturedAt && (
-                <CheckCircle2 className="ml-auto h-4 w-4 text-green-500" />
-              )}
+              {approvalSig ? <CheckCircle2 className="ml-auto h-4 w-4 text-green-500" /> : null}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {readOnly ? (
-              signatures?.approvalSignature?.dataUrl ? (
-                <img
-                  src={signatures.approvalSignature.dataUrl}
-                  alt="Approval signature"
-                  className="h-24 w-full rounded-lg border border-border object-contain bg-white"
-                />
-              ) : (
-                <p className="text-sm text-muted-foreground">Not yet approved</p>
-              )
+              <SignaturePreview
+                dataUrl={approvalSig}
+                emptyLabel="Not yet approved"
+                alt="Approval signature"
+              />
             ) : (
-              <SignaturePad onChange={setApprovalSig} />
+              <SignaturePad
+                value={approvalSig}
+                ariaLabel="admin approval signature"
+                onChange={(dataUrl) => setSignature(ADMIN_SIGNATURE_LABEL, dataUrl)}
+              />
             )}
-            {signatures?.approvalSignature?.capturedAt && (
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Admin / Coordinator ·{" "}
-                {new Date(signatures.approvalSignature.capturedAt).toLocaleDateString()}
-              </p>
-            )}
+            <p className="mt-1.5 text-xs text-muted-foreground">Admin / Coordinator</p>
           </CardContent>
         </Card>
       </div>
-
-      {!readOnly && onSave && (
-        <div className="flex items-center gap-2 justify-end">
-          <p
-            className={cn(
-              "text-xs",
-              inspectorSig || approvalSig ? "text-muted-foreground" : "text-muted-foreground/50",
-            )}
-          >
-            {inspectorSig && approvalSig
-              ? "Both signatures ready"
-              : inspectorSig
-                ? "Inspector signed — awaiting approval signature"
-                : "Draw signatures above to finalise the inspection"}
-          </p>
-          {(inspectorSig || approvalSig) && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setInspectorSig(null);
-                setApprovalSig(null);
-              }}
-            >
-              <RotateCcw className="mr-1 h-3.5 w-3.5" />
-              Clear all
-            </Button>
-          )}
-          <Button
-            type="button"
-            size="sm"
-            disabled={!inspectorSig && !approvalSig}
-            onClick={handleSave}
-          >
-            Save signatures
-          </Button>
-        </div>
-      )}
     </section>
   );
 }

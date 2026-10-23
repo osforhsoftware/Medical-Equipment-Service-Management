@@ -3,6 +3,7 @@ import { AppError } from "@/middleware/errorHandler";
 import { generateReference } from "@/utils/reference";
 import { computeLandedCostTotal } from "@/lib/landedCost";
 import { Prisma } from "@prisma/client";
+import type { PurchaseOrderStatusValue } from "@/schemas/purchaseOrders.schema";
 
 type CreatePurchaseOrderData = {
   supplier: string;
@@ -15,6 +16,18 @@ type CreatePurchaseOrderData = {
   freightCost?: number | null;
   customsCost?: number | null;
   insuranceCost?: number | null;
+};
+
+const TERMINAL_STATUSES = new Set<PurchaseOrderStatusValue>(["closed", "cancelled"]);
+const RECEIPT_LOCKED = new Set<PurchaseOrderStatusValue>(["closed", "partial"]);
+
+/** Allowed manual status transitions (receipts set partial/closed via domain receive). */
+const ALLOWED_TRANSITIONS: Record<PurchaseOrderStatusValue, PurchaseOrderStatusValue[]> = {
+  draft: ["sent", "cancelled"],
+  sent: ["cancelled"],
+  partial: ["cancelled"],
+  closed: [],
+  cancelled: [],
 };
 
 function landedFields(data: {
@@ -51,9 +64,9 @@ export class PurchaseOrdersService {
   }
 
   async create(tenantId: string, data: CreatePurchaseOrderData) {
-    if (data.status === "received" || data.status === "partial") {
+    if (data.status && data.status !== "draft") {
       throw new AppError(
-        "Create purchase orders as draft/sent, then receive via POST /api/domain/purchase-orders/:id/receipts",
+        "Create purchase orders as draft, review, then send. Receive via POST /api/domain/purchase-orders/:id/receipts",
         409,
       );
     }
@@ -65,7 +78,7 @@ export class PurchaseOrdersService {
       currency: data.currency?.trim().toUpperCase() || "INR",
       items: data.items,
       total: data.total,
-      status: (data.status ?? "draft") as never,
+      status: "draft",
       expectedDate: new Date(data.expectedDate),
       ...landedFields(data),
     });
@@ -73,13 +86,41 @@ export class PurchaseOrdersService {
 
   async update(id: string, tenantId: string, data: Partial<CreatePurchaseOrderData>) {
     const existing = await this.getById(id, tenantId);
-    const blockedStatuses = ["received", "partial"];
-    if (typeof data.status === "string" && blockedStatuses.includes(data.status)) {
-      throw new AppError(
-        "Use POST /api/domain/purchase-orders/:id/receipts to receive stock. Legacy status updates cannot change inventory.",
-        409,
-      );
+    const current = existing.status as PurchaseOrderStatusValue;
+
+    if (typeof data.status === "string") {
+      const next = data.status as PurchaseOrderStatusValue;
+      if (next === "partial" || next === "closed") {
+        throw new AppError(
+          "Use POST /api/domain/purchase-orders/:id/receipts to receive stock. Status updates cannot change inventory.",
+          409,
+        );
+      }
+      const allowed = ALLOWED_TRANSITIONS[current] ?? [];
+      if (next !== current && !allowed.includes(next)) {
+        throw new AppError(
+          `Cannot move purchase order from ${current} to ${next}. Path: draft → sent → receive → closed.`,
+          409,
+        );
+      }
     }
+
+    if (TERMINAL_STATUSES.has(current) && data.status == null) {
+      const touchingHeader =
+        data.supplier != null ||
+        data.supplierReference !== undefined ||
+        data.currency != null ||
+        data.items != null ||
+        data.total != null ||
+        data.expectedDate != null ||
+        data.freightCost !== undefined ||
+        data.customsCost !== undefined ||
+        data.insuranceCost !== undefined;
+      if (touchingHeader) {
+        throw new AppError(`Closed or cancelled purchase orders cannot be edited.`, 409);
+      }
+    }
+
     const update: Prisma.PurchaseOrderUpdateInput = {};
     if (data.supplier != null) update.supplier = data.supplier;
     if (data.supplierReference !== undefined) {
@@ -123,7 +164,7 @@ export class PurchaseOrdersService {
 
   async delete(id: string, tenantId: string) {
     const existing = await this.getById(id, tenantId);
-    if (existing.status === "received" || existing.status === "partial") {
+    if (RECEIPT_LOCKED.has(existing.status as PurchaseOrderStatusValue) || existing.status === "closed") {
       throw new AppError("Received purchase orders cannot be deleted. Keep them for the stock and cost audit trail.", 409);
     }
     return purchaseOrdersRepository.delete(id, tenantId);

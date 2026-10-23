@@ -136,7 +136,6 @@ export default function EstimatePreview() {
             detailRows={[
               { label: "Equipment", value: estimate.equipmentName },
               { label: "Ticket", value: estimate.requestRef },
-              { label: "Revision", value: `Rev ${estimate.revision}` },
               { label: "Currency", value: estimate.currency || "INR" },
               ...(estimate.estimatedCompletion
                 ? [{ label: "Est. completion", value: formatDate(estimate.estimatedCompletion) }]
@@ -147,6 +146,8 @@ export default function EstimatePreview() {
             ]}
             lines={estimateToDocumentLines(estimate)}
             discount={estimateLevelDiscount(estimate)}
+            customerView
+            customerSummary={estimate.customerSummary}
             notes={estimate.notes ?? undefined}
             terms={estimate.terms ?? undefined}
             hideToolbar

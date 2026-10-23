@@ -1,5 +1,6 @@
 import { settingsRepository } from "@/repositories/settings.repository";
 import { DEFAULT_RBAC_MATRIX } from "@/config/defaultRbac";
+import { normalizeQaChecklistDefaults } from "@/config/defaultQaChecklist";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/db/prisma";
 import { AppError } from "@/middleware/errorHandler";
@@ -31,6 +32,7 @@ type UpdateSettingsData = {
   defaultInspectorUserId?: string | null;
   defaultEstimatorUserId?: string | null;
   defaultEngineerUserId?: string | null;
+  qaChecklistDefaults?: string[];
   rbacMatrix?: Record<string, string[]>;
 };
 
@@ -134,6 +136,7 @@ export class SettingsService {
       defaultInspectorUserId: settings.defaultInspectorUserId,
       defaultEstimatorUserId: settings.defaultEstimatorUserId,
       defaultEngineerUserId: settings.defaultEngineerUserId,
+      qaChecklistDefaults: normalizeQaChecklistDefaults(settings.qaChecklistDefaults),
       rbacMatrix: normalizeRbac(settings.rbacMatrix),
     };
   }
@@ -204,6 +207,9 @@ export class SettingsService {
     if (defaultEstimatorUserId !== undefined) updatePayload.defaultEstimatorUserId = defaultEstimatorUserId;
     if (defaultEngineerUserId !== undefined) updatePayload.defaultEngineerUserId = defaultEngineerUserId;
 
+    if (data.qaChecklistDefaults !== undefined) {
+      updatePayload.qaChecklistDefaults = normalizeQaChecklistDefaults(data.qaChecklistDefaults) as Prisma.InputJsonValue;
+    }
     if (data.rbacMatrix !== undefined) updatePayload.rbacMatrix = data.rbacMatrix as Prisma.InputJsonValue;
 
     if (Object.keys(updatePayload).length > 0) {

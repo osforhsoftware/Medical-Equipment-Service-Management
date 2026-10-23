@@ -62,6 +62,7 @@ import InventoryReportsPage from "./pages/app/reports/InventoryReportsPage.tsx";
 import ManagementReportsPage from "./pages/app/reports/ManagementReportsPage.tsx";
 import Notifications from "./pages/app/Notifications.tsx";
 import QRTracking from "./pages/app/QRTracking.tsx";
+import InventoryQrLookup from "./pages/app/InventoryQrLookup.tsx";
 import AuditLogs from "./pages/app/AuditLogs.tsx";
 import Settings from "./pages/app/Settings.tsx";
 import UsersPage from "./pages/app/Users.tsx";
@@ -142,6 +143,7 @@ const App = () => (
               <Route path="projects/:id" element={<ModuleGuard module="Projects"><ProjectDetail /></ModuleGuard>} />
               <Route path="service-catalog" element={<ModuleGuard module="Service Catalog"><ServiceCatalog /></ModuleGuard>} />
               <Route path="inventory" element={<ModuleGuard module="Inventory" orModules={["Inventory Items"]}><Inventory /></ModuleGuard>} />
+              <Route path="inventory/qr" element={<ModuleGuard module="Inventory" orModules={["Inventory Items"]}><InventoryQrLookup /></ModuleGuard>} />
               <Route path="inventory/:id" element={<ModuleGuard module="Inventory" orModules={["Inventory Items"]}><InventoryDetail /></ModuleGuard>} />
               <Route path="stock-purchase-requests" element={<ModuleGuard module="Inventory" orModules={["Stock Purchase Requests", "Purchase"]}><StockPurchaseRequests /></ModuleGuard>} />
               <Route path="stock-purchase-requests/:id" element={<ModuleGuard module="Inventory" orModules={["Stock Purchase Requests", "Purchase"]}><StockPurchaseRequestDetail /></ModuleGuard>} />

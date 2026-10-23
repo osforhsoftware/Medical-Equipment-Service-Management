@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -94,10 +94,18 @@ export function EstimateItemsTable({
     });
   };
 
+  const clearCatalog = (index: number) => {
+    updateLine(index, { catalogItemId: null });
+  };
+
+  const clearInventory = (index: number) => {
+    updateLine(index, { inventoryItemId: null, costPrice: undefined });
+  };
+
   const catalogSelectValue = (line: EstimateLineInput) => {
     if (line.catalogItemId) return line.catalogItemId;
     if (line.type === "custom" && !line.inventoryItemId) return CUSTOM_CATALOG_VALUE;
-    return "";
+    return undefined;
   };
 
   return (
@@ -150,26 +158,50 @@ export function EstimateItemsTable({
                           className="min-w-0"
                         />
                         <div className="grid grid-cols-2 gap-2">
-                          <Select
-                            value={catalogSelectValue(line)}
-                            onValueChange={(v) => applyCatalog(index, v)}
-                          >
-                            <SelectTrigger className="h-8 min-w-0 text-xs">
-                              <SelectValue placeholder="Catalog item" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value={CUSTOM_CATALOG_VALUE}>Custom…</SelectItem>
-                              {catalog.map((c) => (
-                                <SelectItem key={c.id} value={c.id}>
-                                  {c.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <div className="relative min-w-0">
+                            <Select
+                              key={line.catalogItemId ?? `catalog-${index}`}
+                              value={catalogSelectValue(line)}
+                              onValueChange={(v) => applyCatalog(index, v)}
+                            >
+                              <SelectTrigger
+                                className={cn("h-8 min-w-0 text-xs", line.catalogItemId && "pr-8")}
+                              >
+                                <SelectValue placeholder="Catalog item" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={CUSTOM_CATALOG_VALUE}>Custom…</SelectItem>
+                                {catalog.map((c) => (
+                                  <SelectItem key={c.id} value={c.id}>
+                                    {c.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {line.catalogItemId ? (
+                              <button
+                                type="button"
+                                className="absolute right-7 top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                                aria-label={`Clear catalog selection for line ${index + 1}`}
+                                onPointerDown={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                }}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  clearCatalog(index);
+                                }}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            ) : null}
+                          </div>
                           <InventoryProductSelect
                             items={inventory}
                             value={line.inventoryItemId ?? ""}
                             onValueChange={(_id, item) => applyInventory(index, item)}
+                            onClear={() => clearInventory(index)}
                             placeholder="Inventory item"
                             triggerClassName="h-8 min-w-0 text-xs"
                           />

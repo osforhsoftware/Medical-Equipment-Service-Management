@@ -12,14 +12,23 @@ export interface PurchaseOrderListFilters {
 }
 
 function buildWhere(tenantId: string, filters: Omit<PurchaseOrderListFilters, "skip" | "take" | "orderBy">): Prisma.PurchaseOrderWhereInput {
+  /** Open for shipment/customs: still editable before/after send. */
   const openStatuses: PurchaseOrder["status"][] = ["draft", "sent", "partial"];
+  /** Receivable (GRN): only after send/print. */
+  const receivableStatuses: PurchaseOrder["status"][] = ["sent", "partial"];
+  /** Stock / complete: fully received and closed. */
+  const closedStatuses: PurchaseOrder["status"][] = ["closed"];
   const where: Prisma.PurchaseOrderWhereInput = {
     tenantId,
     ...(filters.status === "open"
       ? { status: { in: openStatuses } }
-      : filters.status
-        ? { status: filters.status as PurchaseOrder["status"] }
-        : {}),
+      : filters.status === "receivable"
+        ? { status: { in: receivableStatuses } }
+        : filters.status === "closed" || filters.status === "received"
+          ? { status: { in: closedStatuses } }
+          : filters.status
+            ? { status: filters.status as PurchaseOrder["status"] }
+            : {}),
   };
 
   if (filters.search) {

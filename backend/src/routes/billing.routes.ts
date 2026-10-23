@@ -8,19 +8,22 @@ import { createInvoiceSchema, updateInvoiceSchema } from "@/schemas/billing.sche
 
 const router = Router();
 router.use(authenticate, resolveTenant);
-router.use(requireRole(...SERVICE_BILLING_ROLES));
 
-router.get("/queue", billingController.getQueue);
-router.get("/jobs/:jobId/context", billingController.getJobContext);
-router.post("/jobs/:jobId/verify", billingController.verifyJob);
-router.post("/:id/submit-approval", billingController.submitForApproval);
-router.post("/:id/approve", billingController.approveInvoice);
-router.post("/:id/mark-sent", billingController.markSent);
-router.get("/", billingController.getAll);
-router.get("/summary", billingController.getSummary);
-router.get("/:id", billingController.getById);
-router.post("/", validate(createInvoiceSchema), billingController.create);
-router.put("/:id", validate(updateInvoiceSchema), billingController.update);
-router.delete("/:id", billingController.delete);
+/** Coordinators can read invoices for Financial reports; mutations stay billing/admin. */
+const canRead = requireRole(...SERVICE_BILLING_ROLES, "coordinator");
+const canWrite = requireRole(...SERVICE_BILLING_ROLES);
+
+router.get("/queue", canWrite, billingController.getQueue);
+router.get("/jobs/:jobId/context", canWrite, billingController.getJobContext);
+router.post("/jobs/:jobId/verify", canWrite, billingController.verifyJob);
+router.post("/:id/submit-approval", canWrite, billingController.submitForApproval);
+router.post("/:id/approve", canWrite, billingController.approveInvoice);
+router.post("/:id/mark-sent", canWrite, billingController.markSent);
+router.get("/", canRead, billingController.getAll);
+router.get("/summary", canRead, billingController.getSummary);
+router.get("/:id", canRead, billingController.getById);
+router.post("/", canWrite, validate(createInvoiceSchema), billingController.create);
+router.put("/:id", canWrite, validate(updateInvoiceSchema), billingController.update);
+router.delete("/:id", canWrite, billingController.delete);
 
 export default router;

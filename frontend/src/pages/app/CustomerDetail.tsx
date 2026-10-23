@@ -56,7 +56,6 @@ const editSchema = z.object({
   city: fieldRules.optionalString(),
   country: fieldRules.optionalString(),
   licenseGst: fieldRules.optionalString(),
-  paymentTerms: fieldRules.optionalString(),
   creditLimit: z
     .string()
     .trim()
@@ -79,7 +78,6 @@ type EditForm = {
   city: string;
   country: string;
   licenseGst: string;
-  paymentTerms: string;
   creditLimit: string;
   priceCategory: string;
   deliveryAddress: string;
@@ -101,7 +99,6 @@ function customerToForm(customer: BackendCustomer): EditForm {
     city: customer.city ?? "",
     country: customer.country ?? "",
     licenseGst: customer.licenseGst ?? "",
-    paymentTerms: customer.paymentTerms ?? "",
     creditLimit: customer.creditLimit == null ? "" : String(customer.creditLimit),
     priceCategory: customer.priceCategory ?? "",
     deliveryAddress: customer.address?.trim() || customer.deliveryAddress?.trim() || "",
@@ -173,7 +170,6 @@ export default function CustomerDetail() {
       "address",
       "city",
       "country",
-      "paymentTerms",
       "creditLimit",
       "priceCategory",
       "note",
@@ -292,7 +288,6 @@ export default function CustomerDetail() {
         city: form.city.trim(),
         country: form.country.trim(),
         licenseGst: form.licenseGst.trim() || null,
-        paymentTerms: form.paymentTerms.trim() || null,
         creditLimit: creditLimitValue ? Number(creditLimitValue) : null,
         priceCategory: form.priceCategory.trim() || null,
         deliveryAddress: form.address.trim() || null,
@@ -404,7 +399,7 @@ export default function CustomerDetail() {
                   <div className="space-y-2 text-sm">
                     <Row
                       icon={MapPin}
-                      label="Billing & delivery addresses"
+                      label="Address"
                       value={customer.address || customer.deliveryAddress?.trim() || "—"}
                     />
                     <Row icon={MapPin} label="City" value={customer.city || "—"} />
@@ -723,8 +718,8 @@ export default function CustomerDetail() {
                 </div>
               </div>
               <div className="grid gap-2" data-field="address">
-                <Label>Billing & delivery addresses</Label>
-                <Input
+                <Label>Address</Label>
+                <Textarea
                   value={form.address}
                   onChange={(e) => {
                     const next = { ...form, address: e.target.value, deliveryAddress: e.target.value };
@@ -732,6 +727,7 @@ export default function CustomerDetail() {
                     handleChange("address", next);
                   }}
                   placeholder="1200 Medical Center Dr"
+                  rows={3}
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -748,15 +744,9 @@ export default function CustomerDetail() {
                 <Label>License / GST / VAT</Label>
                 <Input value={form.licenseGst} onChange={(e) => setForm({ ...form, licenseGst: e.target.value })} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2" data-field="paymentTerms">
-                  <Label>Payment terms</Label>
-                  <Input value={form.paymentTerms} onChange={(e) => setForm({ ...form, paymentTerms: e.target.value })} placeholder="Net 30" />
-                </div>
-                <div className="grid gap-2" data-field="priceCategory">
-                  <Label>Price category</Label>
-                  <Input value={form.priceCategory} onChange={(e) => setForm({ ...form, priceCategory: e.target.value })} />
-                </div>
+              <div className="grid gap-2" data-field="priceCategory">
+                <Label>Price category</Label>
+                <Input value={form.priceCategory} onChange={(e) => setForm({ ...form, priceCategory: e.target.value })} />
               </div>
               <div className="grid gap-2" data-field="creditLimit">
                 <Label>Credit limit</Label>
@@ -857,7 +847,7 @@ function Row({ icon: Icon, label, value }: { icon: typeof User; label: string; v
       <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
       <div>
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="font-medium">{value}</p>
+        <p className="whitespace-pre-wrap font-medium">{value}</p>
       </div>
     </div>
   );

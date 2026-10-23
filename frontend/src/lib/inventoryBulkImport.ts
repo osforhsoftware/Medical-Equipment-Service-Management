@@ -20,7 +20,6 @@ export const INVENTORY_BULK_TEMPLATE_HEADERS = [
   "compatibleModels",
   "inStock",
   "reorderLevel",
-  "maxLevel",
   "binLocation",
   "unitCost",
   "sellingPrice",
@@ -47,7 +46,6 @@ export type ParsedInventoryImportRow = {
   compatibleModels: string;
   inStock: number;
   reorderLevel: number;
-  maxLevel: number;
   binLocation: string;
   unitCost: number;
   sellingPrice: number;
@@ -91,9 +89,8 @@ const HEADER_ALIASES: Record<string, InventoryBulkTemplateHeader> = {
   reorderlevel: "reorderLevel",
   "reorder level": "reorderLevel",
   "min level": "reorderLevel",
+  "minimum level": "reorderLevel",
   minlevel: "reorderLevel",
-  maxlevel: "maxLevel",
-  "max level": "maxLevel",
   binlocation: "binLocation",
   "bin location": "binLocation",
   bin: "binLocation",
@@ -211,7 +208,6 @@ function mapSheetRows(matrix: unknown[][]): ParsedInventoryImportRow[] {
 
     const inStock = cellNumber(values.inStock);
     const reorderLevel = cellNumber(values.reorderLevel);
-    const maxLevel = cellNumber(values.maxLevel);
     const unitCost = cellNumber(values.unitCost);
     const sellingPrice = cellNumber(values.sellingPrice);
     const deliveryCharge = cellNumber(values.deliveryCharge);
@@ -219,7 +215,6 @@ function mapSheetRows(matrix: unknown[][]): ParsedInventoryImportRow[] {
     const numFields: Array<[string, number | null]> = [
       ["inStock", inStock],
       ["reorderLevel", reorderLevel],
-      ["maxLevel", maxLevel],
       ["unitCost", unitCost],
       ["sellingPrice", sellingPrice],
       ["deliveryCharge", deliveryCharge],
@@ -227,14 +222,10 @@ function mapSheetRows(matrix: unknown[][]): ParsedInventoryImportRow[] {
     for (const [label, n] of numFields) {
       if (n == null) continue;
       if (Number.isNaN(n) || n < 0) errors.push(`${label} must be a non-negative number.`);
-      if ((label === "inStock" || label === "reorderLevel" || label === "maxLevel") && n != null && !Number.isInteger(n)) {
+      if ((label === "inStock" || label === "reorderLevel") && n != null && !Number.isInteger(n)) {
         errors.push(`${label} must be a whole number.`);
       }
     }
-
-    const min = reorderLevel ?? 0;
-    const max = maxLevel ?? 0;
-    if (max > 0 && min > max) errors.push("Max level must be ≥ min/reorder level.");
 
     const deliveryChargeTypeRaw = (values.deliveryChargeType ?? "flat").toLowerCase();
     const deliveryChargeType =
@@ -263,7 +254,6 @@ function mapSheetRows(matrix: unknown[][]): ParsedInventoryImportRow[] {
       compatibleModels: values.compatibleModels?.trim() ?? "",
       inStock: inStock != null && !Number.isNaN(inStock) ? Math.trunc(inStock) : 0,
       reorderLevel: reorderLevel != null && !Number.isNaN(reorderLevel) ? Math.trunc(reorderLevel) : 0,
-      maxLevel: maxLevel != null && !Number.isNaN(maxLevel) ? Math.trunc(maxLevel) : 0,
       binLocation: values.binLocation?.trim() ?? "",
       unitCost: unitCost != null && !Number.isNaN(unitCost) ? unitCost : 0,
       sellingPrice: sellingPrice != null && !Number.isNaN(sellingPrice) ? sellingPrice : 0,
@@ -410,7 +400,6 @@ export function downloadInventoryImportTemplate() {
         compatibleModels: "MX40",
         inStock: 20,
         reorderLevel: 5,
-        maxLevel: 100,
         binLocation: "A-12",
         unitCost: 400,
         sellingPrice: 550,
@@ -433,7 +422,6 @@ export function downloadInventoryImportTemplate() {
         compatibleModels: "",
         inStock: 100,
         reorderLevel: 20,
-        maxLevel: 500,
         binLocation: "B-02",
         unitCost: 80,
         sellingPrice: 120,

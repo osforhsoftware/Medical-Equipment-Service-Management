@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, type BackendInventoryItem } from "@/lib/api";
 import {
@@ -26,6 +26,9 @@ type InventoryProductSelectProps = {
   items: BackendInventoryItem[];
   value?: string;
   onValueChange: (id: string, item: BackendInventoryItem) => void;
+  /** Clears the product link only; does not remove the parent line. */
+  onClear?: () => void;
+  clearable?: boolean;
   placeholder?: string;
   searchPlaceholder?: string;
   emptyText?: string;
@@ -42,6 +45,8 @@ export function InventoryProductSelect({
   items,
   value = "",
   onValueChange,
+  onClear,
+  clearable,
   placeholder = "Select inventory product",
   searchPlaceholder = "Search by name, SKU, or category…",
   emptyText = "No matching inventory products.",
@@ -91,6 +96,7 @@ export function InventoryProductSelect({
     () => mergedItems.find((item) => item.id === value) ?? null,
     [mergedItems, value],
   );
+  const canClear = Boolean(value) && !disabled && (clearable ?? Boolean(onClear));
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -140,7 +146,28 @@ export function InventoryProductSelect({
             ) : null}
             <span className="truncate">{selected ? getOptionLabel(selected) : placeholder}</span>
           </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <span className="ml-1 flex shrink-0 items-center gap-0.5">
+            {canClear ? (
+              <span
+                role="button"
+                tabIndex={-1}
+                aria-label="Clear inventory selection"
+                className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onClear?.();
+                }}
+              >
+                <X className="h-3.5 w-3.5" />
+              </span>
+            ) : null}
+            <ChevronsUpDown className="h-4 w-4 opacity-50" />
+          </span>
         </Button>
       </PopoverTrigger>
       <PopoverContent

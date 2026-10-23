@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { Loader2, Plus, Star, Trash2, Truck } from "lucide-react";
+import { Loader2, Plus, Trash2, Truck } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -10,6 +10,7 @@ import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -32,19 +33,10 @@ const supplierSchema = z.object({
   contact: fieldRules.optionalString(),
   email: fieldRules.email(false),
   phone: fieldRules.phone(false),
+  address: z.string().trim().max(2000).optional(),
   category: fieldRules.optionalString(),
   currency: fieldRules.optionalString(),
   paymentTerms: fieldRules.optionalString(),
-  deliveryLeadDays: z.string().refine((v) => {
-    if (!v.trim()) return true;
-    const n = parseInt(v, 10);
-    return !Number.isNaN(n) && n >= 0 && n <= 3650;
-  }, "Lead time must be between 0 and 3650 days."),
-  rating: z.string().refine((v) => {
-    if (!v.trim()) return true;
-    const n = parseFloat(v);
-    return !Number.isNaN(n) && n >= 0 && n <= 5;
-  }, "Rating must be between 0 and 5."),
 });
 
 type FormState = {
@@ -52,22 +44,20 @@ type FormState = {
   contact: string;
   email: string;
   phone: string;
+  address: string;
   category: string;
   currency: string;
   paymentTerms: string;
-  deliveryLeadDays: string;
-  rating: string;
 };
 const emptyForm: FormState = {
   name: "",
   contact: "",
   email: "",
   phone: "",
+  address: "",
   category: "",
   currency: "INR",
   paymentTerms: "",
-  deliveryLeadDays: "",
-  rating: "0",
 };
 
 export default function Suppliers() {
@@ -111,7 +101,7 @@ export default function Suppliers() {
     handleChange,
     applyApiErrors,
   } = useFormValidation({
-    fieldOrder: ["name", "email", "phone", "rating"],
+    fieldOrder: ["name", "email", "phone"],
     schema: supplierSchema,
   });
 
@@ -133,11 +123,10 @@ export default function Suppliers() {
         contact: form.contact.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
+        address: form.address.trim() || null,
         category: form.category.trim(),
         currency: form.currency.trim().toUpperCase() || "INR",
         paymentTerms: form.paymentTerms.trim() || null,
-        deliveryLeadDays: form.deliveryLeadDays.trim() ? parseInt(form.deliveryLeadDays, 10) : null,
-        rating: parseFloat(form.rating) || 0,
       });
       toast({ title: "Supplier added", description: `${form.name.trim()} has been added.` });
       setDialogOpen(false);
@@ -201,20 +190,8 @@ export default function Suppliers() {
       render: (s) => (
         <div className="text-sm">
           <p>{s.currency || "INR"}</p>
-          <p className="text-xs text-muted-foreground">
-            {s.paymentTerms?.trim() || "—"}
-            {s.deliveryLeadDays != null ? ` · ${s.deliveryLeadDays}d lead` : ""}
-          </p>
+          <p className="text-xs text-muted-foreground">{s.paymentTerms?.trim() || "—"}</p>
         </div>
-      ),
-    },
-    {
-      key: "rating",
-      header: "Rating",
-      render: (s) => (
-        <span className="inline-flex items-center gap-1 text-sm font-medium">
-          <Star className="h-3.5 w-3.5 fill-warning text-warning" /> {Number(s.rating).toFixed(1)}
-        </span>
       ),
     },
     { key: "openOrders", header: "Open POs", render: (s) => <span className="font-medium">{s.openOrders}</span> },
@@ -239,7 +216,7 @@ export default function Suppliers() {
       <div className="space-y-6">
         <PageHeader
           title="Suppliers"
-          description="Supplier master — legal name, contacts, currency, payment terms, and delivery lead time."
+          description="Supplier master — legal name, contacts, currency, and payment terms."
           actions={
             <Button onClick={openCreate} variant="brand">
               <Plus className="mr-1 h-4 w-4" /> Add Supplier
@@ -341,6 +318,24 @@ export default function Suppliers() {
               />
               {shouldShow("email") && <FormFieldError field="email" message={errors.email} />}
             </div>
+            <div className="grid gap-2" data-field="address">
+              <Label htmlFor="supplier-address">Address</Label>
+              <Textarea
+                id="supplier-address"
+                value={form.address}
+                onChange={(e) => {
+                  const next = { ...form, address: e.target.value };
+                  setForm(next);
+                  handleChange("address", next);
+                }}
+                onBlur={() => handleBlur("address", form)}
+                className={fieldErrorClass(shouldShow("address"))}
+                {...fieldAria("address", shouldShow("address") ? errors.address : null)}
+                placeholder="Street, city, country…"
+                rows={3}
+              />
+              {shouldShow("address") && <FormFieldError field="address" message={errors.address} />}
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
                 <Label htmlFor="supplier-category">Category</Label>
@@ -351,28 +346,6 @@ export default function Suppliers() {
                   placeholder="e.g. Medical Parts"
                 />
               </div>
-              <div className="grid gap-2" data-field="rating">
-                <Label htmlFor="supplier-rating">Rating (0–5)</Label>
-                <Input
-                  id="supplier-rating"
-                  type="number"
-                  min="0"
-                  max="5"
-                  step="0.1"
-                  value={form.rating}
-                  onChange={(e) => {
-                    const next = { ...form, rating: e.target.value };
-                    setForm(next);
-                    handleChange("rating", next);
-                  }}
-                  onBlur={() => handleBlur("rating", form)}
-                  className={fieldErrorClass(shouldShow("rating"))}
-                  {...fieldAria("rating", shouldShow("rating") ? errors.rating : null)}
-                />
-                {shouldShow("rating") && <FormFieldError field="rating" message={errors.rating} />}
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
                 <Label htmlFor="supplier-currency">Currency</Label>
                 <Input
@@ -382,24 +355,6 @@ export default function Suppliers() {
                   maxLength={10}
                   placeholder="INR"
                 />
-              </div>
-              <div className="grid gap-2" data-field="deliveryLeadDays">
-                <Label htmlFor="supplier-lead">Delivery lead time (days)</Label>
-                <Input
-                  id="supplier-lead"
-                  type="number"
-                  min="0"
-                  value={form.deliveryLeadDays}
-                  onChange={(e) => {
-                    const next = { ...form, deliveryLeadDays: e.target.value };
-                    setForm(next);
-                    handleChange("deliveryLeadDays", next);
-                  }}
-                  onBlur={() => handleBlur("deliveryLeadDays", form)}
-                  className={fieldErrorClass(shouldShow("deliveryLeadDays"))}
-                  {...fieldAria("deliveryLeadDays", shouldShow("deliveryLeadDays") ? errors.deliveryLeadDays : null)}
-                />
-                {shouldShow("deliveryLeadDays") && <FormFieldError field="deliveryLeadDays" message={errors.deliveryLeadDays} />}
               </div>
             </div>
             <div className="grid gap-2">

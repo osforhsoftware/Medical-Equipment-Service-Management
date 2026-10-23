@@ -44,5 +44,9 @@ export const updateSettingsSchema = z.object({
   defaultInspectorUserId: optionalStaffId,
   defaultEstimatorUserId: optionalStaffId,
   defaultEngineerUserId: optionalStaffId,
+  qaChecklistDefaults: z
+    .array(z.string().trim().min(1).max(200))
+    .max(30)
+    .optional(),
   rbacMatrix: z.record(z.string(), z.array(z.enum(RBAC_ROLES))).optional(),
 });

@@ -104,6 +104,21 @@ export class InventoryRepository {
     });
   }
 
+  async findBySku(sku: string, tenantId: string): Promise<InventoryItem | null> {
+    const value = sku.trim();
+    if (!value) return null;
+    const include = { images: { include: { file: true }, orderBy: { sortOrder: "asc" as const } } };
+    const active = await prisma.inventoryItem.findFirst({
+      where: { tenantId, sku: value, status: "active" },
+      include,
+    });
+    if (active) return active;
+    return prisma.inventoryItem.findFirst({
+      where: { tenantId, sku: value },
+      include,
+    });
+  }
+
   async create(tenantId: string, data: Omit<Prisma.InventoryItemUncheckedCreateInput, "tenantId">): Promise<InventoryItem> {
     return prisma.inventoryItem.create({ data: { ...data, tenantId } });
   }

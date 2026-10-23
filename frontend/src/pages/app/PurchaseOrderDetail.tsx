@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { Loader2, PackageCheck, Undo2 } from "lucide-react";
+import { Loader2, PackageCheck, Printer, Send, Undo2 } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -23,6 +23,25 @@ import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError, type BackendPurchaseOrder } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
+
+const PO_PATH_STEPS = ["Create", "Review", "Send / print", "Receive", "Close"] as const;
+
+function pathStepIndex(status: string | undefined): number {
+  switch (status) {
+    case "draft":
+      return 1;
+    case "sent":
+      return 2;
+    case "partial":
+      return 3;
+    case "closed":
+      return 4;
+    case "cancelled":
+      return -1;
+    default:
+      return 0;
+  }
+}
 
 const receiveSchema = z.object({
   receiptRef: fieldRules.requiredString("Receipt reference"),
@@ -144,7 +163,7 @@ export default function PurchaseOrderDetail() {
     const key = `${order.id}:${stage ?? ""}`;
     if (stageOpenedRef.current === key) return;
     stageOpenedRef.current = key;
-    if (stage === "grn" && order.lineItems?.length && order.status !== "received" && order.status !== "cancelled") {
+    if (stage === "grn" && order.lineItems?.length && (order.status === "sent" || order.status === "partial")) {
       setReceiveOpen(true);
     }
     if (stage === "customs" || stage === "landed") {
@@ -178,7 +197,10 @@ export default function PurchaseOrderDetail() {
       setReceiptNotes("");
       setReceived({});
       resetValidation();
-      toast({ title: "Purchase receipt posted", description: "Inventory quantities were updated." });
+      toast({
+        title: "Purchase receipt posted",
+        description: "Inventory quantities were updated. The PO closes when all lines are fully received.",
+      });
       await load();
     } catch (err) {
       if (!applyApiErrors(err, receiveRef.current)) {
@@ -219,9 +241,29 @@ export default function PurchaseOrderDetail() {
     }
   };
 
-  const canReceive = Boolean(order?.lineItems?.length && order.status !== "received" && order.status !== "cancelled");
-  const canReturn = Boolean(order?.lineItems?.some((line) => returnableQty(line) > 0));
-  const canEditLanded = Boolean(order && order.status !== "received" && order.status !== "cancelled");
+  const canSend = order?.status === "draft";
+  const canReceive = Boolean(order?.lineItems?.length && (order.status === "sent" || order.status === "partial"));
+  const canReturn = Boolean(order?.lineItems?.some((line) => returnableQty(line) > 0) && (order?.status === "partial" || order?.status === "closed"));
+  const canEditLanded = Boolean(order && order.status !== "closed" && order.status !== "cancelled");
+  const canPrint = Boolean(order && order.status !== "cancelled");
+
+  const sendToSupplier = async () => {
+    if (!order || !canSend) return;
+    setSaving(true);
+    try {
+      await api.updatePurchaseOrder(order.id, { status: "sent" });
+      toast({ title: "PO sent", description: "Marked sent for the supplier. You can print a copy next." });
+      await load();
+    } catch (err) {
+      toast.apiError(err, { fallback: "Failed to send purchase order" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const printPurchaseOrder = () => {
+    window.print();
+  };
 
   const saveShipment = async () => {
     if (!order) return;
@@ -299,8 +341,19 @@ export default function PurchaseOrderDetail() {
         notFoundTitle="Purchase order not found"
         notFoundDescription="The requested purchase order could not be found."
         onRetry={() => void load()}
-        actions={(canReceive || canReturn) ? (
-          <div className="flex gap-2">
+        actions={(canSend || canPrint || canReceive || canReturn) ? (
+          <div className="flex flex-wrap gap-2 print:hidden">
+            {canPrint ? (
+              <Button variant="outline" onClick={printPurchaseOrder}>
+                <Printer className="mr-1 h-4 w-4" /> Print
+              </Button>
+            ) : null}
+            {canSend ? (
+              <Button onClick={() => void sendToSupplier()} disabled={saving}>
+                {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4" />}
+                Send to supplier
+              </Button>
+            ) : null}
             {canReturn ? (
               <Button variant="outline" onClick={() => setReturnOpen(true)}>
                 <Undo2 className="mr-1 h-4 w-4" /> Return items
@@ -326,6 +379,43 @@ export default function PurchaseOrderDetail() {
             label: "Overview",
             content: (
               <div className="space-y-4">
+                <DetailSection title="PO path">
+                  <ol className="flex flex-wrap gap-2 text-sm">
+                    {PO_PATH_STEPS.map((label, index) => {
+                      const current = pathStepIndex(order.status);
+                      const done = current >= 0 && index <= current;
+                      const active = current === index;
+                      return (
+                        <li
+                          key={label}
+                          className={`rounded-md border px-2.5 py-1 ${
+                            active
+                              ? "border-primary bg-primary/10 font-medium text-primary"
+                              : done
+                                ? "border-border bg-muted/40 text-foreground"
+                                : "border-dashed border-border text-muted-foreground"
+                          }`}
+                        >
+                          {index + 1}. {label}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {order.status === "draft"
+                      ? "Review supplier and lines, then send/print for the supplier before receiving goods."
+                      : order.status === "sent"
+                        ? "PO is with the supplier. Post a goods receipt when stock arrives."
+                        : order.status === "partial"
+                          ? "Partial receipt posted. Receive remaining lines to close the PO."
+                          : order.status === "closed"
+                            ? "Receipt complete — PO is closed and stock is updated."
+                            : order.status === "cancelled"
+                              ? "This purchase order was cancelled."
+                              : null}
+                  </p>
+                </DetailSection>
+
                 <DetailSection title="Order details">
                   <DetailInfoGrid
                     items={[

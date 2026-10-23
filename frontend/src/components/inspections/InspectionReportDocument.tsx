@@ -10,6 +10,12 @@ import {
   type BackendInspectionReport,
   type BackendServiceRequest,
 } from "@/lib/api";
+import {
+  ADMIN_SIGNATURE_LABEL,
+  INSPECTOR_SIGNATURE_LABEL,
+  INSPECTION_SIGNATURE_LABELS,
+  getSignatureFieldValue,
+} from "@/components/inspections/InspectionSignaturePanel";
 import { formatErrorCodes, formatJsonField } from "@/lib/inspectionReport";
 import { parseCustomerAdditionalFields } from "@/lib/customerFields";
 import { formatDate } from "@/lib/format";
@@ -22,8 +28,6 @@ interface InspectionReportDocumentProps {
   equipment?: BackendEquipment[];
   className?: string;
 }
-
-const SIGNATURE_LABELS = new Set(["Inspector Signature", "Admin Signature"]);
 
 function presentText(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -39,13 +43,6 @@ function chipLabel(value: string) {
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function priorityTone(severity: string): "grey" | "amber" | "red" {
-  const value = severity.toLowerCase();
-  if (value === "high" || value === "critical") return "red";
-  if (value === "medium") return "amber";
-  return "grey";
 }
 
 function formatQty(value: string | number) {
@@ -66,10 +63,6 @@ function partNote(item: BackendInspectionRecommendation): string | null {
   const spare = sparePartName(item);
   if (spare && description.toLowerCase() === spare.toLowerCase()) return null;
   return description;
-}
-
-function ReportChip({ tone, children }: { tone: "grey" | "amber" | "red" | "green"; children: ReactNode }) {
-  return <span className={`inspection-chip inspection-chip-${tone}`}>{children}</span>;
 }
 
 function FieldGrid({ items }: { items: Array<{ label: string; value: ReactNode }> }) {
@@ -221,8 +214,6 @@ export function InspectionReportDocument({
   const company = settings?.companyName ?? "MESMS";
   const split = splitInspectionFindings(report.findings ?? "");
   const siteAddress = [customer?.address, customer?.city, customer?.country].filter(Boolean).join(", ");
-  const reportStatus = report.submittedAt ? "Submitted" : "Draft";
-  const completionLabel = report.submittedAt ? "Completed" : "Draft";
   const checklistFields = formatJsonField(report.checklist).flatMap((field) => {
     const value = presentText(field.value);
     return value ? [{ label: field.label, value }] : [];
@@ -234,11 +225,14 @@ export function InspectionReportDocument({
   const errorCodes = formatErrorCodes(report.errorCodes).map((code) => presentText(code)).filter((code): code is string => Boolean(code));
   const additionalFields = parseCustomerAdditionalFields(report.additionalFields);
   const visibleAdditional = additionalFields.flatMap((field) => {
-    if (SIGNATURE_LABELS.has(field.label)) return [];
+    if (INSPECTION_SIGNATURE_LABELS.has(field.label)) return [];
     const value = presentText(field.value);
     if (!value || value.startsWith("data:image")) return [];
     return [{ label: field.label, value }];
   });
+  const inspectorSignature = getSignatureFieldValue(additionalFields, INSPECTOR_SIGNATURE_LABEL);
+  const adminSignature = getSignatureFieldValue(additionalFields, ADMIN_SIGNATURE_LABEL);
+  const hasSignatures = Boolean(inspectorSignature || adminSignature);
   const inspectorName = presentText(report.reportedBy);
   const visibleInspector = inspectorName && !/^system\s+administrator$/i.test(inspectorName) ? inspectorName : null;
   const inspectionDate = presentText(formatDate(report.reportedAt));
@@ -256,7 +250,6 @@ export function InspectionReportDocument({
     const note = partNote(item);
     return note ? [{ id: item.id, note }] : [];
   });
-  const severity = presentText(report.severity);
   const calibration = presentText(report.calibrationStatus);
   const remarks = presentText(report.technicianRemarks);
 
@@ -317,26 +310,18 @@ export function InspectionReportDocument({
             </tr>
           </thead>
           <tbody>
-            <ReportRow>
-              <div className="doc-report-summary">
-                <div className="doc-report-summary-badges">
-                  {severity ? <ReportChip tone={priorityTone(severity)}>{chipLabel(severity)}</ReportChip> : null}
-                  <ReportChip tone={report.submittedAt ? "green" : "amber"}>{completionLabel}</ReportChip>
-                </div>
-                <dl className="doc-report-summary-meta">
-                  {visibleInspector ? (
+            {visibleInspector ? (
+              <ReportRow>
+                <div className="doc-report-summary">
+                  <dl className="doc-report-summary-meta">
                     <div>
                       <dt>Inspector</dt>
                       <dd>{visibleInspector}</dd>
                     </div>
-                  ) : null}
-                  <div>
-                    <dt>Report Status</dt>
-                    <dd>{reportStatus}</dd>
-                  </div>
-                </dl>
-              </div>
-            </ReportRow>
+                  </dl>
+                </div>
+              </ReportRow>
+            ) : null}
             <ReportRow>
               <FieldsSection
                 title="Client Details"
@@ -455,6 +440,40 @@ export function InspectionReportDocument({
                 <Section title="Remarks">
                   <p className="doc-text-block whitespace-pre-wrap">{remarks}</p>
                 </Section>
+              </ReportRow>
+            ) : null}
+            {hasSignatures ? (
+              <ReportRow>
+                <div className="doc-signatures">
+                  <div className="doc-sign">
+                    <div className="doc-sign-space">
+                      {inspectorSignature ? (
+                        <img
+                          src={inspectorSignature}
+                          alt="Inspector signature"
+                          className="doc-sign-image"
+                        />
+                      ) : null}
+                    </div>
+                    <div className="doc-sign-line" />
+                    <p className="doc-sign-role">Inspector Signature</p>
+                    {visibleInspector ? <p className="doc-sign-name">{visibleInspector}</p> : null}
+                  </div>
+                  <div className="doc-sign">
+                    <div className="doc-sign-space">
+                      {adminSignature ? (
+                        <img
+                          src={adminSignature}
+                          alt="Admin signature"
+                          className="doc-sign-image"
+                        />
+                      ) : null}
+                    </div>
+                    <div className="doc-sign-line" />
+                    <p className="doc-sign-role">Admin Signature</p>
+                    <p className="doc-sign-name">Admin / Coordinator</p>
+                  </div>
+                </div>
               </ReportRow>
             ) : null}
           </tbody>

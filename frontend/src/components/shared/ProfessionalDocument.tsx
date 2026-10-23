@@ -4,6 +4,7 @@ import { MesmsLogo } from "@/components/shared/MesmsLogo";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/context/SettingsContext";
 import { groupDocumentLines } from "@/lib/billingCharges";
+import { customerDocumentSummary, SERVICE_CHARGE_LABEL } from "@/lib/customerDocumentSummary";
 import { lineNet, summarizeLines } from "@/lib/estimates";
 import { formatDate, formatDocumentCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -40,10 +41,19 @@ interface ProfessionalDocumentProps {
   detailRows?: DocumentDetailRow[];
   lines?: DocumentLine[];
   discount?: number;
+  /** Customer print/PDF: one summary line, optional service charge, and the total. */
+  customerView?: boolean;
+  customerSummary?: string | null;
+  /** Staff grand total, used for the customer-copy Total row when it is already stored. */
+  totalOverride?: number;
+  /** Extra rows after Total, such as paid and balance. */
+  extraTotalRows?: Array<{ label: string; value: string }>;
   notes?: string;
   terms?: string;
   hideToolbar?: boolean;
   showSignature?: boolean;
+  /** Staff / authorized signature image (draw or upload data URL / remote URL). */
+  authorizedSignatureSrc?: string | null;
   showFooter?: boolean;
   children?: ReactNode;
   className?: string;
@@ -82,10 +92,15 @@ export function ProfessionalDocument({
   detailRows,
   lines = [],
   discount = 0,
+  customerView = false,
+  customerSummary,
+  totalOverride,
+  extraTotalRows,
   notes,
   terms,
   hideToolbar,
   showSignature,
+  authorizedSignatureSrc,
   showFooter = true,
   children,
   className,
@@ -93,6 +108,9 @@ export function ProfessionalDocument({
   const { settings } = useSettings();
   const company = settings?.companyName ?? "MESMS";
   const documentTotals = summarizeLines(lines, discount);
+  const customerSummaryRows = customerView
+    ? customerDocumentSummary(lines, { label: customerSummary, headerDiscount: discount })
+    : null;
   const subtotal = documentTotals.subtotal;
   const tax = documentTotals.tax;
   const discountTotal = documentTotals.discount;
@@ -211,7 +229,42 @@ export function ProfessionalDocument({
           ) : null}
         </div>
 
-        {lines.length > 0 ? (
+        {lines.length > 0 && customerSummaryRows ? (
+          <table className="billing-doc-table doc-table customer-summary-table">
+            <colgroup>
+              <col className="col-desc" />
+              <col className="col-amt" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th className="cell-desc">Description</th>
+                <th className="cell-amt">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="cell-desc">{customerSummaryRows.label}</td>
+                <td className="cell-amt">{formatDocumentCurrency(customerSummaryRows.workAmount)}</td>
+              </tr>
+              {customerSummaryRows.showServiceCharge ? (
+                <tr>
+                  <td className="cell-desc">{SERVICE_CHARGE_LABEL}</td>
+                  <td className="cell-amt">{formatDocumentCurrency(customerSummaryRows.serviceAmount)}</td>
+                </tr>
+              ) : null}
+              <tr className="summary-total">
+                <td className="cell-desc">Total</td>
+                <td className="cell-amt">{formatDocumentCurrency(totalOverride ?? customerSummaryRows.total)}</td>
+              </tr>
+              {(extraTotalRows ?? []).map((row) => (
+                <tr key={row.label}>
+                  <td className="cell-desc">{row.label}</td>
+                  <td className="cell-amt">{row.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : lines.length > 0 ? (
           <>
             <table className="billing-doc-table doc-table">
               <colgroup>
@@ -319,7 +372,15 @@ export function ProfessionalDocument({
           <div className="doc-signatures">
             <div className="doc-sign">
               <p className="doc-label">Authorized Signature</p>
-              <div className="doc-sign-line" />
+              {authorizedSignatureSrc ? (
+                <img
+                  src={authorizedSignatureSrc}
+                  alt="Authorized signature"
+                  className="mt-3 max-h-16 max-w-[200px] object-contain object-left"
+                />
+              ) : (
+                <div className="doc-sign-line" />
+              )}
               <p className="doc-sign-caption">{company}</p>
             </div>
             <div className="doc-sign">

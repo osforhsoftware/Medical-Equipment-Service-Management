@@ -25,7 +25,7 @@ const customerFields = {
     .optional()
     .default("")
     .refine((value) => !value || phonePattern.test(value), "Invalid phone number"),
-  address: z.string().trim().max(300).optional().default(""),
+  address: z.string().trim().max(500).optional().default(""),
   city: z.string().trim().max(100).optional().default(""),
   country: z.string().trim().max(100).optional().default(""),
   licenseGst: z.string().trim().max(100).optional().nullable(),

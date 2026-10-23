@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { Image, Loader2 } from "lucide-react";
+import { Image, Loader2, Plus, Trash2 } from "lucide-react";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -22,6 +22,7 @@ import { navItems } from "@/config/nav";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
 import { api } from "@/lib/api";
+import { DEFAULT_QA_CHECKLIST_POINTS, normalizeQaChecklistDefaults } from "@/lib/qaChecklist";
 import { toast } from "@/lib/toast";
 import { APPROVED_IMAGE_ACCEPT, uploadTypeErrorMessage } from "@/lib/uploadFileTypes";
 
@@ -64,7 +65,7 @@ export default function Settings() {
   const [companyWebsite, setCompanyWebsite] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
   const [logoFile, setLogoFile] = useState<File | null>(null);
-  const [defaultTaxRate, setDefaultTaxRate] = useState("8");
+  const [defaultTaxRate, setDefaultTaxRate] = useState("0");
   const [marginMode, setMarginMode] = useState<"on" | "fixed" | "off">("fixed");
   const [minMarginPct, setMinMarginPct] = useState("20");
   const [savingMargin, setSavingMargin] = useState(false);
@@ -82,6 +83,8 @@ export default function Settings() {
   const [defaultEstimatorUserId, setDefaultEstimatorUserId] = useState(NONE);
   const [defaultEngineerUserId, setDefaultEngineerUserId] = useState(NONE);
   const [savingAssignment, setSavingAssignment] = useState(false);
+  const [qaChecklistDefaults, setQaChecklistDefaults] = useState<string[]>([...DEFAULT_QA_CHECKLIST_POINTS]);
+  const [savingQaChecklist, setSavingQaChecklist] = useState(false);
   const orgRef = useRef<HTMLDivElement>(null);
   const {
     errors: orgErrors,
@@ -131,6 +134,7 @@ export default function Settings() {
     setDefaultInspectorUserId(settings.defaultInspectorUserId ?? NONE);
     setDefaultEstimatorUserId(settings.defaultEstimatorUserId ?? NONE);
     setDefaultEngineerUserId(settings.defaultEngineerUserId ?? NONE);
+    setQaChecklistDefaults(normalizeQaChecklistDefaults(settings.qaChecklistDefaults));
   }, [settings]);
 
   useEffect(() => {
@@ -191,6 +195,27 @@ export default function Settings() {
       toast.apiError(err, { fallback: "Unable to save margin rule" });
     } finally {
       setSavingMargin(false);
+    }
+  };
+
+  const saveQaChecklistDefaults = async () => {
+    const points = qaChecklistDefaults.map((p) => p.trim()).filter(Boolean);
+    if (!points.length) {
+      toast.error("Add at least one QA checklist point.");
+      return;
+    }
+    setSavingQaChecklist(true);
+    try {
+      const updated = await api.updateSettings({ qaChecklistDefaults: points });
+      updateLocal(updated);
+      setQaChecklistDefaults(normalizeQaChecklistDefaults(updated.qaChecklistDefaults));
+      toast.success("QA checklist saved", {
+        description: "New jobs show these default checks. Job-only extras are not changed.",
+      });
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to save QA checklist" });
+    } finally {
+      setSavingQaChecklist(false);
     }
   };
 
@@ -541,6 +566,58 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground">Default is 20%. Raise the selling price when a line is under this.</p>
               </div>
             ) : null}
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-base">QA checklist defaults</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                These points appear as checkboxes on every job QA step. Staff can add optional extras on a job without changing this list.
+              </p>
+            </div>
+            <Button size="sm" disabled={savingQaChecklist} onClick={() => void saveQaChecklistDefaults()}>
+              {savingQaChecklist ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Save checklist
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {qaChecklistDefaults.map((point, index) => (
+              <div key={index} className="flex items-center gap-2">
+                <span className="w-6 shrink-0 text-xs text-muted-foreground">{index + 1}.</span>
+                <Input
+                  value={point}
+                  placeholder="Checklist point"
+                  onChange={(e) => {
+                    const next = [...qaChecklistDefaults];
+                    next[index] = e.target.value;
+                    setQaChecklistDefaults(next);
+                  }}
+                  aria-label={`QA checklist point ${index + 1}`}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  disabled={qaChecklistDefaults.length <= 1}
+                  onClick={() => setQaChecklistDefaults(qaChecklistDefaults.filter((_, i) => i !== index))}
+                  aria-label={`Remove QA checklist point ${index + 1}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={qaChecklistDefaults.length >= 30}
+              onClick={() => setQaChecklistDefaults([...qaChecklistDefaults, ""])}
+            >
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              Add point
+            </Button>
           </CardContent>
         </Card>
 

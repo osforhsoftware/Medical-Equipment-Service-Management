@@ -599,6 +599,7 @@ export interface BackendSupplier {
   contact: string;
   email: string;
   phone: string;
+  address?: string | null;
   category: string;
   currency?: string;
   paymentTerms?: string | null;
@@ -614,11 +615,10 @@ export interface CreateSupplierInput {
   contact: string;
   email: string;
   phone: string;
+  address?: string | null;
   category: string;
   currency?: string;
   paymentTerms?: string | null;
-  deliveryLeadDays?: number | null;
-  rating?: number;
 }
 
 export interface BackendAmcContract {
@@ -654,6 +654,7 @@ export interface BackendInvoice {
   paidTotal?: string | number;
   balanceDue?: string | number;
   currency?: string;
+  customerSummary?: string | null;
   status: string;
   issuedAt: string;
   dueAt: string;
@@ -672,6 +673,7 @@ export interface BackendInvoiceLine {
   taxRate: string | number;
   discount: string | number;
   lineTotal: string | number;
+  catalogItemId?: string | null;
 }
 
 export type InvoiceLineInput = {
@@ -682,6 +684,8 @@ export type InvoiceLineInput = {
   unitPrice: number;
   taxRate?: number;
   discount?: number;
+  catalogItemId?: string | null;
+  inventoryItemId?: string | null;
 };
 
 export interface BackendInvoicePayment {
@@ -815,6 +819,7 @@ export interface BackendEstimate {
   revision: number;
   terms?: string | null;
   notes?: string | null;
+  customerSummary?: string | null;
   currency?: string | null;
   warranty?: string | null;
   estimatedCompletion?: string | null;
@@ -924,6 +929,12 @@ export interface BackendServiceJob {
       notes?: string | null;
       checkedAt?: string | null;
       checkedBy?: string | null;
+      checklist?: Array<{
+        id: string;
+        label: string;
+        checked: boolean;
+        isExtra?: boolean;
+      }> | null;
     };
     delivery?: {
       method?: string | null;
@@ -1068,7 +1079,12 @@ export interface UpdateJobInput {
       notes?: string | null;
       checkedAt?: string | null;
       checkedBy?: string | null;
-      checklist?: unknown;
+      checklist?: Array<{
+        id: string;
+        label: string;
+        checked: boolean;
+        isExtra?: boolean;
+      }> | null;
     };
     delivery?: {
       method?: string | null;
@@ -1126,7 +1142,6 @@ export interface BackendInventoryItem {
   /** Computed: inStock − reserved. Added in Phase 1; additive, non-breaking. */
   available?: number;
   reorderLevel: number;
-  maxLevel?: number;
   binLocation?: string;
   trackBatches?: boolean;
   trackSerials?: boolean;
@@ -1156,7 +1171,6 @@ export interface CreateInventoryInput {
   branchId?: string;
   inStock?: number;
   reorderLevel?: number;
-  maxLevel?: number;
   binLocation?: string;
   trackBatches?: boolean;
   trackSerials?: boolean;
@@ -1397,6 +1411,7 @@ export interface BackendSettings {
   defaultInspectorUserId: string | null;
   defaultEstimatorUserId: string | null;
   defaultEngineerUserId: string | null;
+  qaChecklistDefaults: string[];
   rbacMatrix: Record<string, string[]>;
 }
 
@@ -1424,6 +1439,7 @@ export interface UpdateSettingsInput {
   defaultInspectorUserId?: string | null;
   defaultEstimatorUserId?: string | null;
   defaultEngineerUserId?: string | null;
+  qaChecklistDefaults?: string[];
   rbacMatrix?: Record<string, string[]>;
 }
 
@@ -2292,6 +2308,9 @@ export const api = {
   getInventoryItem: (id: string) =>
     request<BackendInventoryItem>(`/api/inventory/${id}`),
 
+  getInventoryBySku: (sku: string) =>
+    request<BackendInventoryItem>(`/api/inventory/by-sku/${encodeURIComponent(sku)}`),
+
   getInventoryStats: () =>
     request<{
       itemCount: number;
@@ -2485,7 +2504,7 @@ export const api = {
   listStockReservations: (status?: string) =>
     request<BackendStockReservation[]>(`/api/domain/stock/reservations${queryString({ status })}`),
 
-  createStockReservation: (data: { inventoryItemId: string; quantity: number; purpose: string }) =>
+  createStockReservation: (data: { inventoryItemId: string; quantity: number; purpose?: string }) =>
     request<BackendStockReservation>("/api/domain/stock/reservations", {
       method: "POST",
       body: JSON.stringify(data),
@@ -2595,6 +2614,7 @@ export const api = {
     data: {
       validUntil: string;
       notes?: string | null;
+      customerSummary?: string | null;
       lines: Array<{
         inventoryItemId?: string | null;
         catalogItemId?: string | null;
@@ -2718,7 +2738,7 @@ export const api = {
 
   getInvoice: (id: string) => request<BackendInvoice>(`/api/billing/${id}`),
 
-  updateInvoice: (id: string, data: { dueAt?: string; lineItems?: InvoiceLineInput[] }) =>
+  updateInvoice: (id: string, data: { dueAt?: string; customerSummary?: string | null; lineItems?: InvoiceLineInput[] }) =>
     request<BackendInvoice>(`/api/billing/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
@@ -2749,6 +2769,7 @@ export const api = {
       discount: number;
       terms?: string | null;
       notes?: string | null;
+      customerSummary?: string | null;
       currency?: string | null;
       warranty?: string | null;
       estimatedCompletion?: string | null;

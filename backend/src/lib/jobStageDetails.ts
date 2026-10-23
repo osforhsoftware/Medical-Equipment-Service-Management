@@ -1,4 +1,8 @@
 import { Prisma } from "@prisma/client";
+import {
+  normalizeQaChecklistItems,
+  type QaChecklistItem,
+} from "@/config/defaultQaChecklist";
 
 export type JobDeliveryCourier = {
   name?: string | null;
@@ -12,6 +16,7 @@ export type JobQaStage = {
   notes?: string | null;
   checkedAt?: string | null;
   checkedBy?: string | null;
+  checklist?: QaChecklistItem[] | null;
 };
 
 export type JobDeliveryStage = {
@@ -60,12 +65,16 @@ export function parseJobStageDetails(value: unknown): JobStageDetails {
       ? (raw.delivery as Record<string, unknown>)
       : null;
 
+  const checklist =
+    qaRaw && "checklist" in qaRaw ? normalizeQaChecklistItems(qaRaw.checklist) : undefined;
+
   const qa: JobQaStage | undefined = qaRaw
     ? {
         result: qaRaw.result === "pass" || qaRaw.result === "fail" ? qaRaw.result : undefined,
         notes: trimOrNull(qaRaw.notes, 2000) ?? null,
         checkedAt: typeof qaRaw.checkedAt === "string" ? qaRaw.checkedAt : null,
         checkedBy: typeof qaRaw.checkedBy === "string" ? qaRaw.checkedBy : null,
+        ...(checklist ? { checklist } : qaRaw.checklist === null ? { checklist: null } : {}),
       }
     : undefined;
 
@@ -96,8 +105,18 @@ export function mergeJobStageDetails(
     return Object.keys(parsed).length ? (parsed as Prisma.InputJsonValue) : Prisma.JsonNull;
   }
   const base = parseJobStageDetails(existing);
+  const nextQa = patch.qa
+    ? {
+        ...base.qa,
+        ...patch.qa,
+        checklist:
+          patch.qa.checklist !== undefined
+            ? normalizeQaChecklistItems(patch.qa.checklist)
+            : base.qa?.checklist,
+      }
+    : base.qa;
   const next: JobStageDetails = {
-    qa: patch.qa ? { ...base.qa, ...patch.qa } : base.qa,
+    qa: nextQa,
     delivery: patch.delivery
       ? {
           ...base.delivery,

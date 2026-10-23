@@ -7,9 +7,10 @@ import {
   BILLING_CHARGE_GROUPS,
   billingLineTypeLabel,
   extraLineTotal,
+  groupDocumentLines,
   type BillingChargeGroupKey,
 } from "@/lib/billingCharges";
-import { totalsForEstimate } from "@/lib/estimates";
+import { lineNet, totalsForEstimate } from "@/lib/estimates";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -32,18 +33,62 @@ export function InfoRow({ label, value }: { label: string; value: React.ReactNod
   );
 }
 
+export type BillingPreviewLine = {
+  id?: string;
+  type?: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  discount?: number;
+  taxRate?: number;
+};
+
+/** Each product and service, with its own price — not only the group total. */
+export function ItemizedChargeLines({ lines }: { lines: BillingPreviewLine[] }) {
+  const grouped = groupDocumentLines(lines.filter((line) => line.description.trim()));
+  if (!grouped.length) return null;
+  return (
+    <div className="space-y-3">
+      {grouped.map((group) => (
+        <div key={group.key}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group.label}</p>
+          <ul className="mt-1 divide-y rounded-md border">
+            {group.lines.map((line, index) => (
+              <li key={line.id ?? `${group.key}-${index}`} className="flex items-start justify-between gap-3 px-2 py-1.5 text-sm">
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{line.description}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {Number(line.quantity)} × {formatCurrency(line.unitPrice)}
+                    {Number(line.discount) > 0 ? ` · disc. ${formatCurrency(line.discount)}` : ""}
+                  </span>
+                </span>
+                <span className="shrink-0 font-medium">{formatCurrency(lineNet(line))}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ChargeBreakdown({
   groups,
   total,
   label = "Final amount",
+  hideEmpty = false,
 }: {
   groups: Record<BillingChargeGroupKey, number>;
   total: number;
   label?: string;
+  hideEmpty?: boolean;
 }) {
+  const visible = hideEmpty
+    ? BILLING_CHARGE_GROUPS.filter((group) => groups[group.key] > 0)
+    : BILLING_CHARGE_GROUPS;
   return (
     <div className="space-y-1">
-      {BILLING_CHARGE_GROUPS.map((group) => (
+      {visible.map((group) => (
         <InfoRow key={group.key} label={group.label} value={formatCurrency(groups[group.key])} />
       ))}
       <div className="flex min-w-0 items-start justify-between gap-4 border-t pt-2 text-sm">

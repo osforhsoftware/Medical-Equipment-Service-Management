@@ -16,9 +16,10 @@ export const invoiceLineUpdateSchema = z.object({
 
 export const updateInvoiceSchema = z.object({
   dueAt: z.string().min(1).optional(),
+  customerSummary: z.string().trim().max(200).nullable().optional(),
   lineItems: z.array(invoiceLineUpdateSchema).min(1, "At least one line item is required").optional(),
-}).refine((data) => data.dueAt || data.lineItems?.length, {
-  message: "Provide a due date and/or line items to update",
+}).refine((data) => data.dueAt || data.lineItems?.length || data.customerSummary !== undefined, {
+  message: "Provide a due date, line items, or customer summary to update",
 });
 
 export const createInvoiceSchema = z.object({

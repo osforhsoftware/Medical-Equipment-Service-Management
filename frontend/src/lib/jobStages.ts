@@ -1,15 +1,11 @@
+import { parseQaChecklist, type QaChecklistItem } from "@/lib/qaChecklist";
+
 export type JobQaStage = {
   result?: "pass" | "fail";
   notes?: string | null;
   checkedAt?: string | null;
   checkedBy?: string | null;
-  checklist?: {
-    repairVerified?: boolean;
-    testingPassed?: boolean;
-    calibrationChecked?: boolean;
-    cleanlinessOk?: boolean;
-    docsReady?: boolean;
-  } | null;
+  checklist?: QaChecklistItem[] | null;
 };
 
 export type JobDeliveryStage = {
@@ -43,14 +39,21 @@ export type JobWorkflowStageId = (typeof JOB_WORKFLOW_STAGES)[number]["id"];
 export function parseJobStageDetails(value: unknown): JobStageDetails {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const raw = value as Record<string, unknown>;
-  const qa =
+  const qaRaw =
     raw.qa && typeof raw.qa === "object" && !Array.isArray(raw.qa)
-      ? (raw.qa as JobQaStage)
+      ? (raw.qa as Record<string, unknown>)
       : undefined;
   const delivery =
     raw.delivery && typeof raw.delivery === "object" && !Array.isArray(raw.delivery)
       ? (raw.delivery as JobDeliveryStage)
       : undefined;
+  const checklist = qaRaw ? parseQaChecklist(qaRaw.checklist) : null;
+  const qa: JobQaStage | undefined = qaRaw
+    ? {
+        ...(qaRaw as JobQaStage),
+        checklist: checklist ?? null,
+      }
+    : undefined;
   return {
     ...(qa ? { qa } : {}),
     ...(delivery ? { delivery } : {}),

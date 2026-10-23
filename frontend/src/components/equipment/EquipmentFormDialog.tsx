@@ -27,7 +27,15 @@ import {
 } from "@/components/ui/select";
 import { api, type BackendEquipment, type CreateEquipmentInput } from "@/lib/api";
 import { useFormValidation } from "@/hooks/useFormValidation";
-import { fieldAria, fieldErrorClass, fieldRules, type FieldErrors } from "@/lib/formValidation";
+import {
+  fieldAria,
+  fieldErrorClass,
+  fieldRules,
+  parseApiFieldErrors,
+  type FieldErrors,
+} from "@/lib/formValidation";
+
+const SERIAL_NUMBER_TAKEN_MESSAGE = "Serial number already taken. Please check.";
 import { EQUIPMENT_CURRENT_STATUS_OPTIONS } from "@/lib/equipmentWarranty";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/context/AuthContext";
@@ -45,7 +53,6 @@ type FormState = {
   manufacturer: string;
   category: string;
   serialNumber: string;
-  partNumber: string;
   partDescription: string;
   additionalNote: string;
   customerId: string;
@@ -74,7 +81,6 @@ const equipmentSchema = z.object({
   manufacturer: fieldRules.optionalString(),
   category: fieldRules.optionalString(),
   serialNumber: fieldRules.requiredString("Serial number"),
-  partNumber: fieldRules.optionalString(),
   partDescription: fieldRules.optionalString(),
   additionalNote: fieldRules.optionalString(),
   customerId: fieldRules.optionalString(),
@@ -105,7 +111,6 @@ const emptyForm = (): FormState => ({
   manufacturer: "",
   category: "",
   serialNumber: "",
-  partNumber: "",
   partDescription: "",
   additionalNote: "",
   customerId: "",
@@ -131,7 +136,6 @@ function fromEquipment(item: BackendEquipment): FormState {
     manufacturer: item.manufacturer ?? "",
     category: item.category ?? "",
     serialNumber: item.serialNumber,
-    partNumber: item.partNumber ?? "",
     partDescription: item.partDescription ?? "",
     additionalNote: item.additionalNote ?? "",
     customerId: item.customerId ?? "",
@@ -157,7 +161,6 @@ function toPayload(form: FormState, unit?: Pick<UnitEntry, "serialNumber">): Cre
     manufacturer: form.manufacturer.trim(),
     category: form.category,
     serialNumber: (unit?.serialNumber ?? form.serialNumber).trim(),
-    partNumber: form.partNumber.trim() || null,
     partDescription: form.partDescription.trim() || null,
     additionalNote: form.additionalNote.trim() || null,
     customerId: form.customerId || null,
@@ -261,7 +264,6 @@ export function EquipmentFormDialog({
     fieldOrder: editing
       ? [
           "serialNumber",
-          "partNumber",
           "partDescription",
           "name",
           "manufacturer",
@@ -283,7 +285,6 @@ export function EquipmentFormDialog({
           "name",
           "manufacturer",
           "model",
-          "partNumber",
           "partDescription",
           "category",
           "customerId",
@@ -400,13 +401,16 @@ export function EquipmentFormDialog({
         } catch (err) {
           const message =
             err instanceof Error ? err.message : "Unable to register this unit";
-          const apiUnitErrors: FieldErrors = {
-            unit_0_serialNumber: message,
-          };
+          const { fieldErrors } = parseApiFieldErrors(err);
+          const serialMessage =
+            fieldErrors.serialNumber ||
+            (message === SERIAL_NUMBER_TAKEN_MESSAGE ? message : undefined);
 
           setUnits(remaining);
-          setUnitErrors(apiUnitErrors);
           setUnitsTouched(true);
+          setUnitErrors(
+            serialMessage ? { unit_0_serialNumber: serialMessage } : {},
+          );
 
           if (created.length > 0) {
             void refreshSettings();
@@ -416,6 +420,8 @@ export function EquipmentFormDialog({
               variant: "destructive",
             });
             onSaved?.(created[created.length - 1]);
+          } else if (serialMessage) {
+            // Serial uniqueness is shown on the serial field; do not save or toast.
           } else if (!applyApiErrors(err, dialogRef.current)) {
             toast.apiError(err, { fallback: "Unable to register equipment" });
           }
@@ -602,21 +608,6 @@ export function EquipmentFormDialog({
               />
             </div>
           </div>
-          <div className="grid gap-2" data-field="partNumber">
-            <Label htmlFor="part-number">Part number (optional)</Label>
-            <Input
-              id="part-number"
-              value={form.partNumber}
-              onChange={(e) => {
-                const next = { ...form, partNumber: e.target.value };
-                setForm(next);
-                handleChange("partNumber", next);
-              }}
-              onBlur={() => handleBlur("partNumber", form)}
-              placeholder="PN-MRI-100"
-              className="font-mono"
-            />
-          </div>
           <div className="grid gap-2" data-field="partDescription">
             <Label htmlFor="part-description">Part description (optional)</Label>
             <Textarea
@@ -702,7 +693,7 @@ export function EquipmentFormDialog({
             </div>
           </div>
           <div className="grid gap-2" data-field="location">
-            <Label htmlFor="location">Location at site (optional)</Label>
+            <Label htmlFor="location">Location (optional)</Label>
             <Input
               id="location"
               value={form.location}

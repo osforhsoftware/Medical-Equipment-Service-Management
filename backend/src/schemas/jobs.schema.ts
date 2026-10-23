@@ -26,6 +26,19 @@ const stageDetailsSchema = z
 
         checkedBy: z.string().optional().nullable(),
 
+        checklist: z
+          .array(
+            z.object({
+              id: z.string().trim().min(1).max(64),
+              label: z.string().trim().min(1).max(200),
+              checked: z.boolean(),
+              isExtra: z.boolean().optional(),
+            }),
+          )
+          .max(40)
+          .optional()
+          .nullable(),
+
       })
 
       .optional(),

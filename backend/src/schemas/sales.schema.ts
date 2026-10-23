@@ -28,6 +28,7 @@ export const salesOrderLineSchema = z.object({
 
 export const updateSalesQuoteSchema = z.object({
   notes: z.string().max(5000).optional().nullable(),
+  customerSummary: z.string().trim().max(200).nullable().optional(),
   validUntil: z.string().min(1, "Valid until date is required"),
   lines: z.array(salesOrderLineSchema).min(1, "Add at least one product"),
 });

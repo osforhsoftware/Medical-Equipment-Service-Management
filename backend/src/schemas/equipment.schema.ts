@@ -39,7 +39,7 @@ export const createEquipmentSchema = z.object({
   model: optionalText(120),
   manufacturer: optionalText(120),
   category: optionalText(80),
-  serialNumber: z.string().min(1, "Serial number is required").max(120),
+  serialNumber: z.string().trim().min(1, "Serial number is required").max(120),
   partNumber: optionalNullableText(120),
   partDescription: optionalNullableText(2000),
   additionalNote: optionalNullableText(5000),

@@ -232,6 +232,7 @@ export class DomainService {
             lines: input.lines,
             terms: input.terms,
             notes: input.notes,
+            customerSummary: input.customerSummary ?? null,
             discount: input.discount,
             headerDiscount: Number(input.discount ?? 0) || 0,
             currency: input.currency,
@@ -276,6 +277,9 @@ export class DomainService {
           partsCost: money(lines.filter((x: any) => x.type === "part").reduce((s: number, x: any) => s + Number(x.lineTotal), 0)),
           terms: input.terms,
           notes: input.notes,
+          ...(input.customerSummary !== undefined
+            ? { customerSummary: String(input.customerSummary ?? "").trim() || null }
+            : {}),
           ...(input.currency ? { currency: input.currency } : {}),
           warranty: input.warranty !== undefined ? input.warranty : undefined,
           estimatedCompletion:
@@ -758,7 +762,7 @@ export class DomainService {
   async createReservation(
     tenantId: string,
     actor: Actor,
-    input: { inventoryItemId: string; quantity: number; purpose: string },
+    input: { inventoryItemId: string; quantity: number; purpose?: string | null },
   ) {
     return prisma.$transaction(async (tx) => {
       const item = await tx.inventoryItem.findFirst({
@@ -772,13 +776,14 @@ export class DomainService {
           409,
         );
       }
+      const purpose = input.purpose?.trim() || null;
       const reservation = await tx.stockReservation.create({
         data: {
           tenantId,
           inventoryItemId: item.id,
           requestedQuantity: input.quantity,
           quantity: input.quantity,
-          purpose: input.purpose.trim(),
+          purpose,
           status: "active",
           reservedBy: actor.userId,
         },
@@ -797,7 +802,7 @@ export class DomainService {
           balanceAfter: updated.inStock,
           referenceType: "reservation",
           referenceId: reservation.id,
-          reason: input.purpose.trim(),
+          reason: purpose,
           actorId: actor.userId,
         },
       });
@@ -1125,8 +1130,8 @@ export class DomainService {
         include: { shipment: true },
       });
       if (!po) throw new AppError("Purchase order not found", 404);
-      if (po.status === "received") {
-        throw new AppError("Cannot change shipment after the PO is fully received", 409);
+      if (po.status === "closed") {
+        throw new AppError("Cannot change shipment after the PO is closed", 409);
       }
 
       const freightCost = input.freightCost != null ? money(input.freightCost) : null;
@@ -1179,8 +1184,8 @@ export class DomainService {
       where: { id: purchaseOrderId, tenantId, status: { not: "cancelled" } },
     });
     if (!po) throw new AppError("Purchase order not found", 404);
-    if (po.status === "received") {
-      throw new AppError("Cannot change landed costs after the PO is fully received", 409);
+    if (po.status === "closed") {
+      throw new AppError("Cannot change landed costs after the PO is closed", 409);
     }
 
     const freightCost =
@@ -1307,10 +1312,15 @@ export class DomainService {
   async receivePurchaseOrder(tenantId: string, purchaseOrderId: string, actor: Actor, input: any) {
     return prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findFirst({
-        where: { id: purchaseOrderId, tenantId, status: { notIn: ["cancelled", "received"] } },
+        where: { id: purchaseOrderId, tenantId, status: { in: ["sent", "partial"] } },
         include: { lineItems: true },
       });
-      if (!po) throw new AppError("Receivable purchase order not found", 404);
+      if (!po) {
+        throw new AppError(
+          "Receivable purchase order not found. Send the PO to the supplier before posting a goods receipt.",
+          404,
+        );
+      }
       const merchandiseTotal = po.lineItems.reduce(
         (sum, line) => sum.plus(line.lineTotal),
         new Prisma.Decimal(0),
@@ -1403,7 +1413,7 @@ export class DomainService {
       }
       const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId } });
       const complete = lines.every((line) => line.quantityReceived >= line.quantityOrdered);
-      await tx.purchaseOrder.update({ where: { id: po.id }, data: { status: complete ? "received" : "partial" } });
+      await tx.purchaseOrder.update({ where: { id: po.id }, data: { status: complete ? "closed" : "partial" } });
       return tx.purchaseReceipt.findUniqueOrThrow({ where: { id: receipt.id }, include: { lines: true } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
@@ -1434,7 +1444,7 @@ export class DomainService {
   async createPurchaseReturn(tenantId: string, actor: Actor, input: any) {
     return prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findFirst({
-        where: { id: input.purchaseOrderId, tenantId, status: { in: ["partial", "received"] } },
+        where: { id: input.purchaseOrderId, tenantId, status: { in: ["partial", "closed"] } },
         include: { lineItems: true },
       });
       if (!po) throw new AppError("Returnable purchase order not found", 404);
@@ -1689,6 +1699,7 @@ export class DomainService {
           balanceDue: total,
           currency: input.currency.toUpperCase(),
           dueAt: input.dueAt,
+          customerSummary: job.estimate.customerSummary,
           lineItems: { create: sourceLines },
         },
         include: { lineItems: true },

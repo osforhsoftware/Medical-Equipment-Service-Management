@@ -81,6 +81,22 @@ export class EquipmentRepository {
     });
   }
 
+  async findBySerialNumber(
+    serialNumber: string,
+    tenantId: string,
+    excludeId?: string,
+  ): Promise<Equipment | null> {
+    const serial = serialNumber.trim();
+    if (!serial) return null;
+    return prisma.equipment.findFirst({
+      where: {
+        tenantId,
+        serialNumber: serial,
+        ...(excludeId ? { NOT: { id: excludeId } } : {}),
+      },
+    });
+  }
+
   async create(tenantId: string, data: Omit<Prisma.EquipmentUncheckedCreateInput, "tenantId">): Promise<Equipment> {
     return prisma.equipment.create({ data: { ...data, tenantId } });
   }

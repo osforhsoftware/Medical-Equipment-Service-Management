@@ -1,6 +1,7 @@
 import { prisma } from "@/db/prisma";
 import type { TenantSettings, Prisma } from "@prisma/client";
 import { DEFAULT_RBAC_MATRIX } from "@/config/defaultRbac";
+import { DEFAULT_QA_CHECKLIST_POINTS } from "@/config/defaultQaChecklist";
 
 export class SettingsRepository {
   async findByTenantId(tenantId: string): Promise<TenantSettings | null> {
@@ -15,6 +16,7 @@ export class SettingsRepository {
       data: {
         tenantId,
         rbacMatrix: DEFAULT_RBAC_MATRIX as Prisma.InputJsonValue,
+        qaChecklistDefaults: [...DEFAULT_QA_CHECKLIST_POINTS] as Prisma.InputJsonValue,
       },
     });
   }

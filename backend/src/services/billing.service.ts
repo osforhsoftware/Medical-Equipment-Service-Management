@@ -546,9 +546,10 @@ export class BillingService {
     tenantId: string,
     invoiceId: string,
     actor: Actor,
-    input: { dueAt?: Date; lineItems?: InvoiceLineUpdateInput[] },
+    input: { dueAt?: Date; lineItems?: InvoiceLineUpdateInput[]; customerSummary?: string | null },
   ) {
-    if (!input.dueAt && !input.lineItems?.length) {
+    const summaryOnly = input.customerSummary !== undefined && !input.dueAt && !input.lineItems?.length;
+    if (!input.dueAt && !input.lineItems?.length && input.customerSummary === undefined) {
       throw new AppError("Nothing to update", 422);
     }
 
@@ -558,14 +559,19 @@ export class BillingService {
         include: { lineItems: true, payments: true },
       });
       if (!invoice) throw new AppError("Invoice not found", 404);
-      if (!["draft", "pendingApproval"].includes(invoice.status)) {
-        throw new AppError("Only draft or pending-approval invoices can be edited", 409);
-      }
-      if (invoice.payments.length > 0) {
-        throw new AppError("Invoices with payments cannot be edited", 409);
+      if (!summaryOnly) {
+        if (!["draft", "pendingApproval"].includes(invoice.status)) {
+          throw new AppError("Only draft or pending-approval invoices can be edited", 409);
+        }
+        if (invoice.payments.length > 0) {
+          throw new AppError("Invoices with payments cannot be edited", 409);
+        }
       }
 
       const updateData: Prisma.InvoiceUpdateInput = {};
+      if (input.customerSummary !== undefined) {
+        updateData.customerSummary = input.customerSummary?.trim() || null;
+      }
       if (input.dueAt) updateData.dueAt = input.dueAt;
 
       if (input.lineItems?.length) {
@@ -592,7 +598,10 @@ export class BillingService {
             net,
             estimateLineItemId: existing?.estimateLineItemId ?? null,
             jobExtraId: existing?.jobExtraId ?? null,
-            catalogItemId: existing?.catalogItemId ?? null,
+            catalogItemId:
+              lineInput.catalogItemId !== undefined
+                ? lineInput.catalogItemId
+                : (existing?.catalogItemId ?? null),
             type: lineInput.type ?? existing?.type ?? "adjustment",
             description: lineInput.description.trim(),
             quantity: qty,
@@ -632,6 +641,7 @@ export class BillingService {
                 taxRate: line.taxRate,
                 discount: line.discount,
                 lineTotal: line.lineTotal,
+                catalogItemId: line.catalogItemId,
               },
             });
           } else {

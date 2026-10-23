@@ -45,15 +45,15 @@ export default function InventoryReportsPage() {
 
   const inventoryQuery = useQuery({
     queryKey: ["reports", "inventory"],
-    queryFn: () => emptyOnError({ data: [] as BackendInventoryItem[] })(() => api.listInventory({ limit: 100, page: 1, status: "active" })),
+    queryFn: () => emptyOnError({ data: [] as BackendInventoryItem[] })(() => api.listInventory({ limit: 200, page: 1, status: "active" })),
   });
   const purchaseQuery = useQuery({
     queryKey: ["reports", "purchase-orders"],
-    queryFn: () => emptyOnError({ data: [] as BackendPurchaseOrder[] })(() => api.listPurchaseOrders({ limit: 100, page: 1 })),
+    queryFn: () => emptyOnError({ data: [] as BackendPurchaseOrder[] })(() => api.listPurchaseOrders({ limit: 200, page: 1 })),
   });
   const jobsQuery = useQuery({
     queryKey: ["reports", "jobs"],
-    queryFn: () => emptyOnError({ data: [] as BackendServiceJob[] })(() => api.listJobs({ limit: 100, page: 1, completedScope: "all" })),
+    queryFn: () => emptyOnError({ data: [] as BackendServiceJob[] })(() => api.listJobs({ limit: 200, page: 1, completedScope: "all" })),
   });
 
   const items = inventoryQuery.data?.data ?? [];

@@ -83,7 +83,7 @@ model TenantSettings {
   companyAddress        String?  @map("company_address") @db.VarChar(500)
   companyPhone          String?  @map("company_phone") @db.VarChar(40)
   companyWebsite        String?  @map("company_website") @db.VarChar(200)
-  defaultTaxRate        Decimal  @default(8) @map("default_tax_rate") @db.Decimal(5, 2)
+  defaultTaxRate        Decimal  @default(0) @map("default_tax_rate") @db.Decimal(5, 2)
   /// off = no minimum; fixed = minMarginPct on every line; on = each item's own selling-price margin
   marginMode            String   @default("fixed") @map("margin_mode") @db.VarChar(16)
   minMarginPct          Decimal  @default(20) @map("min_margin_pct") @db.Decimal(5, 2)
@@ -102,6 +102,8 @@ model TenantSettings {
   defaultEngineerUserId                  String? @map("default_engineer_user_id")
   /// Prefix for newly registered equipment. Changing it does not rewrite existing asset tags.
   assetTagPrefix        String?  @map("asset_tag_prefix") @db.VarChar(20)
+  /// Default QA checklist point labels shown on jobs. Job-only extras are stored on the job.
+  qaChecklistDefaults   Json     @default("[]") @map("qa_checklist_defaults")
   rbacMatrix            Json     @default("{}") @map("rbac_matrix")
   createdAt             DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
@@ -362,6 +364,7 @@ model Equipment {
   qrScans         QrScan[]
 
   @@unique([tenantId, assetTag])
+  @@unique([tenantId, serialNumber])
   @@index([tenantId])
   @@index([customerId])
   @@index([tenantId, category])
@@ -696,6 +699,7 @@ model Estimate {
   revision         Int            @default(1)
   terms            String?        @db.Text
   notes            String?        @db.Text
+  customerSummary  String?        @map("customer_summary") @db.VarChar(200)
   currency         String         @default("INR")
   warranty         String?        @db.Text
   estimatedCompletion DateTime?   @map("estimated_completion")
@@ -1287,6 +1291,7 @@ model Supplier {
   contact          String
   email            String
   phone            String
+  address          String?  @db.Text
   category         String
   currency         String   @default("INR")
   paymentTerms     String?  @map("payment_terms")
@@ -1425,8 +1430,8 @@ model PurchaseReceiptLine {
 enum PurchaseOrderStatus {
   draft
   sent
-  received
   partial
+  closed
   cancelled
 }
 
@@ -1575,6 +1580,7 @@ model Invoice {
   total            Decimal       @default(0) @db.Decimal(12, 2)
   paidTotal        Decimal       @default(0) @map("paid_total") @db.Decimal(12, 2)
   balanceDue       Decimal       @default(0) @map("balance_due") @db.Decimal(12, 2)
+  customerSummary  String?       @map("customer_summary") @db.VarChar(200)
   currency         String        @default("USD")
   status           InvoiceStatus @default(draft)
   approvedAt       DateTime?     @map("approved_at")

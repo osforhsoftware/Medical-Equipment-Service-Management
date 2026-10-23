@@ -18,6 +18,8 @@ import {
   BillingServiceNotes,
   ChargeBreakdown,
   InfoRow,
+  ItemizedChargeLines,
+  type BillingPreviewLine,
 } from "@/components/billing/billing-ui";
 import { InvoiceLineEditor } from "@/components/billing/InvoiceLineEditor";
 import {
@@ -28,7 +30,7 @@ import {
   type BillingJobContext,
   type InvoiceLineInput,
 } from "@/lib/api";
-import { extraLineTotal, lineAmount, summarizeChargeGroups } from "@/lib/billingCharges";
+import { lineAmount, summarizeChargeGroups } from "@/lib/billingCharges";
 import { defaultDatePlusDays, formatCurrency, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
@@ -93,36 +95,51 @@ export default function BillingJobDetail() {
     ]);
   }, []);
 
-  const charges = useMemo(() => {
-    const estimateLines = (context?.job.estimate?.lineItems ?? []).map((line) => ({
+  const billPreview = useMemo(() => {
+    const estimateLines: BillingPreviewLine[] = (context?.job.estimate?.lineItems ?? []).map((line) => ({
+      id: line.id,
       type: line.type,
+      description: line.description,
       quantity: Number(line.quantity),
       unitPrice: Number(line.unitPrice),
       discount: Number(line.discount),
       taxRate: Number(line.taxRate),
-      lineTotal: Number(line.lineTotal),
     }));
-    const extraLines = (context?.job.extras ?? [])
+    const extraLines: BillingPreviewLine[] = (context?.job.extras ?? [])
       .filter((extra) => extra.status === "approved")
       .map((extra) => ({
+        id: extra.id,
         type: extra.type || "product",
+        description: extra.description,
         quantity: Number(extra.quantity),
         unitPrice: Number(extra.unitPrice),
         taxRate: Number(extra.taxRate),
-        lineTotal: extraLineTotal(extra),
       }));
-    const billingLines = additionalLines
-      .filter((line) => line.description.trim())
-      .map((line) => ({
+    const billingLines: BillingPreviewLine[] = additionalLines
+      .filter((line) => line.description.trim() || Number(line.unitPrice) > 0)
+      .map((line, index) => ({
+        id: line.id ?? `added-${index}`,
+        type: line.type || "service",
+        description: line.description.trim() || (line.type === "service" || line.type === "labor" ? "Service" : "Item"),
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        discount: line.discount,
+        taxRate: line.taxRate,
+      }));
+    const lines = [...estimateLines, ...extraLines, ...billingLines];
+    return {
+      lines,
+      charges: summarizeChargeGroups(lines.map((line) => ({
         type: line.type || "other",
         quantity: line.quantity,
         unitPrice: line.unitPrice,
         discount: line.discount,
         taxRate: line.taxRate,
-        lineTotal: lineAmount(line),
-      }));
-    return summarizeChargeGroups([...estimateLines, ...extraLines, ...billingLines]);
+        lineTotal: lineAmount({ ...line, type: line.type || "other" }),
+      }))),
+    };
   }, [context, additionalLines]);
+  const charges = billPreview.charges;
 
   const equipment = context?.job.equipment ?? null;
   const equipmentWarrantyPayload = warrantyForm.noServiceWarranty
@@ -177,7 +194,12 @@ export default function BillingJobDetail() {
         jobId,
         new Date(dueAt).toISOString(),
         "INR",
-        additionalLines.filter((line) => line.description.trim()),
+        additionalLines
+          .filter((line) => line.description.trim() || Number(line.unitPrice) > 0)
+          .map((line) => ({
+            ...line,
+            description: line.description.trim() || (line.type === "service" || line.type === "labor" ? "Service" : "Item"),
+          })),
         equipment ? equipmentWarrantyPayload : undefined,
       );
       toast({ title: "Final invoice generated", description: `Amount ${formatCurrency(invoice.total)}` });
@@ -350,7 +372,8 @@ export default function BillingJobDetail() {
                       onChange={setAdditionalLines}
                     />
                     <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 xl:sticky xl:top-4">
-                      <ChargeBreakdown groups={charges.groups} total={charges.total} />
+                      <ItemizedChargeLines lines={billPreview.lines} />
+                      <ChargeBreakdown groups={charges.groups} total={charges.total} hideEmpty />
                       <div className="grid gap-2">
                         <Label htmlFor="invoice-due-at">Payment due date</Label>
                         <Input

@@ -6,6 +6,7 @@ import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { fieldAria, fieldErrorClass, fieldRules, focusFirstInvalidField, type FieldErrors } from "@/lib/formValidation";
+import { CustomerSummaryField } from "@/components/shared/CustomerSummaryField";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ProfessionalDocument } from "@/components/shared/ProfessionalDocument";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -17,13 +18,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { InfoRow, ChargeBreakdown, downloadInvoicePdf, normalizeInvoiceLineDescription } from "@/components/billing/billing-ui";
+import { InfoRow, ChargeBreakdown, ItemizedChargeLines, downloadInvoicePdf, normalizeInvoiceLineDescription } from "@/components/billing/billing-ui";
 import { InvoiceLineEditor } from "@/components/billing/InvoiceLineEditor";
 import { ApiError, api, type BackendCatalogItem, type BackendCustomer, type BackendInventoryItem, type BackendInvoice, type BillingJobContext, type InvoiceLineInput } from "@/lib/api";
 import { newBillingLine, summarizeChargeGroups } from "@/lib/billingCharges";
 import { summarizeLines } from "@/lib/estimates";
 import { PAYMENT_METHOD_OPTIONS } from "@/lib/fixedOptions";
-import { formatCurrency, formatDate, formatDateTime, formatServiceStatus } from "@/lib/format";
+import { formatCurrency, formatDate, formatDateTime, formatDocumentCurrency, formatServiceStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 const newLine = (): InvoiceLineInput => newBillingLine("product");
@@ -37,6 +38,7 @@ function toEditableLines(invoice: BackendInvoice): InvoiceLineInput[] {
     unitPrice: Number(line.unitPrice),
     taxRate: Number(line.taxRate),
     discount: Number(line.discount),
+    catalogItemId: line.catalogItemId ?? null,
   }));
 }
 
@@ -105,6 +107,8 @@ export default function BillingInvoiceDetail() {
   const [editing, setEditing] = useState(false);
   const [editDueAt, setEditDueAt] = useState("");
   const [editLines, setEditLines] = useState<InvoiceLineInput[]>([]);
+  const [customerSummary, setCustomerSummary] = useState("");
+  const [summarySaving, setSummarySaving] = useState(false);
   const [payment, setPayment] = useState({ amount: 0, method: "bank_transfer", methodOther: "", reference: "", note: "" });
   const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
   const [catalog, setCatalog] = useState<BackendCatalogItem[]>([]);
@@ -168,6 +172,10 @@ export default function BillingInvoiceDetail() {
     }
   }, [invoice?.id, invoice?.balanceDue, invoice?.total]);
 
+  useEffect(() => {
+    setCustomerSummary(invoice?.customerSummary ?? "");
+  }, [invoice?.id, invoice?.customerSummary]);
+
   const canEdit = Boolean(
     invoice
     && ["draft", "pendingApproval"].includes(invoice.status)
@@ -217,6 +225,7 @@ export default function BillingInvoiceDetail() {
     setEditing(false);
     setEditLines([]);
     setEditDueAt("");
+    setCustomerSummary(invoice?.customerSummary ?? "");
     editValidation.reset();
   };
 
@@ -234,6 +243,7 @@ export default function BillingInvoiceDetail() {
     try {
       const updated = await api.updateInvoice(invoiceId, {
         dueAt: new Date(editDueAt).toISOString(),
+        customerSummary: customerSummary.trim() || null,
         lineItems: editLines.map((line) => ({
           id: line.id,
           type: line.type,
@@ -242,6 +252,7 @@ export default function BillingInvoiceDetail() {
           unitPrice: line.unitPrice,
           taxRate: line.taxRate ?? 0,
           discount: line.discount ?? 0,
+          catalogItemId: line.catalogItemId ?? null,
         })),
       });
       setInvoice(updated);
@@ -258,6 +269,22 @@ export default function BillingInvoiceDetail() {
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveSummary = async () => {
+    if (!invoice) return;
+    setSummarySaving(true);
+    try {
+      const updated = await api.updateInvoice(invoice.id, {
+        customerSummary: customerSummary.trim() || null,
+      });
+      setInvoice(updated);
+      toast({ title: "Customer summary saved" });
+    } catch (error) {
+      toast.apiError(error, { fallback: "Unable to save the customer summary" });
+    } finally {
+      setSummarySaving(false);
     }
   };
 
@@ -486,6 +513,14 @@ export default function BillingInvoiceDetail() {
                       )}
                     </div>
 
+                    <CustomerSummaryField
+                      id="invoice-customer-summary"
+                      value={customerSummary}
+                      lines={lines}
+                      total={editPreviewTotal}
+                      onChange={setCustomerSummary}
+                    />
+
                     <InvoiceLineEditor
                       title="Products & services"
                       lines={editLines}
@@ -507,7 +542,8 @@ export default function BillingInvoiceDetail() {
                           <CardTitle className="text-sm">Final amount</CardTitle>
                         </CardHeader>
                         <CardContent>
-                          <ChargeBreakdown groups={chargeSummary.groups} total={editPreviewTotal} label="Preview final amount" />
+                          <ItemizedChargeLines lines={lines} />
+                          <ChargeBreakdown groups={chargeSummary.groups} total={editPreviewTotal} label="Preview final amount" hideEmpty />
                           <p className="mt-3 text-xs text-muted-foreground">
                             Add products from inventory or services from the catalog, same as estimate creation. Totals update when you save.
                           </p>
@@ -546,13 +582,28 @@ export default function BillingInvoiceDetail() {
               </form>
             </div>
           ) : (
+          <>
           <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
             <div className="no-print space-y-4">
               <Card>
                 <CardHeader><CardTitle className="text-base">Invoice actions</CardTitle></CardHeader>
                 <CardContent className="space-y-3">
                   <InfoRow label="Status" value={<StatusBadge status={invoice.status} />} />
-                  <ChargeBreakdown groups={chargeSummary.groups} total={Number(invoice.total)} />
+                  <ItemizedChargeLines lines={lines} />
+                  <ChargeBreakdown groups={chargeSummary.groups} total={Number(invoice.total)} hideEmpty />
+                  <CustomerSummaryField
+                    id="invoice-customer-summary-view"
+                    value={customerSummary}
+                    lines={lines}
+                    total={Number(invoice.total)}
+                    onChange={setCustomerSummary}
+                  />
+                  {(invoice.customerSummary ?? "") !== customerSummary ? (
+                    <Button className="w-full" variant="outline" disabled={summarySaving} onClick={() => void saveSummary()}>
+                      {summarySaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Save customer summary
+                    </Button>
+                  ) : null}
                   <InfoRow label="Paid" value={formatCurrency(invoice.paidTotal ?? 0)} />
                   <InfoRow label="Balance" value={formatCurrency(invoice.balanceDue ?? invoice.total)} />
                   {canEdit ? (
@@ -724,7 +775,7 @@ export default function BillingInvoiceDetail() {
               ) : null}
             </div>
 
-            <Card className="print-area overflow-visible border-border">
+            <Card className="no-print overflow-visible border-border">
               <CardContent className="p-0">
                 {lines.length ? (
                   <ProfessionalDocument
@@ -752,6 +803,37 @@ export default function BillingInvoiceDetail() {
               </CardContent>
             </Card>
           </div>
+          {lines.length ? (
+            <div className="customer-print-copy print-area">
+              <ProfessionalDocument
+                kind="Invoice"
+                reference={invoice.reference}
+                customerName={invoice.customerName}
+                customerAddress={customerAddress}
+                customerPhone={customer?.phone || undefined}
+                customerEmail={customer?.email || undefined}
+                equipmentName={context?.job.equipmentName}
+                issueDate={invoice.issuedAt}
+                validOrDueLabel="Due date"
+                validOrDueDate={invoice.dueAt}
+                ticketRef={invoice.jobRef}
+                detailsHeading={isSaleInvoice ? "Sale details" : "Project details"}
+                detailRows={invoiceDetailRows}
+                lines={lines}
+                customerView={!isSaleInvoice}
+                customerSummary={isSaleInvoice ? undefined : customerSummary}
+                totalOverride={Number(invoice.total)}
+                extraTotalRows={Number(invoice.paidTotal ?? 0) > 0 ? [
+                  { label: "Paid", value: formatDocumentCurrency(invoice.paidTotal ?? 0) },
+                  { label: "Balance", value: formatDocumentCurrency(invoice.balanceDue ?? invoice.total) },
+                ] : undefined}
+                notes={context?.job.serviceRequest?.description ? `Service: ${context.job.serviceRequest.description}` : undefined}
+                hideToolbar
+                showFooter={false}
+              />
+            </div>
+          ) : null}
+          </>
           )
         )}
       </div>

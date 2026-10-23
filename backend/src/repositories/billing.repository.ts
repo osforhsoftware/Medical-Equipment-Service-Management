@@ -3,9 +3,10 @@ import type { Invoice, Prisma } from "@prisma/client";
 
 export class BillingRepository {
   async findAll(tenantId: string, status?: string) {
+    // Omit documents on list — PDF file metadata balloons payloads and can hit response size limits.
     return prisma.invoice.findMany({
       where: { tenantId, ...(status ? { status: status as Invoice["status"] } : {}) },
-      include: { lineItems: true, payments: { orderBy: { paidAt: "desc" } }, documents: true },
+      include: { lineItems: true, payments: { orderBy: { paidAt: "desc" } } },
       orderBy: { issuedAt: "desc" },
     });
   }

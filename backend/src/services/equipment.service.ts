@@ -4,12 +4,29 @@ import { assertCustomerSelectable, requireActiveCustomer } from "@/lib/activeCus
 import { settingsRepository } from "@/repositories/settings.repository";
 import { allocateAssetTag } from "@/services/assetTag.service";
 import { taxonomyService } from "@/services/taxonomy.service";
-import { AppError } from "@/middleware/errorHandler";
+import { AppError, EQUIPMENT_SERIAL_TAKEN_MESSAGE } from "@/middleware/errorHandler";
 import { prisma } from "@/db/prisma";
 import { getDefaultBranchId } from "@/utils/defaultBranch";
 import { equipmentTicketLabel, syncEquipmentNameSnapshots } from "@/lib/equipmentLabel";
 import type { PaginatedResult } from "@/types";
 import { Prisma, type Equipment } from "@prisma/client";
+
+function serialTakenError(): AppError {
+  return new AppError(EQUIPMENT_SERIAL_TAKEN_MESSAGE, 409, [
+    `serialNumber: ${EQUIPMENT_SERIAL_TAKEN_MESSAGE}`,
+  ]);
+}
+
+function isSerialUniqueViolation(err: unknown): boolean {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== "P2002") {
+    return false;
+  }
+  const target = err.meta?.target;
+  const fields = (Array.isArray(target) ? target : [target])
+    .filter(Boolean)
+    .map((field) => String(field).toLowerCase().replace(/_/g, ""));
+  return fields.some((field) => field.includes("serialnumber"));
+}
 
 type CreateEquipmentData = {
   name: string;
@@ -79,6 +96,10 @@ export class EquipmentService {
       conditionSlug,
     );
 
+    const serialNumber = data.serialNumber.trim();
+    const duplicate = await equipmentRepository.findBySerialNumber(serialNumber, tenantId);
+    if (duplicate) throw serialTakenError();
+
     await settingsRepository.ensureDefaults(tenantId);
 
     const record = {
@@ -86,7 +107,7 @@ export class EquipmentService {
       model: data.model?.trim() || "",
       manufacturer: data.manufacturer?.trim() || "",
       category,
-      serialNumber: data.serialNumber,
+      serialNumber,
       partNumber: data.partNumber?.trim() || null,
       partDescription: data.partDescription?.trim() || null,
       additionalNote: data.additionalNote?.trim() || null,
@@ -125,7 +146,12 @@ export class EquipmentService {
           return equipment;
         });
       } catch (err) {
-        const retryable = err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002" && attempt < 2;
+        // Serial collisions must not be retried as asset-tag races.
+        if (isSerialUniqueViolation(err)) throw serialTakenError();
+        const retryable =
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === "P2002" &&
+          attempt < 2;
         if (!retryable) throw err;
       }
     }
@@ -255,7 +281,31 @@ export class EquipmentService {
       delete next.assetTag;
     }
 
-    const updated = await equipmentRepository.update(id, tenantId, next);
+    if ("serialNumber" in next) {
+      if (typeof next.serialNumber !== "string" || !next.serialNumber.trim()) {
+        throw new AppError("Serial number is required", 422, [
+          "serialNumber: Serial number is required",
+        ]);
+      }
+      const serialNumber = next.serialNumber.trim();
+      next.serialNumber = serialNumber;
+      if (serialNumber !== existing.serialNumber) {
+        const duplicate = await equipmentRepository.findBySerialNumber(
+          serialNumber,
+          tenantId,
+          id,
+        );
+        if (duplicate) throw serialTakenError();
+      }
+    }
+
+    let updated: Equipment;
+    try {
+      updated = await equipmentRepository.update(id, tenantId, next);
+    } catch (err) {
+      if (isSerialUniqueViolation(err)) throw serialTakenError();
+      throw err;
+    }
 
     if (
       equipmentTicketLabel(updated) !== equipmentTicketLabel(existing) ||

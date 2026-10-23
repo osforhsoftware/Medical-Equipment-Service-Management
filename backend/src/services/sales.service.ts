@@ -510,6 +510,7 @@ export class SalesService {
     actor: { userId: string; role?: string },
     input: {
       notes?: string | null;
+      customerSummary?: string | null;
       validUntil: string;
       lines: Array<{
         inventoryItemId?: string | null;
@@ -576,6 +577,7 @@ export class SalesService {
               taxRate: Number(line.taxRate),
             })),
             notes: input.notes ?? null,
+            customerSummary: input.customerSummary ?? null,
             discount: 0,
             headerDiscount: 0,
           },
@@ -613,6 +615,9 @@ export class SalesService {
           partsCost,
           laborCost: laborCost.greaterThan(0) ? laborCost : new Prisma.Decimal(0),
           notes: input.notes ?? null,
+          ...(input.customerSummary !== undefined
+            ? { customerSummary: input.customerSummary?.trim() || null }
+            : {}),
           validUntil,
           equipmentName: priced.length === 1 ? priced[0].description : "Sales quotation",
         },
@@ -907,6 +912,7 @@ export class SalesService {
           total: order.total,
           balanceDue: order.total,
           currency: "INR",
+          customerSummary: order.estimate?.customerSummary ?? null,
           status: "sent",
           sentAt: new Date(),
           dueAt,

@@ -345,19 +345,58 @@ export default function InspectionDetail() {
                 </DetailSection>
 
                 {(() => {
-                  const extraFields = parseCustomerAdditionalFields(report.additionalFields).filter(
-                    (field) => field.label !== "Inspector Signature" && field.label !== "Admin Signature" && !field.value.startsWith("data:image"),
+                  const parsedFields = parseCustomerAdditionalFields(report.additionalFields);
+                  const extraFields = parsedFields.filter(
+                    (field) =>
+                      field.label !== "Inspector Signature" &&
+                      field.label !== "Admin Signature" &&
+                      !field.value.startsWith("data:image"),
                   );
-                  if (!extraFields.length) return null;
+                  const inspectorSignature = parsedFields.find(
+                    (field) => field.label === "Inspector Signature" && field.value.startsWith("data:image"),
+                  )?.value;
+                  const adminSignature = parsedFields.find(
+                    (field) => field.label === "Admin Signature" && field.value.startsWith("data:image"),
+                  )?.value;
                   return (
-                    <DetailSection title="Additional fields">
-                      <DetailInfoGrid
-                        items={extraFields.map((field) => ({
-                          label: field.label,
-                          value: field.value || "—",
-                        }))}
-                      />
-                    </DetailSection>
+                    <>
+                      {extraFields.length ? (
+                        <DetailSection title="Additional fields">
+                          <DetailInfoGrid
+                            items={extraFields.map((field) => ({
+                              label: field.label,
+                              value: field.value || "—",
+                            }))}
+                          />
+                        </DetailSection>
+                      ) : null}
+                      {inspectorSignature || adminSignature ? (
+                        <DetailSection title="Signatures">
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            {inspectorSignature ? (
+                              <div className="space-y-2">
+                                <p className="text-xs font-medium text-muted-foreground">Inspector</p>
+                                <img
+                                  src={inspectorSignature}
+                                  alt="Inspector signature"
+                                  className="h-24 w-full rounded-lg border border-border bg-white object-contain"
+                                />
+                              </div>
+                            ) : null}
+                            {adminSignature ? (
+                              <div className="space-y-2">
+                                <p className="text-xs font-medium text-muted-foreground">Admin / Approval</p>
+                                <img
+                                  src={adminSignature}
+                                  alt="Admin signature"
+                                  className="h-24 w-full rounded-lg border border-border bg-white object-contain"
+                                />
+                              </div>
+                            ) : null}
+                          </div>
+                        </DetailSection>
+                      ) : null}
+                    </>
                   );
                 })()}
 

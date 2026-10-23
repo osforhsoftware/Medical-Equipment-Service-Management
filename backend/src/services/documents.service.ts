@@ -6,6 +6,7 @@ import { BILLING_CHARGE_GROUPS, chargeGroupForType } from "@/utils/invoiceCharge
 import { normalizeAdditionalFields } from "@/lib/additionalFields";
 import { formatInventoryItemClass } from "@/lib/inventoryItemClass";
 import { parseJobStageDetails } from "@/lib/jobStageDetails";
+import { customerDocumentSummary, SERVICE_CHARGE_LABEL } from "@/lib/customerDocumentSummary";
 import { calculateEstimateTotals, estimateLevelDiscount } from "@/lib/estimateTotals";
 
 type DocumentKind = "estimate" | "invoice" | "service-report" | "inspection-report";
@@ -47,16 +48,6 @@ async function toBuffer(doc: PDFKit.PDFDocument): Promise<Buffer> {
 
 function fmtDate(value: Date) {
   return value.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-}
-
-function fmtDateTime(value: Date) {
-  return value.toLocaleString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 const WORK_DETAILS_MARKER = "\n\nWork details:\n";
@@ -529,6 +520,46 @@ export class DocumentsService {
     doc.fillColor(INK);
   }
 
+  /** Customer copy: one work line, an optional service charge, and the grand total. */
+  private drawCustomerSummary(
+    doc: PDFKit.PDFDocument,
+    rows: Array<{ label: string; amount: string; emphasis?: boolean }>,
+  ) {
+    const amountW = 140;
+    const descW = WIDTH - amountW;
+    const amountX = LEFT + descW;
+    let y = doc.y;
+    const headerH = 22;
+    if (y + headerH > PAGE_BOTTOM) {
+      doc.addPage();
+      y = 48;
+    }
+    doc.rect(LEFT, y, WIDTH, headerH).strokeColor(RULE).stroke();
+    doc.moveTo(amountX, y).lineTo(amountX, y + headerH).strokeColor(RULE).stroke();
+    doc.fillColor(INK).font("Helvetica-Bold").fontSize(8);
+    doc.text("Description", LEFT + 8, y + 7, { width: descW - 16 });
+    doc.text("Amount", amountX, y + 7, { width: amountW - 10, align: "right" });
+    y += headerH;
+
+    for (const row of rows) {
+      doc.font(row.emphasis ? "Helvetica-Bold" : "Helvetica").fontSize(row.emphasis ? 11 : 10);
+      const textH = doc.heightOfString(row.label, { width: descW - 16 });
+      const rowH = Math.max(28, textH + 14);
+      if (y + rowH > PAGE_BOTTOM) {
+        doc.addPage();
+        y = 48;
+      }
+      doc.rect(LEFT, y, WIDTH, rowH).strokeColor(RULE).stroke();
+      doc.moveTo(amountX, y).lineTo(amountX, y + rowH).strokeColor(RULE).stroke();
+      doc.fillColor(INK).text(row.label, LEFT + 8, y + 8, { width: descW - 16 });
+      doc.text(row.amount, amountX, y + 8, { width: amountW - 10, align: "right" });
+      y += rowH;
+    }
+
+    doc.y = y + 16;
+    doc.fillColor(INK);
+  }
+
   private totals(
     doc: PDFKit.PDFDocument,
     rows: Array<{ label: string; value: string; emphasis?: boolean }>,
@@ -861,7 +892,7 @@ export class DocumentsService {
     this.sectionHeading(doc, "Customer sign-off");
     this.keyValueRows(doc, [
       { label: "Signed by", value: signature.customerName },
-      { label: "Sign-off date", value: fmtDateTime(signature.capturedAt) },
+      { label: "Sign-off date", value: fmtDate(signature.capturedAt) },
     ]);
     let buffer: Buffer | null = null;
     if (signature.fileId) {
@@ -1028,20 +1059,6 @@ export class DocumentsService {
     this.paintInspectionParagraph(doc, left, width, value || "No findings recorded", !value);
   }
 
-  private paintInspectionChip(
-    doc: PDFKit.PDFDocument,
-    x: number,
-    y: number,
-    label: string,
-    colors: { bg: string; fg: string; border: string },
-  ) {
-    doc.font("Helvetica-Bold").fontSize(8);
-    const w = doc.widthOfString(label) + 18;
-    doc.roundedRect(x, y, w, 16, 8).lineWidth(0.6).fillAndStroke(colors.bg, colors.border);
-    doc.fillColor(colors.fg).text(label, x + 9, y + 4, { lineBreak: false });
-    return w;
-  }
-
   private async drawStyledInspectionReport(
     doc: PDFKit.PDFDocument,
     input: {
@@ -1052,9 +1069,6 @@ export class DocumentsService {
       orgLines: string[];
       reference: string;
       inspectionDate: string;
-      severity: string;
-      completionLabel: string;
-      reportStatus: string;
       inspectorName: string;
       logo: Buffer | null;
       clientRows: Array<{ label: string; value: string }>;
@@ -1078,6 +1092,7 @@ export class DocumentsService {
       additionalFields: Array<{ label: string; value: string }>;
       attachments: Array<{ fileId: string; caption?: string | null; file?: { originalName: string } }>;
       remarks: string;
+      signatures?: Array<{ label: string; name?: string | null; dataUrl: string }>;
     },
   ) {
     const left = doc.page.margins.left;
@@ -1108,47 +1123,22 @@ export class DocumentsService {
     doc.on("pageAdded", onPageAdded);
     paintHeader();
 
-    const priorityColors = (severity: string) => {
-      const value = severity.toLowerCase();
-      if (value === "high" || value === "critical") return { bg: "#fef2f2", fg: "#b91c1c", border: "#fecaca" };
-      if (value === "medium") return { bg: "#fffbeb", fg: "#b45309", border: "#fcd34d" };
-      return { bg: "#f1f5f9", fg: "#475569", border: "#e2e8f0" };
-    };
-    const completionColors = input.completionLabel.toLowerCase() === "completed"
-      ? { bg: "#f0fdf4", fg: "#15803d", border: "#bbf7d0" }
-      : { bg: "#fffbeb", fg: "#b45309", border: "#fcd34d" };
-
-    this.ensureInspectionSpace(doc, 52);
-    const barY = doc.y;
-    const barH = 42;
-    doc.roundedRect(left, barY, width, barH, 4).lineWidth(0.8).strokeColor(RULE).stroke();
-    let chipX = left + 10;
-    const severity = reportText(input.severity);
-    if (severity) {
-      chipX += this.paintInspectionChip(doc, chipX, barY + 13, prettyLabel(severity), priorityColors(severity)) + 6;
+    if (reportText(input.inspectorName)) {
+      this.ensureInspectionSpace(doc, 40);
+      const barY = doc.y;
+      const barH = 36;
+      doc.roundedRect(left, barY, width, barH, 4).lineWidth(0.8).strokeColor(RULE).stroke();
+      doc.fillColor("#64748b").font("Helvetica-Bold").fontSize(7).text("INSPECTOR", left + 10, barY + 8, {
+        lineBreak: false,
+      });
+      doc.fillColor(INK).font("Helvetica").fontSize(9).text(input.inspectorName, left + 10, barY + 18, {
+        width: width - 20,
+        lineBreak: false,
+      });
+      doc.y = barY + barH + 4;
+      doc.x = left;
+      doc.fillColor(INK);
     }
-    this.paintInspectionChip(doc, chipX, barY + 13, input.completionLabel, completionColors);
-    const pairs = [
-      ...(reportText(input.inspectorName) ? [{ label: "INSPECTOR", value: input.inspectorName }] : []),
-      { label: "REPORT STATUS", value: input.reportStatus },
-    ];
-    doc.font("Helvetica").fontSize(9);
-    const pairWidths = pairs.map((pair) => Math.max(doc.font("Helvetica-Bold").fontSize(7).widthOfString(pair.label), doc.font("Helvetica").fontSize(9).widthOfString(pair.value)));
-    let pairX = right - 10 - pairWidths.reduce((sum, item) => sum + item, 0) - Math.max(0, pairs.length - 1) * 16;
-    pairs.forEach((pair, index) => {
-      doc.fillColor("#64748b").font("Helvetica-Bold").fontSize(7).text(pair.label, pairX, barY + 10, {
-        width: pairWidths[index],
-        lineBreak: false,
-      });
-      doc.fillColor(INK).font("Helvetica").fontSize(9).text(pair.value, pairX, barY + 22, {
-        width: pairWidths[index],
-        lineBreak: false,
-      });
-      pairX += pairWidths[index] + 16;
-    });
-    doc.y = barY + barH + 4;
-    doc.x = left;
-    doc.fillColor(INK);
 
     this.paintInspectionFields(doc, left, width, "Client Details", input.clientRows);
     this.paintInspectionFields(doc, left, width, "Equipment", input.equipmentRows);
@@ -1265,9 +1255,60 @@ export class DocumentsService {
       this.paintInspectionParagraph(doc, left, width, reportText(input.remarks));
     }
 
+    const signatures = input.signatures ?? [];
+    if (signatures.length) {
+      this.paintInspectionSignatures(doc, left, width, signatures);
+    }
+
     doc.x = left;
     doc.fillColor(INK);
     doc.removeListener("pageAdded", onPageAdded);
+  }
+
+  private paintInspectionSignatures(
+    doc: PDFKit.PDFDocument,
+    left: number,
+    width: number,
+    signatures: Array<{ label: string; name?: string | null; dataUrl: string }>,
+  ) {
+    const gap = 28;
+    const colW = (width - gap) / 2;
+    const blockH = 110;
+    this.ensureInspectionSpace(doc, blockH);
+    const startY = doc.y + 8;
+    signatures.slice(0, 2).forEach((signature, index) => {
+      const x = left + index * (colW + gap);
+      let imageDrawn = false;
+      const match = /^data:[^;]+;base64,(.+)$/.exec(signature.dataUrl);
+      if (match) {
+        try {
+          const buffer = Buffer.from(match[1], "base64");
+          doc.image(buffer, x, startY, { fit: [colW, 56] });
+          imageDrawn = true;
+        } catch {
+          imageDrawn = false;
+        }
+      }
+      const lineY = startY + 62;
+      if (!imageDrawn) {
+        doc.moveTo(x, lineY).lineTo(x + colW, lineY).strokeColor(RULE_STRONG).lineWidth(0.75).stroke();
+      } else {
+        doc.moveTo(x, lineY).lineTo(x + colW, lineY).strokeColor(RULE).lineWidth(0.5).stroke();
+      }
+      doc.fillColor(MUTED).font("Helvetica-Bold").fontSize(8).text(signature.label.toUpperCase(), x, lineY + 8, {
+        width: colW,
+        lineBreak: false,
+      });
+      if (reportText(signature.name)) {
+        doc.fillColor(INK).font("Helvetica").fontSize(9).text(reportText(signature.name), x, lineY + 20, {
+          width: colW,
+          lineBreak: false,
+        });
+      }
+    });
+    doc.y = startY + blockH;
+    doc.x = left;
+    doc.fillColor(INK);
   }
 
   async generate(tenantId: string, actorId: string, kind: DocumentKind, entityId: string, actorRole = "admin") {
@@ -1312,11 +1353,14 @@ export class DocumentsService {
             select: { name: true },
           }))?.name
         : null;
+      const isSalesQuote = !estimate.serviceRequestId;
       await this.header(doc, tenantId, "Estimate", reference, [
         { label: "Quotation No", value: reference },
-        { label: "Revision", value: `Rev ${estimate.revision}` },
         { label: "Date", value: fmtDate(estimate.sentAt ?? estimate.createdAt) },
-        { label: "Project code", value: estimate.requestRef || "—" },
+        {
+          label: isSalesQuote ? "Sale code" : "Project code",
+          value: estimate.requestRef || "—",
+        },
       ]);
       this.partyAndMeta(
         doc,
@@ -1324,43 +1368,56 @@ export class DocumentsService {
           name: estimate.customerName,
           lines: billLines,
         },
-        [
-          ...(estimate.equipmentName ? [{ label: "Equipment", value: estimate.equipmentName }] : []),
-          { label: "Currency", value: estimate.currency || "INR" },
-          { label: "Valid until", value: fmtDate(estimate.validUntil) },
-          ...(estimate.estimatedCompletion
-            ? [{ label: "Est. completion", value: fmtDate(estimate.estimatedCompletion) }]
+        isSalesQuote
+          ? [
+              { label: "Customer", value: estimate.customerName },
+              { label: "Currency", value: estimate.currency || "INR" },
+              { label: "Valid until", value: fmtDate(estimate.validUntil) },
+              ...(preparedBy ? [{ label: "Prepared by", value: preparedBy }] : []),
+              { label: "Status", value: estimate.status },
+            ]
+          : [
+              ...(estimate.equipmentName ? [{ label: "Equipment", value: estimate.equipmentName }] : []),
+              { label: "Currency", value: estimate.currency || "INR" },
+              { label: "Valid until", value: fmtDate(estimate.validUntil) },
+              ...(estimate.estimatedCompletion
+                ? [{ label: "Est. completion", value: fmtDate(estimate.estimatedCompletion) }]
+                : []),
+              ...(estimate.warranty ? [{ label: "Warranty", value: estimate.warranty }] : []),
+              ...(preparedBy ? [{ label: "Prepared by", value: preparedBy }] : []),
+              { label: "Approval", value: estimate.status },
+            ],
+        { detailsHeading: isSalesQuote ? "QUOTATION DETAILS" : "PROJECT DETAILS" },
+      );
+      const headerDiscount = estimateLevelDiscount({
+        discount: estimate.discount,
+        subtotal: estimate.subtotal,
+        lineItems: estimate.lineItems,
+        revisions: estimate.revisions,
+      });
+      if (isSalesQuote) {
+        // Product sales quotes show every selected item with unit price and amount.
+        this.drawGroupedLines(doc, estimate.lineItems);
+        const totals = calculateEstimateTotals(estimate.lineItems, headerDiscount);
+        this.totals(doc, [
+          { label: "Subtotal", value: money(totals.subtotal) },
+          ...(totals.discount > 0 ? [{ label: "Discount", value: `-${money(totals.discount)}` }] : []),
+          { label: "Tax", value: money(totals.tax) },
+          { label: "Grand Total", value: money(totals.total), emphasis: true },
+        ]);
+      } else {
+        const estimateSummary = customerDocumentSummary(estimate.lineItems, {
+          label: estimate.customerSummary,
+          headerDiscount,
+        });
+        this.drawCustomerSummary(doc, [
+          { label: estimateSummary.label, amount: money(estimateSummary.workAmount) },
+          ...(estimateSummary.showServiceCharge
+            ? [{ label: SERVICE_CHARGE_LABEL, amount: money(estimateSummary.serviceAmount) }]
             : []),
-          ...(estimate.warranty ? [{ label: "Warranty", value: estimate.warranty }] : []),
-          ...(preparedBy ? [{ label: "Prepared by", value: preparedBy }] : []),
-          { label: "Approval", value: estimate.status },
-        ],
-        { detailsHeading: "PROJECT DETAILS" },
-      );
-      this.drawLines(
-        doc,
-        estimate.lineItems.map((line) => ({
-          ...line,
-          description: line.partNumber ? `${line.description} (${line.partNumber})` : line.description,
-        })),
-      );
-      const taxRates = [...new Set(estimate.lineItems.map((line) => Number(line.taxRate ?? 0)))];
-      const taxLabel = taxRates.length === 1 && taxRates[0] > 0 ? `GST (${taxRates[0]}%)` : "Tax";
-      const totals = calculateEstimateTotals(
-        estimate.lineItems,
-        estimateLevelDiscount({
-          discount: estimate.discount,
-          subtotal: estimate.subtotal,
-          lineItems: estimate.lineItems,
-          revisions: estimate.revisions,
-        }),
-      );
-      this.totals(doc, [
-        { label: "Subtotal", value: money(totals.subtotal) },
-        { label: "Discount", value: `-${money(totals.discount)}` },
-        { label: taxLabel, value: money(totals.tax) },
-        { label: "Grand Total", value: money(totals.total), emphasis: true },
-      ]);
+          { label: "Total", amount: money(estimateSummary.total), emphasis: true },
+        ]);
+      }
       if (estimate.terms) {
         doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(8).text("TERMS & CONDITIONS");
         doc.fillColor(MUTED).font("Helvetica").fontSize(9).text(estimate.terms, { width: WIDTH });
@@ -1422,22 +1479,41 @@ export class DocumentsService {
         detailRows,
         { detailsHeading: isSale ? "SALE DETAILS" : "PROJECT DETAILS" },
       );
-      this.drawGroupedLines(doc, invoice.lineItems);
-      const taxRates = [...new Set(invoice.lineItems.map((line) => Number(line.taxRate ?? 0)))];
-      const taxLabel = taxRates.length === 1 && taxRates[0] > 0 ? `GST (${taxRates[0]}%)` : "Tax";
-      const invoiceTotals = calculateEstimateTotals(invoice.lineItems, 0);
-      this.totals(doc, [
-        { label: "Subtotal", value: money(invoiceTotals.subtotal) },
-        { label: "Discount", value: `-${money(invoiceTotals.discount)}` },
-        { label: taxLabel, value: money(invoiceTotals.tax) },
-        { label: "Grand Total", value: money(invoiceTotals.total), emphasis: true },
-        ...(Number(invoice.paidTotal) > 0
-          ? [
-              { label: "Paid", value: money(invoice.paidTotal) },
-              { label: "Balance", value: money(invoice.balanceDue) },
-            ]
-          : []),
-      ]);
+      if (isSale) {
+        this.drawGroupedLines(doc, invoice.lineItems);
+        const invoiceTotals = calculateEstimateTotals(invoice.lineItems);
+        this.totals(doc, [
+          { label: "Subtotal", value: money(invoiceTotals.subtotal) },
+          ...(invoiceTotals.discount > 0
+            ? [{ label: "Discount", value: `-${money(invoiceTotals.discount)}` }]
+            : []),
+          { label: "Tax", value: money(invoiceTotals.tax) },
+          { label: "Grand Total", value: money(invoice.total), emphasis: true },
+          ...(Number(invoice.paidTotal) > 0
+            ? [
+                { label: "Paid", value: money(invoice.paidTotal) },
+                { label: "Balance", value: money(invoice.balanceDue) },
+              ]
+            : []),
+        ]);
+      } else {
+        const invoiceSummary = customerDocumentSummary(invoice.lineItems, {
+          label: invoice.customerSummary,
+        });
+        this.drawCustomerSummary(doc, [
+          { label: invoiceSummary.label, amount: money(invoiceSummary.workAmount) },
+          ...(invoiceSummary.showServiceCharge
+            ? [{ label: SERVICE_CHARGE_LABEL, amount: money(invoiceSummary.serviceAmount) }]
+            : []),
+          { label: "Total", amount: money(invoice.total), emphasis: true },
+          ...(Number(invoice.paidTotal) > 0
+            ? [
+                { label: "Paid", amount: money(invoice.paidTotal) },
+                { label: "Balance", amount: money(invoice.balanceDue) },
+              ]
+            : []),
+        ]);
+      }
       kindLabel = "Invoice";
     } else if (kind === "service-report") {
       const job = await prisma.serviceJob.findFirst({
@@ -1537,12 +1613,11 @@ export class DocumentsService {
       this.sectionHeading(doc, "Service");
       this.keyValueRows(doc, [
         { label: "Service type", value: serviceTypeLabel(job.type, job.typeOther) },
-        { label: "Status", value: prettyLabel(String(job.status)) },
         ...(team ? [{ label: "Engineer / team", value: team }] : []),
         { label: "Ticket", value: orDash(job.requestRef) },
         { label: "Scheduled", value: fmtDate(job.scheduledFor) },
-        { label: "Service date", value: fmtDateTime(serviceStarted) },
-        { label: "Completed", value: serviceEnded ? fmtDateTime(serviceEnded) : "—" },
+        { label: "Service date", value: fmtDate(serviceStarted) },
+        { label: "Completed", value: serviceEnded ? fmtDate(serviceEnded) : "—" },
         ...(ticket?.createdAt ? [{ label: "Ticket opened", value: fmtDate(ticket.createdAt) }] : []),
       ]);
       if (displayValue(ticket?.description)) {
@@ -1556,7 +1631,7 @@ export class DocumentsService {
         this.ensureSpace(doc, 36);
         doc.x = LEFT;
         const engineerName = customerFacingPersonName(log.user.name);
-        const workedAt = `${fmtDateTime(log.startedAt)}${log.endedAt ? ` to ${fmtDateTime(log.endedAt)}` : ""}`;
+        const workedAt = `${fmtDate(log.startedAt)}${log.endedAt ? ` to ${fmtDate(log.endedAt)}` : ""}`;
         doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text(
           engineerName ? `${engineerName} — ${workedAt}` : workedAt,
           LEFT,
@@ -1650,17 +1725,26 @@ export class DocumentsService {
 
       const stages = parseJobStageDetails(job.stageDetails);
       const qa = stages.qa;
-      if (qa?.result || qa?.notes) {
+      if (qa?.result || qa?.notes || (qa?.checklist && qa.checklist.length)) {
         this.sectionHeading(doc, "Quality check");
         this.keyValueRows(doc, [
           { label: "Result", value: qa.result ? prettyLabel(qa.result) : "—" },
           {
             label: "Checked",
             value: qa.checkedAt && !Number.isNaN(new Date(qa.checkedAt).getTime())
-              ? fmtDateTime(new Date(qa.checkedAt))
+              ? fmtDate(new Date(qa.checkedAt))
               : "—",
           },
         ]);
+        if (qa.checklist?.length) {
+          this.keyValueRows(
+            doc,
+            qa.checklist.map((item, index) => ({
+              label: `${index + 1}. ${item.label}${item.isExtra ? " (extra)" : ""}`,
+              value: item.checked ? "Yes" : "No",
+            })),
+          );
+        }
         if (qa.notes) this.bodyParagraph(doc, qa.notes);
       }
       const delivery = stages.delivery;
@@ -1673,7 +1757,7 @@ export class DocumentsService {
             label: "Delivered",
             value:
               delivery.deliveredAt && !Number.isNaN(new Date(delivery.deliveredAt).getTime())
-                ? fmtDateTime(new Date(delivery.deliveredAt))
+                ? fmtDate(new Date(delivery.deliveredAt))
                 : "—",
           },
           { label: "Courier", value: orDash(delivery.courier?.name) },
@@ -1734,7 +1818,6 @@ export class DocumentsService {
 
       reference = sr.reference;
       filename = `${reference}-inspection-report.pdf`;
-      const reportStatus = report.submittedAt ? "Submitted" : "Draft";
       const split = splitInspectionFindings(report.findings);
       const customer = sr.customer;
       const siteAddress = [customer?.address, customer?.city, customer?.country].filter(Boolean).join(", ");
@@ -1769,6 +1852,18 @@ export class DocumentsService {
         if (/signature/i.test(field.label) || field.value.startsWith("data:image")) return [];
         return [{ label: field.label, value: field.value }];
       });
+      const signatureEntries = [
+        {
+          label: "Inspector Signature",
+          name: inspectorName,
+          dataUrl: extraFields.find((field) => field.label === "Inspector Signature")?.value ?? "",
+        },
+        {
+          label: "Admin Signature",
+          name: "Admin / Coordinator",
+          dataUrl: extraFields.find((field) => field.label === "Admin Signature")?.value ?? "",
+        },
+      ].filter((entry) => entry.dataUrl.startsWith("data:image"));
       footerLayout = {
         left: doc.page.margins.left,
         right: doc.page.width - doc.page.margins.right,
@@ -1786,9 +1881,6 @@ export class DocumentsService {
         ].filter(Boolean),
         reference,
         inspectionDate: reportText(fmtDate(report.reportedAt)),
-        severity: report.severity,
-        completionLabel: report.submittedAt ? "Completed" : "Draft",
-        reportStatus,
         inspectorName,
         logo,
         clientRows: [
@@ -1809,6 +1901,7 @@ export class DocumentsService {
         additionalFields: visibleExtra,
         attachments: report.attachments,
         remarks: report.technicianRemarks ?? "",
+        signatures: signatureEntries,
       });
       kindLabel = "Inspection Report";
     } else {

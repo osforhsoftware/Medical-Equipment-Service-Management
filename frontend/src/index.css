@@ -605,6 +605,18 @@
 .professional-document .doc-table .col-qty { width: 10%; }
 .professional-document .doc-table .col-amt { width: 14%; }
 
+.professional-document .customer-summary-table .col-desc { width: 68%; }
+.professional-document .customer-summary-table .col-amt { width: 32%; }
+
+.professional-document .customer-summary-table .summary-total td {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.customer-print-copy {
+  display: none;
+}
+
 .professional-document .doc-table thead th {
   padding: 10px 8px;
   font-size: 11px;
@@ -988,7 +1000,6 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: 12px 24px;
   margin: 14px 0 0;
   padding: 10px 14px;
@@ -997,18 +1008,11 @@
   background: #fff;
 }
 
-.inspection-report-document .doc-report-summary-badges {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
 .inspection-report-document .doc-report-summary-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 28px;
-  margin: 0 0 0 auto;
+  margin: 0;
 }
 
 .inspection-report-document .doc-report-summary-meta > div {
@@ -1030,54 +1034,6 @@
   font-size: 13px;
   font-weight: 400;
   color: #0f172a;
-}
-
-.inspection-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.4;
-  white-space: nowrap;
-  -webkit-print-color-adjust: exact;
-  print-color-adjust: exact;
-}
-
-.inspection-chip::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  flex-shrink: 0;
-  border-radius: 999px;
-  background: currentColor;
-}
-
-.inspection-chip-grey {
-  background: #f1f5f9;
-  color: #475569;
-  border-color: #e2e8f0;
-}
-
-.inspection-chip-amber {
-  background: #fffbeb;
-  color: #b45309;
-  border-color: #fcd34d;
-}
-
-.inspection-chip-red {
-  background: #fef2f2;
-  color: #b91c1c;
-  border-color: #fecaca;
-}
-
-.inspection-chip-green {
-  background: #f0fdf4;
-  color: #15803d;
-  border-color: #bbf7d0;
 }
 
 .inspection-report-document .doc-parts-table {
@@ -1167,6 +1123,9 @@
 }
 
 .inspection-report-document .doc-signatures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
   margin-top: 36px;
   break-inside: avoid;
   page-break-inside: avoid;
@@ -1247,20 +1206,10 @@
   overflow-wrap: anywhere;
 }
 
-.inspection-report-document .doc-photo-meta {
-  margin: 2px 0 0;
-  font-size: 10px;
-  color: var(--doc-muted);
-}
-
 .inspection-report-document .inspection-doc-sheet {
   min-height: auto;
   display: block;
   padding: 15mm;
-}
-
-.inspection-report-document .inspection-doc-footer {
-  margin-top: 28px;
 }
 
 @media (max-width: 640px) {
@@ -1272,13 +1221,8 @@
     text-align: left;
   }
 
-  .inspection-report-document .doc-info-grid,
-  .inspection-report-document .doc-report-summary-meta {
+  .inspection-report-document .doc-info-grid {
     grid-template-columns: 1fr;
-  }
-
-  .inspection-report-document .doc-report-summary-meta {
-    margin-left: 0;
   }
 
   .inspection-report-document .doc-photo-grid {
@@ -1359,6 +1303,7 @@
     visibility: visible !important;
   }
 
+  .customer-print-copy,
   .print-area,
   .professional-document,
   .qr-print-label {
@@ -1501,6 +1446,31 @@
   .qr-print-label {
     display: block !important;
   }
+
+  /* Supplier quote share: print only the body-level quote sheet */
+  .supplier-quote-print-root {
+    display: none !important;
+  }
+
+  body.print-supplier-quote #root,
+  body.print-supplier-quote [data-radix-portal],
+  body.print-supplier-quote [data-sonner-toaster] {
+    display: none !important;
+  }
+
+  body.print-supplier-quote .supplier-quote-print-root {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+}
+
+/* Screen: keep the supplier-quote print portal out of the layout */
+.supplier-quote-print-root {
+  display: none;
 }
 
 /* ── Toast notifications (Sonner) ── */

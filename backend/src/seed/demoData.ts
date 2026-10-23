@@ -80,7 +80,7 @@ export const DEMO_SUPPLIERS = [
 
 export const DEMO_PURCHASE_ORDERS = [
   { reference: "PO-2026-0211", supplier: "MedParts Global", items: 4, total: 6840, status: "sent" as const, createdAt: "2026-05-29", expectedDate: "2026-06-09" },
-  { reference: "PO-2026-0210", supplier: "Acme Medical Supply", items: 2, total: 1840, status: "received" as const, createdAt: "2026-05-22", expectedDate: "2026-06-01" },
+  { reference: "PO-2026-0210", supplier: "Acme Medical Supply", items: 2, total: 1840, status: "closed" as const, createdAt: "2026-05-22", expectedDate: "2026-06-01" },
   { reference: "PO-2026-0209", supplier: "CalibPro", items: 1, total: 210, status: "partial" as const, createdAt: "2026-05-25", expectedDate: "2026-06-05" },
   { reference: "PO-2026-0208", supplier: "FilterTech", items: 6, total: 390, status: "draft" as const, createdAt: "2026-06-01", expectedDate: "2026-06-12" },
 ];

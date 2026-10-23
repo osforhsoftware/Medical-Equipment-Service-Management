@@ -37,11 +37,11 @@ export default function ServiceReportsPage() {
 
   const jobsQuery = useQuery({
     queryKey: ["reports", "jobs"],
-    queryFn: () => api.listJobs({ limit: 100, page: 1, completedScope: "all" }),
+    queryFn: () => api.listJobs({ limit: 200, page: 1, completedScope: "all" }),
   });
   const ticketsQuery = useQuery({
     queryKey: ["reports", "tickets"],
-    queryFn: () => api.listServiceRequests({ limit: 100, page: 1, completedScope: "all" }),
+    queryFn: () => api.listServiceRequests({ limit: 200, page: 1, completedScope: "all" }),
   });
   const claimsQuery = useQuery({
     queryKey: ["warranty-claims"],

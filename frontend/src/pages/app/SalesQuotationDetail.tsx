@@ -152,6 +152,7 @@ export default function SalesQuotationDetail() {
   const payload = () => ({
     validUntil,
     notes: notes.trim() || null,
+    customerSummary: null,
     lines: lines
       .filter((line) => line.description.trim() && line.quantity > 0)
       .map((line) => ({
@@ -384,7 +385,7 @@ export default function SalesQuotationDetail() {
                   ]}
                   lines={lines.map((line) => ({
                     id: line.key,
-                    description: line.sku ? `${line.description} (${line.sku})` : line.description,
+                    description: line.description,
                     type: line.type,
                     quantity: line.quantity,
                     unitPrice: line.unitPrice,

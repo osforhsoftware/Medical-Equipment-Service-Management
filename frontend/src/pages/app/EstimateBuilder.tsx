@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { EstimateItemsTable } from "@/components/estimates/EstimateItemsTable";
 import { EstimateSummary } from "@/components/estimates/EstimateSummary";
 import { EstimateWorkflowSteps } from "@/components/estimates/EstimateWorkflowSteps";
+import { CustomerSummaryField } from "@/components/shared/CustomerSummaryField";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { CreditExposureBanner } from "@/components/shared/CreditExposureBanner";
 import { creditBlocksSave, useCustomerCreditExposure } from "@/hooks/useCustomerCreditExposure";
@@ -97,7 +98,6 @@ export default function EstimateBuilder() {
   const equipmentIdParam = searchParams.get("equipmentId") ?? "";
   const navigate = useNavigate();
   const { settings } = useSettings();
-  const taxDefault = settings?.defaultTaxRate ?? 0;
 
   const [ticket, setTicket] = useState<BackendServiceRequest | null>(null);
   const [party, setParty] = useState<BackendCustomer | null>(null);
@@ -112,10 +112,11 @@ export default function EstimateBuilder() {
   const [discount, setDiscount] = useState(0);
   const [terms, setTerms] = useState("Payment due as agreed. Parts are subject to availability.");
   const [notes, setNotes] = useState("");
+  const [customerSummary, setCustomerSummary] = useState("");
   const [currency, setCurrency] = useState("INR");
   const [warranty, setWarranty] = useState("");
   const [estimatedCompletion, setEstimatedCompletion] = useState("");
-  const [lines, setLines] = useState<EstimateLineInput[]>([newEstimateLine(taxDefault)]);
+  const [lines, setLines] = useState<EstimateLineInput[]>([newEstimateLine()]);
   const formRef = useRef<HTMLDivElement>(null);
   const {
     errors,
@@ -179,13 +180,13 @@ export default function EstimateBuilder() {
         if (recommendation.type === "service" || recommendation.catalogItemId) {
           const service = services.find((item) => item.id === recommendation.catalogItemId);
           const storedTotal = Number(recommendation.estimatedCost) || 0;
-          return newEstimateLine(taxDefault, {
+          return newEstimateLine(0, {
             type: "service",
             description: recommendation.title || service?.name || "Service",
             catalogItemId: recommendation.catalogItemId,
             quantity,
             unitPrice: Number(service?.unitPrice) || (quantity > 0 ? storedTotal / quantity : storedTotal),
-            taxRate: Number(service?.taxRate) || taxDefault,
+            taxRate: Number(service?.taxRate) || 0,
           });
         }
 
@@ -194,7 +195,7 @@ export default function EstimateBuilder() {
           item?.deliveryChargeType === "perUnit"
             ? Number(item.deliveryCharge ?? 0) * quantity
             : Number(item?.deliveryCharge ?? 0);
-        return newEstimateLine(taxDefault, {
+        return newEstimateLine(0, {
           type: "part",
           description: recommendation.title || item?.name || "Part",
           inventoryItemId: recommendation.inventoryItemId,
@@ -213,6 +214,7 @@ export default function EstimateBuilder() {
         setDiscount(estimateLevelDiscount(full));
         setTerms(full.terms || customer?.paymentTerms || "Payment due as agreed. Parts are subject to availability.");
         setNotes(full.notes || "");
+        setCustomerSummary(full.customerSummary || "");
         setCurrency(full.currency || "INR");
         setWarranty(full.warranty || "");
         setEstimatedCompletion(full.estimatedCompletion?.slice(0, 10) || "");
@@ -258,7 +260,7 @@ export default function EstimateBuilder() {
     } finally {
       setLoading(false);
     }
-  }, [ticketId, customerIdParam, equipmentIdParam, taxDefault]);
+  }, [ticketId, customerIdParam, equipmentIdParam]);
 
   useEffect(() => {
     void load();
@@ -345,6 +347,7 @@ export default function EstimateBuilder() {
         discount,
         terms,
         notes,
+        customerSummary: customerSummary.trim() || null,
         currency,
         warranty: warranty.trim() || null,
         estimatedCompletion: estimatedCompletion || null,
@@ -490,7 +493,6 @@ export default function EstimateBuilder() {
           <EstimateItemsTable
             mode={editable ? "edit" : "view"}
             lines={lines}
-            taxDefault={taxDefault}
             catalog={catalog}
             inventory={inventory}
             invalid={shouldShow("lines")}
@@ -601,6 +603,15 @@ export default function EstimateBuilder() {
                 <Label htmlFor="terms">Payment terms / Terms & conditions</Label>
                 <Textarea id="terms" value={terms} disabled={!editable} onChange={(e) => setTerms(e.target.value)} rows={3} />
               </div>
+              <CustomerSummaryField
+                id="customer-summary"
+                value={customerSummary}
+                disabled={!editable}
+                lines={lines}
+                headerDiscount={discount}
+                total={totals.total}
+                onChange={setCustomerSummary}
+              />
               <div className="grid gap-2">
                 <Label htmlFor="notes">Internal notes</Label>
                 <Textarea id="notes" value={notes} disabled={!editable} onChange={(e) => setNotes(e.target.value)} rows={3} />

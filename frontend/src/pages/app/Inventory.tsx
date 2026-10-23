@@ -84,8 +84,7 @@ const inventorySchema = z
     manufacturer: fieldRules.optionalString(),
     compatibleModels: fieldRules.optionalString(),
     inStock: nonNegativeString("Quantity on hand"),
-    reorderLevel: nonNegativeString("Min level"),
-    maxLevel: nonNegativeString("Max level"),
+    reorderLevel: nonNegativeString("Minimum level"),
     binLocation: fieldRules.optionalString(),
     unitCost: nonNegativeString("Cost price"),
     sellingPrice: nonNegativeString("Selling price"),
@@ -126,21 +125,6 @@ const inventorySchema = z
         message: data.supplierOther?.trim() ? "Click Add to save the new supplier." : "Enter a supplier name.",
       });
     }
-    const minLevel = Number(data.reorderLevel);
-    const maxLevel = Number(data.maxLevel);
-    if (
-      data.maxLevel.trim() &&
-      Number.isFinite(minLevel) &&
-      Number.isFinite(maxLevel) &&
-      maxLevel > 0 &&
-      minLevel > maxLevel
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["maxLevel"],
-        message: "Max level must be greater than or equal to min level.",
-      });
-    }
   });
 
 const emptyForm = {
@@ -154,7 +138,6 @@ const emptyForm = {
   compatibleModels: "",
   inStock: "0",
   reorderLevel: "5",
-  maxLevel: "0",
   binLocation: "",
   trackBatches: false,
   trackSerials: false,
@@ -174,17 +157,19 @@ const emptyForm = {
 function reserveFieldErrors(form: typeof emptyForm, alreadyReserved: number): FieldErrors {
   const qtyRaw = form.reserveQuantity.trim();
   const purpose = form.reservePurpose.trim();
-  if (!qtyRaw && !purpose) return {};
+  if (!qtyRaw) {
+    if (purpose.length > 500) return { reservePurpose: "Purpose must be 500 characters or fewer." };
+    return {};
+  }
   const errors: FieldErrors = {};
   const qty = Number(qtyRaw);
   const available = Math.max(0, (Number(form.inStock) || 0) - alreadyReserved);
-  if (!qtyRaw || !Number.isInteger(qty) || qty <= 0) {
+  if (!Number.isInteger(qty) || qty <= 0) {
     errors.reserveQuantity = "Quantity must be a whole number greater than 0";
   } else if (qty > available) {
     errors.reserveQuantity = `Only ${available} available to reserve`;
   }
-  if (!purpose) errors.reservePurpose = "Enter what this stock is reserved for";
-  else if (purpose.length > 500) errors.reservePurpose = "Purpose must be 500 characters or fewer.";
+  if (purpose.length > 500) errors.reservePurpose = "Purpose must be 500 characters or fewer.";
   return errors;
 }
 
@@ -220,7 +205,6 @@ function formFromItem(item: BackendInventoryItem): typeof emptyForm {
     compatibleModels: item.compatibleModels ?? "",
     inStock: String(item.inStock ?? 0),
     reorderLevel: String(item.reorderLevel ?? 0),
-    maxLevel: String(item.maxLevel ?? 0),
     binLocation: item.binLocation ?? "",
     trackBatches: Boolean(item.trackBatches),
     trackSerials: Boolean(item.trackSerials),
@@ -442,7 +426,6 @@ export default function Inventory() {
       "compatibleModels",
       "inStock",
       "reorderLevel",
-      "maxLevel",
       "binLocation",
       "unitCost",
       "sellingPrice",
@@ -636,7 +619,7 @@ export default function Inventory() {
     const supplier = suppliers.find((row) => row.id === form.supplierId);
     const reserveQty = Number(form.reserveQuantity);
     const reservePurpose = form.reservePurpose.trim();
-    const shouldReserve = Boolean(form.reserveQuantity.trim()) && reserveQty > 0 && Boolean(reservePurpose);
+    const shouldReserve = Boolean(form.reserveQuantity.trim()) && reserveQty > 0;
 
     setSaving(true);
     try {
@@ -656,7 +639,6 @@ export default function Inventory() {
         compatibleModels: form.compatibleModels.trim() || null,
         inStock: Number(form.inStock) || 0,
         reorderLevel: Number(form.reorderLevel) || 0,
-        maxLevel: Number(form.maxLevel) || 0,
         binLocation: form.binLocation.trim(),
         trackBatches: form.trackBatches,
         trackSerials: form.trackSerials,
@@ -679,7 +661,7 @@ export default function Inventory() {
           await api.createStockReservation({
             inventoryItemId: saved.id,
             quantity: reserveQty,
-            purpose: reservePurpose,
+            ...(reservePurpose ? { purpose: reservePurpose } : {}),
           });
           reserved = true;
         } catch (reserveError) {
@@ -689,7 +671,9 @@ export default function Inventory() {
       toast({
         title: editingItem ? "Inventory item updated" : "Inventory item added",
         description: reserved
-          ? `${form.name.trim()} · ${reserveQty} reserved for ${reservePurpose}. On-hand stock is unchanged.`
+          ? reservePurpose
+            ? `${form.name.trim()} · ${reserveQty} reserved for ${reservePurpose}. On-hand stock is unchanged.`
+            : `${form.name.trim()} · ${reserveQty} reserved. On-hand stock is unchanged.`
           : form.name.trim(),
       });
       closeDialog();
@@ -1369,7 +1353,7 @@ export default function Inventory() {
                   placeholder="e.g. Magnetom Vida, Magnetom Sola"
                 />
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2" data-field="inStock">
                   <Label htmlFor="inventory-in-stock">Qty on hand</Label>
                   <Input
@@ -1389,7 +1373,7 @@ export default function Inventory() {
                   {shouldShow("inStock") && <FormFieldError field="inStock" message={errors.inStock} />}
                 </div>
                 <div className="grid gap-2" data-field="reorderLevel">
-                  <Label htmlFor="inventory-reorder">Min/max level (min)</Label>
+                  <Label htmlFor="inventory-reorder">Minimum level</Label>
                   <Input
                     id="inventory-reorder"
                     type="number"
@@ -1405,24 +1389,6 @@ export default function Inventory() {
                     {...fieldAria("reorderLevel", shouldShow("reorderLevel") ? errors.reorderLevel : null)}
                   />
                   {shouldShow("reorderLevel") && <FormFieldError field="reorderLevel" message={errors.reorderLevel} />}
-                </div>
-                <div className="grid gap-2" data-field="maxLevel">
-                  <Label htmlFor="inventory-max">Min/max level (max)</Label>
-                  <Input
-                    id="inventory-max"
-                    type="number"
-                    min={0}
-                    value={form.maxLevel}
-                    onChange={(e) => {
-                      const next = { ...form, maxLevel: e.target.value };
-                      setForm(next);
-                      handleChange("maxLevel", next);
-                    }}
-                    onBlur={() => handleBlur("maxLevel", form)}
-                    className={fieldErrorClass(shouldShow("maxLevel"))}
-                    {...fieldAria("maxLevel", shouldShow("maxLevel") ? errors.maxLevel : null)}
-                  />
-                  {shouldShow("maxLevel") && <FormFieldError field="maxLevel" message={errors.maxLevel} />}
                 </div>
               </div>
               <div className="space-y-3 rounded-lg border border-border p-3">

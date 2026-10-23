@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
+import { InventoryQrPanel } from "@/components/shared/InventoryQrPanel";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { fieldAria, fieldErrorClass, fieldRules } from "@/lib/formValidation";
 import {
@@ -19,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/AuthContext";
 import { api, ApiError, type BackendInventoryItem } from "@/lib/api";
-import { Eye, Package, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Pencil, Trash2, RotateCcw, Loader2 } from "lucide-react";
+import { Eye, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Pencil, Trash2, RotateCcw, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
@@ -240,8 +241,7 @@ export default function InventoryDetail() {
                       { label: "Reserved", value: String(item.reserved) },
                       { label: "Issued", value: String(item.issued ?? 0) },
                       { label: "Damaged", value: String(item.damaged ?? 0) },
-                      { label: "Min/max level (min)", value: String(item.reorderLevel) },
-                      { label: "Min/max level (max)", value: String(item.maxLevel ?? 0) },
+                      { label: "Minimum level", value: String(item.reorderLevel) },
                       { label: "Bin/location", value: item.binLocation || "—" },
                       { label: "Stock unit", value: item.unitOfMeasure ?? "pcs" },
                       { label: "Cost / selling price (cost)", value: formatCurrency(item.unitCost) },
@@ -305,139 +305,142 @@ export default function InventoryDetail() {
                     { label: "Available", value: String(item.inStock - item.reserved) },
                     { label: "On hand", value: String(item.inStock) },
                     { label: "Reserved", value: String(item.reserved) },
-                    { label: "Min/max level (min)", value: String(item.reorderLevel) },
+                    { label: "Minimum level", value: String(item.reorderLevel) },
                   ]}
                 />
                 {item.inStock <= item.reorderLevel ? (
-                  <p className="mt-3 text-sm text-warning-foreground">Stock is at or below Min/max level (min).</p>
+                  <p className="mt-3 text-sm text-warning-foreground">Stock is at or below minimum level.</p>
                 ) : null}
               </DetailSection>
             ),
           },
         ] : undefined}
         sidebar={item ? (
-          <Card>
-            <CardHeader className="pb-3"><CardTitle className="text-base">Actions</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              {canAdjust ? (
-                <div className="flex flex-col gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-start"
-                    onClick={() => navigate(`/app/inventory?stage=parts&edit=${item.id}`)}
-                  >
-                    <Pencil className="mr-2 h-4 w-4" /> Edit product
-                  </Button>
-                  {item.status === "inactive" ? (
+          <div className="space-y-4">
+            <Card>
+              <CardHeader className="pb-3"><CardTitle className="text-base">Actions</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                {canAdjust ? (
+                  <div className="flex flex-col gap-2">
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       className="w-full justify-start"
-                      disabled={restoring}
-                      onClick={() => void restoreFromTrash()}
+                      onClick={() => navigate(`/app/inventory?stage=parts&edit=${item.id}`)}
                     >
-                      {restoring ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
-                      Restore from trash
+                      <Pencil className="mr-2 h-4 w-4" /> Edit product
                     </Button>
-                  ) : (
+                    {item.status === "inactive" ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-full justify-start"
+                        disabled={restoring}
+                        onClick={() => void restoreFromTrash()}
+                      >
+                        {restoring ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                        Restore from trash
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-full justify-start text-destructive hover:text-destructive"
+                        onClick={() => setDeleteOpen(true)}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" /> Move to trash
+                      </Button>
+                    )}
+                  </div>
+                ) : null}
+                {canAdjust ? (
+                  <form
+                    noValidate
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void adjustStock();
+                    }}
+                  >
+                    <div ref={adjustRef} className="space-y-3">
+                      <p className="text-sm font-medium">Force stock adjustment</p>
+                      <div className="grid gap-2" data-field="adjustDelta">
+                        <Label htmlFor="adjust-delta" className={shouldShow("adjustDelta") ? "text-destructive" : undefined}>
+                          Delta (+/-)
+                          <RequiredMark />
+                        </Label>
+                        <Input
+                          id="adjust-delta"
+                          name="adjustDelta"
+                          type="number"
+                          value={adjustDelta}
+                          placeholder="Delta (+/-)"
+                          className={fieldErrorClass(shouldShow("adjustDelta"))}
+                          {...fieldAria("adjustDelta", shouldShow("adjustDelta") ? errors.adjustDelta : null)}
+                          onChange={(e) => {
+                            setAdjustDelta(e.target.value);
+                            handleChange("adjustDelta", { adjustDelta: e.target.value, adjustReason });
+                          }}
+                          onBlur={() => handleBlur("adjustDelta", formValues())}
+                        />
+                        {shouldShow("adjustDelta") && <FormFieldError field="adjustDelta" message={errors.adjustDelta} />}
+                      </div>
+                      <div className="grid gap-2" data-field="adjustReason">
+                        <Label htmlFor="adjust-reason" className={shouldShow("adjustReason") ? "text-destructive" : undefined}>
+                          Reason
+                          <RequiredMark />
+                        </Label>
+                        <Input
+                          id="adjust-reason"
+                          name="adjustReason"
+                          value={adjustReason}
+                          placeholder="Reason (required)"
+                          className={fieldErrorClass(shouldShow("adjustReason"))}
+                          {...fieldAria("adjustReason", shouldShow("adjustReason") ? errors.adjustReason : null)}
+                          onChange={(e) => {
+                            setAdjustReason(e.target.value);
+                            handleChange("adjustReason", { adjustDelta, adjustReason: e.target.value });
+                          }}
+                          onBlur={() => handleBlur("adjustReason", formValues())}
+                        />
+                        {shouldShow("adjustReason") && <FormFieldError field="adjustReason" message={errors.adjustReason} />}
+                      </div>
+                      <Button type="submit" size="sm" className="w-full" disabled={saving}>
+                        Apply adjustment
+                      </Button>
+                    </div>
+                  </form>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Stock adjustments require inventory access.</p>
+                )}
+                {canAdjust && (
+                  <div className="pt-2 border-t border-border space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-muted-foreground">Damaged Stock Segregation</span>
+                      {damagedCount > 0 && (
+                        <Badge variant="destructive" className="text-[10px]">
+                          🔴 {damagedCount} Damaged
+                        </Badge>
+                      )}
+                    </div>
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="w-full justify-start text-destructive hover:text-destructive"
-                      onClick={() => setDeleteOpen(true)}
+                      className="w-full text-destructive border-destructive/40 hover:bg-destructive/10"
+                      onClick={() => setDamagedOpen(true)}
                     >
-                      <Trash2 className="mr-2 h-4 w-4" /> Move to trash
-                    </Button>
-                  )}
-                </div>
-              ) : null}
-              {canAdjust ? (
-                <form
-                  noValidate
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void adjustStock();
-                  }}
-                >
-                  <div ref={adjustRef} className="space-y-3">
-                    <p className="text-sm font-medium">Force stock adjustment</p>
-                    <div className="grid gap-2" data-field="adjustDelta">
-                      <Label htmlFor="adjust-delta" className={shouldShow("adjustDelta") ? "text-destructive" : undefined}>
-                        Delta (+/-)
-                        <RequiredMark />
-                      </Label>
-                      <Input
-                        id="adjust-delta"
-                        name="adjustDelta"
-                        type="number"
-                        value={adjustDelta}
-                        placeholder="Delta (+/-)"
-                        className={fieldErrorClass(shouldShow("adjustDelta"))}
-                        {...fieldAria("adjustDelta", shouldShow("adjustDelta") ? errors.adjustDelta : null)}
-                        onChange={(e) => {
-                          setAdjustDelta(e.target.value);
-                          handleChange("adjustDelta", { adjustDelta: e.target.value, adjustReason });
-                        }}
-                        onBlur={() => handleBlur("adjustDelta", formValues())}
-                      />
-                      {shouldShow("adjustDelta") && <FormFieldError field="adjustDelta" message={errors.adjustDelta} />}
-                    </div>
-                    <div className="grid gap-2" data-field="adjustReason">
-                      <Label htmlFor="adjust-reason" className={shouldShow("adjustReason") ? "text-destructive" : undefined}>
-                        Reason
-                        <RequiredMark />
-                      </Label>
-                      <Input
-                        id="adjust-reason"
-                        name="adjustReason"
-                        value={adjustReason}
-                        placeholder="Reason (required)"
-                        className={fieldErrorClass(shouldShow("adjustReason"))}
-                        {...fieldAria("adjustReason", shouldShow("adjustReason") ? errors.adjustReason : null)}
-                        onChange={(e) => {
-                          setAdjustReason(e.target.value);
-                          handleChange("adjustReason", { adjustDelta, adjustReason: e.target.value });
-                        }}
-                        onBlur={() => handleBlur("adjustReason", formValues())}
-                      />
-                      {shouldShow("adjustReason") && <FormFieldError field="adjustReason" message={errors.adjustReason} />}
-                    </div>
-                    <Button type="submit" size="sm" className="w-full" disabled={saving}>
-                      Apply adjustment
+                      <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />
+                      Log Damaged Stock
                     </Button>
                   </div>
-                </form>
-              ) : (
-                <p className="text-sm text-muted-foreground">Stock adjustments require inventory access.</p>
-              )}
-              {canAdjust && (
-                <div className="pt-2 border-t border-border space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-muted-foreground">Damaged Stock Segregation</span>
-                    {damagedCount > 0 && (
-                      <Badge variant="destructive" className="text-[10px]">
-                        🔴 {damagedCount} Damaged
-                      </Badge>
-                    )}
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full text-destructive border-destructive/40 hover:bg-destructive/10"
-                    onClick={() => setDamagedOpen(true)}
-                  >
-                    <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />
-                    Log Damaged Stock
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                )}
+              </CardContent>
+            </Card>
+            <InventoryQrPanel sku={item.sku} binLocation={item.binLocation} />
+          </div>
         ) : undefined}
       />
 

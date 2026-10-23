@@ -29,6 +29,7 @@ router.post("/parts-requests/:requestId/approve", canManage, validate(approvePar
 router.post("/parts-requests/:requestId/reject", canManage, validate(rejectPartsRequestSchema), inventoryController.rejectPartsRequest);
 router.post("/parts-requests/:requestId/issue", canAdjust, validate(issuePartsRequestSchema), inventoryController.issuePartsRequest);
 router.post("/bulk", canManage, validate(bulkImportInventorySchema), inventoryController.bulkImport);
+router.get("/by-sku/:sku", canRead, inventoryController.getBySku);
 router.get("/:id", canRead, inventoryController.getById);
 router.post("/", canManage, validate(createInventorySchema), inventoryController.create);
 router.put("/:id", canManage, validate(updateInventorySchema), inventoryController.update);

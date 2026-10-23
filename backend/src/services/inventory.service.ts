@@ -24,7 +24,6 @@ type CreateInventoryData = {
   branchId?: string;
   inStock?: number;
   reorderLevel?: number;
-  maxLevel?: number;
   binLocation?: string;
   trackBatches?: boolean;
   trackSerials?: boolean;
@@ -128,6 +127,12 @@ export class InventoryService {
     return this.withAvailability(item);
   }
 
+  async getBySku(sku: string, tenantId: string) {
+    const item = await inventoryRepository.findBySku(sku, tenantId);
+    if (!item) throw new AppError("Inventory item not found for that SKU", 404);
+    return this.withAvailability(item);
+  }
+
   private async resolveOptionalSlug(
     tenantId: string,
     type: "inventory_category" | "inventory_subcategory",
@@ -190,7 +195,6 @@ export class InventoryService {
           inStock: rest.inStock ?? 0,
           reserved: 0,
           reorderLevel: rest.reorderLevel ?? 0,
-          maxLevel: rest.maxLevel ?? 0,
           binLocation: rest.binLocation?.trim() || "",
           trackBatches: rest.trackBatches ?? false,
           trackSerials: rest.trackSerials ?? false,
@@ -342,20 +346,6 @@ export class InventoryService {
         const itemClass = resolveItemClass(data.itemClass, category);
         const imageFileIds = data.imageFileIds ?? [];
 
-        const minLevel = data.reorderLevel ?? 0;
-        const maxLevel = data.maxLevel ?? 0;
-        if (maxLevel > 0 && minLevel > maxLevel) {
-          failed += 1;
-          results.push({
-            row: rowNum,
-            sku,
-            name,
-            status: "error",
-            message: "Max level must be greater than or equal to min level",
-          });
-          continue;
-        }
-
         const item = await prisma.$transaction(async (tx) => {
           const createdItem = await tx.inventoryItem.create({
             data: {
@@ -372,7 +362,6 @@ export class InventoryService {
               inStock: data.inStock ?? 0,
               reserved: 0,
               reorderLevel: data.reorderLevel ?? 0,
-              maxLevel: data.maxLevel ?? 0,
               binLocation: data.binLocation?.trim() || "",
               trackBatches: data.trackBatches ?? false,
               trackSerials: data.trackSerials ?? false,
@@ -430,16 +419,11 @@ export class InventoryService {
       reserved?: number;
     };
     const nextOnHand = safe.inStock ?? existing.inStock;
-    const nextMin = safe.reorderLevel ?? existing.reorderLevel;
-    const nextMax = safe.maxLevel ?? existing.maxLevel;
     if (!Number.isFinite(nextOnHand) || nextOnHand < 0) {
       throw new AppError("Quantity on hand cannot be negative", 422);
     }
     if (nextOnHand < existing.reserved) {
       throw new AppError(`Quantity on hand cannot fall below the ${existing.reserved} reserved units`, 409);
-    }
-    if (nextMax > 0 && nextMin > nextMax) {
-      throw new AppError("Max level must be greater than or equal to min level", 422);
     }
     if (safe.supplierId) {
       const supplier = await prisma.supplier.findFirst({ where: { id: safe.supplierId, tenantId } });
@@ -487,7 +471,6 @@ export class InventoryService {
           ...(safe.branchId != null ? { branchId: nextBranchId } : {}),
           ...(safe.inStock != null ? { inStock: safe.inStock } : {}),
           ...(safe.reorderLevel != null ? { reorderLevel: safe.reorderLevel } : {}),
-          ...(safe.maxLevel != null ? { maxLevel: safe.maxLevel } : {}),
           ...(safe.binLocation != null ? { binLocation: String(safe.binLocation).trim() } : {}),
           ...(safe.trackBatches != null ? { trackBatches: Boolean(safe.trackBatches) } : {}),
           ...(safe.trackSerials != null ? { trackSerials: Boolean(safe.trackSerials) } : {}),

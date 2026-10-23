@@ -20,6 +20,7 @@ function buildWhere(tenantId: string, filters: Omit<SupplierListFilters, "skip" 
       { phone: searchContains(filters.search) },
       { contact: searchContains(filters.search) },
       { category: searchContains(filters.search) },
+      { address: searchContains(filters.search) },
     ];
   }
 

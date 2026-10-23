@@ -60,7 +60,14 @@ export default function PurchaseOrdersProfessional() {
     () => ({
       ...listParams,
       search: debouncedSearch || undefined,
-      status: stage === "grn" || stage === "shipment" || stage === "customs" ? "open" : stage === "stock" ? "received" : undefined,
+      status:
+        stage === "grn"
+          ? "receivable"
+          : stage === "shipment" || stage === "customs"
+            ? "open"
+            : stage === "stock"
+              ? "closed"
+              : undefined,
     }),
     [listParams, debouncedSearch, stage],
   );
@@ -131,7 +138,7 @@ export default function PurchaseOrdersProfessional() {
     if (!supplier) return;
     setSaving(true);
     try {
-      await api.createItemizedPurchaseOrder({
+      const created = await api.createItemizedPurchaseOrder({
         supplierId,
         supplier: supplier.name,
         currency: currency.trim() || supplier.currency || "INR",
@@ -152,7 +159,8 @@ export default function PurchaseOrdersProfessional() {
       setLines([blankLine()]);
       resetValidation();
       await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
-      toast({ title: "Itemized purchase order created" });
+      toast({ title: "Draft PO created", description: "Review lines, then send/print for the supplier." });
+      navigate(`/app/purchase-orders/${created.id}`);
     } catch (error) {
       if (!applyApiErrors(error, dialogRef.current)) {
         toast.apiError(error, { fallback: "Request failed" });
@@ -201,14 +209,14 @@ export default function PurchaseOrdersProfessional() {
             : "Purchase orders";
   const description =
     stage === "grn"
-      ? "Open a purchase order to post a goods receipt into inventory."
+      ? "Sent and partially received POs — post a goods receipt to update stock."
       : stage === "shipment"
         ? "Record courier, tracking, freight, and ETD/ETA for open purchase orders."
         : stage === "customs"
           ? "Enter customs and other import costs for accurate landed valuation."
           : stage === "stock"
-            ? "Fully received purchase orders — stock is valued at landed unit cost."
-            : "Create and track purchase orders. Continue to shipment, customs, GRN, then stock.";
+            ? "Closed purchase orders — receipt complete and stock valued at landed unit cost."
+            : "Create → review → send/print → receive goods → closes when receipt is complete.";
 
   return <RoleGuard roles={["admin", "inventory"]}><div className="space-y-6">
     <PageHeader title={title} description={description} actions={stage === "po" ? <Button variant="brand" onClick={() => { resetValidation(); setCreateOpen(true); }}><Plus className="mr-1 h-4 w-4" /> New PO</Button> : undefined} />
@@ -226,14 +234,14 @@ export default function PurchaseOrdersProfessional() {
         <p className="text-xs text-muted-foreground">Tip</p>
         <p className="mt-1 text-sm text-muted-foreground">
           {stage === "grn"
-            ? "Open a row to receive goods."
+            ? "Only sent POs appear here. Open a row to receive goods."
             : stage === "shipment"
               ? "Open a row to enter shipment details."
               : stage === "customs"
                 ? "Open a row to enter customs & import costs."
                 : stage === "stock"
-                  ? "Received orders — inventory already updated."
-                  : "Use Overview for the full buy desk."}
+                  ? "Closed orders — inventory already updated."
+                  : "New POs open as draft for review before send."}
         </p>
       </div>
     </div>

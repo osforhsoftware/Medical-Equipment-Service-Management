@@ -44,6 +44,13 @@ export class InventoryController {
     } catch (err) { next(err); }
   }
 
+  async getBySku(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await inventoryService.getBySku(req.params.sku, req.tenantId!);
+      res.json(success("Inventory item fetched successfully", data));
+    } catch (err) { next(err); }
+  }
+
   async create(req: Request, res: Response, next: NextFunction) {
     try {
       const data = await inventoryService.create(req.tenantId!, req.body);

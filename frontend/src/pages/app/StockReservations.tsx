@@ -124,16 +124,23 @@ export default function StockReservations() {
       toast.error(`Only ${selectedAvailable} available to reserve`);
       return;
     }
-    if (!purpose.trim()) {
-      toast.error("Enter what this stock is reserved for");
+    if (purpose.trim().length > 500) {
+      toast.error("Purpose must be 500 characters or fewer.");
       return;
     }
     setSaving(true);
     try {
-      await api.createStockReservation({ inventoryItemId: itemId, quantity: qty, purpose: purpose.trim() });
+      const purposeText = purpose.trim();
+      await api.createStockReservation({
+        inventoryItemId: itemId,
+        quantity: qty,
+        ...(purposeText ? { purpose: purposeText } : {}),
+      });
       toast({
         title: "Stock reserved",
-        description: `${qty} held for ${purpose.trim()}. On-hand stock is unchanged.`,
+        description: purposeText
+          ? `${qty} held for ${purposeText}. On-hand stock is unchanged.`
+          : `${qty} reserved. On-hand stock is unchanged.`,
       });
       setReserveOpen(false);
       setItemId("");

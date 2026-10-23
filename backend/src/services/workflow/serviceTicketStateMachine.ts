@@ -192,9 +192,11 @@ export function assertTicketReopen(
   }
   const currentIdx = TICKET_STATUS_ORDER.indexOf(from);
   const targetIdx = TICKET_STATUS_ORDER.indexOf(to);
+
   if (targetIdx >= currentIdx) {
     throw new AppError("Reopen must move to an earlier workflow stage", 409);
   }
+ 
 }
 
 /** Apply a domain event: same status, a legal next transition, or a controlled reverse. */
