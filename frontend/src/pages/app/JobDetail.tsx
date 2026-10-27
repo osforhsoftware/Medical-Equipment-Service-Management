@@ -21,7 +21,6 @@ import { JobWorkbenchContextSection } from "@/components/jobs/JobWorkbenchContex
 import { QaChecklistEditor } from "@/components/jobs/QaChecklistEditor";
 import { pickWorkReportLog, useJobWorkReportEditor } from "@/components/jobs/useJobWorkReportEditor";
 import {
-  allQaChecklistChecked,
   buildQaChecklistFromDefaults,
   resolveJobQaChecklist,
   type QaChecklistItem,
@@ -610,14 +609,6 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
   const approveQaPass = async () => {
     if (!job) return;
     const checklist = sanitizedQaChecklist();
-    if (!allQaChecklistChecked(checklist)) {
-      toast({
-        title: "Complete the checklist",
-        description: "Check all QA points before marking pass.",
-        variant: "destructive",
-      });
-      return;
-    }
     try {
       const updated = await api.updateJob(job.id, {
         status: "completed",
@@ -1407,10 +1398,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                             <Button variant="outline" onClick={() => void failQaReturnToRepair()}>
                               Fail — Return to Repair
                             </Button>
-                            <Button
-                              disabled={!allQaChecklistChecked(sanitizedQaChecklist())}
-                              onClick={() => void approveQaPass()}
-                            >
+                            <Button onClick={() => void approveQaPass()}>
                               Pass — Mark Complete
                             </Button>
                           </>

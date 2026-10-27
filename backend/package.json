@@ -15,6 +15,7 @@
     "prisma:repair": "node scripts/repair-stuck-migrations.js",
     "seed": "ts-node prisma/seed.ts",
     "db:clean": "ts-node -r tsconfig-paths/register prisma/clean.ts",
+    "db:clean:keep-staff": "ts-node -r tsconfig-paths/register prisma/clean.ts -- --confirm --keep-staff",
     "asset-tag:report": "ts-node -r tsconfig-paths/register scripts/asset-tag-migration-report.ts"
   },
   "dependencies": {

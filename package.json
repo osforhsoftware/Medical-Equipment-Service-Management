@@ -10,6 +10,8 @@
     "test:backend": "npm test --prefix backend",
     "test:frontend": "npm run test --prefix frontend",
     "lint:frontend": "npm run lint --prefix frontend",
-    "verify": "npm run build:backend && npm run test:backend && npm run lint:frontend && npm run test:frontend && npm run build:frontend"
+    "verify": "npm run build:backend && npm run test:backend && npm run lint:frontend && npm run test:frontend && npm run build:frontend",
+    "db:clean": "npm run db:clean --prefix backend --",
+    "db:clean:keep-staff": "npm run db:clean:keep-staff --prefix backend --"
   }
 }

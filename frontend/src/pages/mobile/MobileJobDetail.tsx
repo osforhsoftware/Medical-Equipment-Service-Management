@@ -60,7 +60,6 @@ import { defaultDatePlusDays, formatDate, formatDateTime, formatJobStatus } from
 import { formatInventoryItemClass, inventoryMatchesExtraType, requestableStock } from "@/lib/inventoryItemClass";
 import { parseJobStageDetails } from "@/lib/jobStages";
 import {
-  allQaChecklistChecked,
   buildQaChecklistFromDefaults,
   resolveJobQaChecklist,
   type QaChecklistItem,
@@ -345,14 +344,6 @@ export default function MobileJobDetail() {
   const approveQaPass = async () => {
     if (!job) return;
     const checklist = sanitizedQaChecklist();
-    if (!allQaChecklistChecked(checklist)) {
-      toast({
-        title: "Complete the checklist",
-        description: "Check all QA points before marking pass.",
-        variant: "destructive",
-      });
-      return;
-    }
     try {
       await api.updateJob(job.id, {
         status: "completed",
@@ -914,7 +905,6 @@ export default function MobileJobDetail() {
                 <button
                   type="button"
                   className="mobile-btn-primary w-full"
-                  disabled={!allQaChecklistChecked(sanitizedQaChecklist())}
                   onClick={() => void approveQaPass()}
                 >
                   QA Pass — Mark Complete

@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "handbook": "node generate-full-workflow-handbook.mjs",
-    "gap-report": "node generate-client-gap-report.mjs"
+    "gap-report": "node generate-client-gap-report.mjs",
+    "corrections-guide": "node generate-site-corrections-guide.mjs"
   },
   "keywords": [],
   "author": "",

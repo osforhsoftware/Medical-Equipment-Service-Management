@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MEMS Site Corrections &amp; Updates Guide</title>
+  <style>
+    :root {
+      --blue: #1b4f9c;
+      --blue-dark: #0f3a75;
+      --blue-soft: #e8f1fb;
+      --navy: #0f2a44;
+      --muted: #5a6a7a;
+      --green: #1f6b3a;
+      --green-soft: #e6f4ea;
+      --soft: #f5f7fa;
+      --line: #d0d8e0;
+      --white: #ffffff;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Calibri, Arial, sans-serif;
+      color: var(--navy);
+      background: #e9eef5;
+      line-height: 1.45;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      background: var(--blue-dark);
+      color: white;
+    }
+    .toolbar button {
+      border: 0;
+      border-radius: 6px;
+      padding: 10px 16px;
+      background: white;
+      color: var(--blue-dark);
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .toolbar span { font-size: 14px; opacity: 0.95; }
+
+    .page {
+      max-width: 900px;
+      margin: 24px auto 48px;
+      background: var(--white);
+      box-shadow: 0 8px 28px rgba(15, 42, 68, 0.12);
+      padding: 40px 48px;
+    }
+
+    .banner {
+      background: var(--blue);
+      color: white;
+      padding: 14px 18px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      margin: 0 0 18px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      color: var(--blue-dark);
+      font-size: 28px;
+      line-height: 1.2;
+    }
+    .subtitle {
+      margin: 0 0 22px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .meta {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 28px;
+      font-size: 14px;
+    }
+    .meta th, .meta td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .meta th {
+      width: 30%;
+      background: var(--blue-soft);
+      color: var(--blue-dark);
+    }
+
+    h2.section {
+      background: var(--blue);
+      color: white;
+      margin: 28px 0 14px;
+      padding: 12px 16px;
+      font-size: 16px;
+    }
+
+    .overview p { margin: 0 0 12px; font-size: 15px; }
+    .overview ul { margin: 8px 0 0; padding-left: 20px; }
+    .overview li { margin: 4px 0; font-size: 14px; }
+
+    table.toc {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    table.toc th, table.toc td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+    }
+    table.toc th {
+      background: var(--blue);
+      color: white;
+    }
+    table.toc td.num {
+      width: 42px;
+      text-align: center;
+      background: var(--blue-soft);
+      font-weight: 700;
+      color: var(--blue-dark);
+    }
+    table.toc td.status {
+      width: 70px;
+      text-align: center;
+      background: var(--green-soft);
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 13px;
+      font-style: italic;
+      margin: 0 0 18px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      margin: 0 0 22px;
+      page-break-inside: avoid;
+    }
+    .card-head {
+      display: grid;
+      grid-template-columns: 72px 1fr;
+    }
+    .done {
+      background: var(--green-soft);
+      color: var(--green);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border-right: 1px solid var(--line);
+      font-weight: 700;
+      padding: 12px 6px;
+      gap: 2px;
+    }
+    .done .mark { font-size: 18px; }
+    .done .lbl { font-size: 11px; text-transform: uppercase; }
+    .title-wrap {
+      background: var(--soft);
+      padding: 12px 14px;
+    }
+    .title-wrap h3 {
+      margin: 0 0 4px;
+      color: var(--blue-dark);
+      font-size: 16px;
+    }
+    .title-wrap .cat {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .facts {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .facts th, .facts td {
+      border-top: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .facts th {
+      width: 24%;
+      background: var(--blue-soft);
+      color: var(--blue-dark);
+      border-right: 1px solid var(--line);
+    }
+
+    .howto {
+      padding: 12px 14px 14px;
+      border-top: 1px solid var(--line);
+    }
+    .howto strong {
+      display: block;
+      color: var(--blue-dark);
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+    .howto ol {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .howto li {
+      margin: 4px 0;
+      font-size: 13px;
+    }
+
+    .map {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .map th, .map td {
+      border: 1px solid var(--line);
+      padding: 9px 11px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .map th { background: var(--blue); color: white; }
+    .map td:first-child {
+      width: 28%;
+      background: var(--blue-soft);
+      color: var(--blue-dark);
+      font-weight: 700;
+    }
+
+    .footer-note {
+      margin-top: 28px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media print {
+      body { background: white; }
+      .toolbar { display: none !important; }
+      .page {
+        margin: 0;
+        box-shadow: none;
+        max-width: none;
+        padding: 0;
+      }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <span>MEMS · Site Corrections &amp; Updates Guide — open Print → Save as PDF</span>
+    <button type="button" onclick="window.print()">Print / Save PDF</button>
+  </div>
+
+  <main class="page">
+    <div class="banner">Medical Equipment Service Management</div>
+    <h1>Site Corrections &amp; Updates Guide</h1>
+    <p class="subtitle">A simple how-to guide for the latest system corrections: what changed, where to find it, and how to use it.</p>
+
+    <table class="meta">
+      <tr><th>Document title</th><td>MEMS Site Corrections &amp; Updates Guide</td></tr>
+      <tr><th>Subtitle</th><td>Client information pack — 18 corrections completed</td></tr>
+      <tr><th>Date last edited</th><td>27 October 2026</td></tr>
+      <tr><th>Audience</th><td>Client / operations staff / administrators</td></tr>
+      <tr><th>Status</th><td>All listed corrections updated on the site</td></tr>
+    </table>
+
+    <h2 class="section">1. Overview</h2>
+    <div class="overview">
+      <p>This guide informs the client that the Medical Equipment Service Management site has been updated with <strong>eighteen corrections</strong>. Each item explains what was added or changed, which page or menu to open, and how to use the new behaviour.</p>
+      <p><strong>Main themes covered:</strong></p>
+      <ul>
+        <li>Tax defaults and line tax entry on estimates and billing</li>
+        <li>Share estimate and RFQ quote via Print / PDF, Gmail, and WhatsApp</li>
+        <li>Clearer line editing (clear selection, description without part number)</li>
+        <li>Equipment serial uniqueness and Location label</li>
+        <li>Customer and supplier Address; unused form fields removed</li>
+        <li>Inventory QR codes, optional reserve purpose, no maximum stock</li>
+        <li>Purchase order workflow and configurable QA checklist</li>
+        <li>Cleaner customer PDFs (no internal status/time; customer text only)</li>
+        <li>Signature draw or upload for inspection, estimate, and billing</li>
+      </ul>
+    </div>
+
+    <h2 class="section">2. Table of contents</h2>
+    <table class="toc">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Correction</th>
+          <th>Area</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="toc-body"></tbody>
+    </table>
+
+    <h2 class="section">3. Correction details — Where · What · How to use</h2>
+    <p class="note">Use this section as a checklist. Each item is marked Done because the correction is already applied on the website.</p>
+    <div id="cards"></div>
+
+    <h2 class="section">4. Quick location map</h2>
+    <table class="map">
+      <thead>
+        <tr><th>Module / menu</th><th>Related corrections</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Estimates</td><td>1 Tax · 2 Share · 3 Clear selection · 4 Description · 15 Customer PDF · 16 Revision · 18 Signature</td></tr>
+        <tr><td>Billing</td><td>1 Tax · 3 Clear selection · 4 Description · 15 Customer PDF · 18 Signature</td></tr>
+        <tr><td>Equipment</td><td>5 Unique serial · 8 Remove part number · 17 Location label</td></tr>
+        <tr><td>Customers / Suppliers</td><td>6 Address · 8 Removed payment terms / rating / lead time</td></tr>
+        <tr><td>Inventory / Reserve</td><td>7 No max stock · 9 QR code · 13 Optional purpose</td></tr>
+        <tr><td>Purchase / RFQ / PO</td><td>10 PO workflow · 11 RFQ quote print &amp; share</td></tr>
+        <tr><td>Jobs / QA / Settings</td><td>1 Default tax (Settings) · 12 QA checklist defaults · 14 Service report PDF</td></tr>
+        <tr><td>Inspections</td><td>14 Inspection report PDF · 18 Signature draw / upload</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">5. Notes for the client</h2>
+    <p style="font-size:14px;margin:0 0 8px;">
+      All eighteen corrections listed in this document are implemented on the live site. Staff should use the <strong>Where (menu)</strong> and <strong>How to use</strong> steps when training or verifying each change. If a later review finds any purchase-order step still missing or out of order, that can be listed in a short follow-up note under item 10.
+    </p>
+    <p class="footer-note">— End of Site Corrections &amp; Updates Guide —</p>
+  </main>
+
+  <script>
+    const corrections = [
+      {
+        id: 1,
+        title: "Tax on estimates and billing",
+        category: "Estimates & Billing",
+        location: "Estimates → open / build estimate · Billing → invoice / job lines · Admin → Settings (default tax)",
+        path: "/app/estimates · /app/billing · /app/settings",
+        what: "New estimate and billing lines no longer start at 12% tax. They start at 0%. The organization default tax rate in Settings is also 0%.",
+        how: [
+          "Open an estimate or billing document and add a new line.",
+          "Tax % starts at 0. Type a percent only when tax applies.",
+          "Admin can confirm the default in Settings so new documents do not pick up 12% automatically."
+        ]
+      },
+      {
+        id: 2,
+        title: "Share an estimate",
+        category: "Estimates & Billing",
+        location: "Estimates → open estimate detail or Print / PDF preview",
+        path: "/app/estimates/{id} · /app/estimates/{id}/preview",
+        what: "Staff can send the estimate PDF to the customer using the same share pattern as inspection reports: Print / PDF, Gmail, and WhatsApp.",
+        how: [
+          "Open the estimate.",
+          "Use Print / PDF to view or save the document.",
+          "Use Gmail to open a compose window with the estimate ready to send.",
+          "Use WhatsApp to open a share message with the estimate ready to send."
+        ]
+      },
+      {
+        id: 3,
+        title: "Clear a selected estimate or billing item",
+        category: "Estimates & Billing",
+        location: "Estimate line items · Billing line items (service catalog or inventory product picker)",
+        path: "/app/estimates (builder / detail) · /app/billing (invoice / job lines)",
+        what: "After picking a catalog service or inventory product, a small close (×) button appears on that choice. Clicking it clears only the selection. The line stays; description can be edited or left blank.",
+        how: [
+          "Select a service or product on a line.",
+          "Click the small close button on the selected chip / choice to clear it.",
+          "You no longer need to pick a different item just to remove the current one."
+        ]
+      },
+      {
+        id: 4,
+        title: "Part number stays out of the description",
+        category: "Estimates & Billing",
+        location: "Estimate and billing description fields (line text)",
+        path: "/app/estimates · /app/billing",
+        what: "Description shows the item name or custom text only. Part number / SKU is not appended (for example, no “Item name (PN-123)”). Part number is also removed from Register Equipment (see item 8).",
+        how: [
+          "Add or edit a line on an estimate or bill.",
+          "Confirm the description is name or custom text only.",
+          "Use the part / SKU field separately where shown for staff—not inside the description."
+        ]
+      },
+      {
+        id: 5,
+        title: "Serial number must be unique",
+        category: "Equipment",
+        location: "Equipment → Register / create equipment (single or bulk)",
+        path: "/app/equipment",
+        what: "A serial number cannot match one already saved. Duplicate serials are blocked with a field error.",
+        how: [
+          "Enter a serial number when registering equipment.",
+          "If it is already used, save is blocked and the serial field shows: “Serial number already taken. Please check.”",
+          "The same check applies when several units are entered together or when an existing serial is typed again."
+        ]
+      },
+      {
+        id: 6,
+        title: "Address on customer and supplier",
+        category: "Customers & Suppliers",
+        location: "Customers → create / edit · Suppliers → create / edit",
+        path: "/app/customers · /app/suppliers",
+        what: "An Address text area is available. On customers, the previous “Billing & delivery addresses” box is this Address field. On suppliers, Address is optional.",
+        how: [
+          "Open create or edit for a customer or supplier.",
+          "Enter the address in the Address text area.",
+          "Save. Supplier address may be left blank."
+        ]
+      },
+      {
+        id: 7,
+        title: "Inventory: remove maximum stock",
+        category: "Inventory",
+        location: "Inventory → Parts → Create inventory item",
+        path: "/app/inventory?stage=parts",
+        what: "Maximum stock (Min/max level max) is removed from create inventory. Quantity on hand remains. Minimum level may remain only if reorder warnings need it.",
+        how: [
+          "Create a new inventory item under Inventory → Parts.",
+          "Enter quantity on hand (and minimum level if shown).",
+          "There is no maximum stock field to fill."
+        ]
+      },
+      {
+        id: 8,
+        title: "Fields removed from forms",
+        category: "Equipment · Customers · Suppliers",
+        location: "Register Equipment · Customer create/edit · Supplier create/edit",
+        path: "/app/equipment · /app/customers · /app/suppliers",
+        what: "Removed fields: Part number (Register Equipment); Payment terms (Customer); Rating 0–5 and Delivery lead time days (Supplier). Supplier payment terms stay unless separately removed.",
+        how: [
+          "Open the forms above and confirm those fields are no longer shown.",
+          "Continue using the remaining fields as usual."
+        ]
+      },
+      {
+        id: 9,
+        title: "QR code on inventory items",
+        category: "Inventory",
+        location: "Inventory → open item detail",
+        path: "/app/inventory/{id}",
+        what: "Each inventory item has a QR code, same idea as equipment. Print or download for labels. Scanning opens that inventory item.",
+        how: [
+          "Open an inventory item detail page.",
+          "View the QR code on the item.",
+          "Print or download the QR for the part or bin label.",
+          "Scan the code to open that inventory item in the system."
+        ]
+      },
+      {
+        id: 10,
+        title: "Purchase order workflow",
+        category: "Purchase",
+        location: "Purchase → PO (and related stages: shipment, GRN, stock)",
+        path: "/app/purchase-orders · /app/rfqs",
+        what: "The purchase order path follows: create PO from supplier and lines → review → send/print → receive goods and update stock → close when receipt is complete.",
+        how: [
+          "Create the purchase order with supplier and lines.",
+          "Review the order before it is sent.",
+          "Send or print the order for the supplier.",
+          "Receive goods (GRN) and update stock.",
+          "Close the order when receipt is complete."
+        ]
+      },
+      {
+        id: 11,
+        title: "RFQ quote: print and share",
+        category: "Purchase",
+        location: "Purchase → RFQ / Supplier quote → open quote after it is created",
+        path: "/app/rfqs?stage=quotes",
+        what: "After a quote is created from an RFQ, staff can Print / PDF, Gmail, or WhatsApp the quote without leaving the quote screen.",
+        how: [
+          "Open the supplier quote created from an RFQ.",
+          "Use Print / PDF for the client copy.",
+          "Use Gmail or WhatsApp to send the PDF from the same screen."
+        ]
+      },
+      {
+        id: 12,
+        title: "QA checklist from settings",
+        category: "Jobs & QA · Settings",
+        location: "Admin → Settings (default QA points) · Service Jobs → job QA section",
+        path: "/app/settings · /app/jobs/{id}",
+        what: "QA is no longer a fixed list of five checks. Defaults are stored in Settings. On the job, those points appear as checkboxes. A + button adds optional extra points for that job only.",
+        how: [
+          "Admin sets default QA points in Settings.",
+          "Open a job’s QA section—defaults appear as checkboxes.",
+          "Use + to add optional extra points for that job.",
+          "QA staff (or a manager in that role) updates and saves the checklist.",
+          "After that update, staff can Download Service Report."
+        ]
+      },
+      {
+        id: 13,
+        title: "Reserve stock purpose is optional",
+        category: "Inventory",
+        location: "Inventory → Reserve stock",
+        path: "/app/stock-reservations",
+        what: "Purpose is a message box and is optional. Saving with an empty purpose is allowed. The system does not block with “purpose is required.”",
+        how: [
+          "Create or edit a stock reservation.",
+          "Leave Purpose blank if not needed, or type a note.",
+          "Save—empty purpose is accepted."
+        ]
+      },
+      {
+        id: 14,
+        title: "Inspection report and service report cleanup",
+        category: "Reports / PDFs",
+        location: "Inspection report PDF · Service report PDF",
+        path: "/app/inspections · /app/jobs (Download Service Report)",
+        what: "Customer PDFs no longer show internal status chips (Priority, Work status) or time. Time may still appear on estimate/billing detail screens for staff, but not on inspection or service report PDFs.",
+        how: [
+          "Generate or download an inspection report or service report.",
+          "Confirm Priority / Work status chips are not on the customer PDF.",
+          "Confirm time is not printed in header, photos, findings, or footer of those two reports."
+        ]
+      },
+      {
+        id: 15,
+        title: "Customer copy of an estimate or bill",
+        category: "Estimates & Billing · PDFs",
+        location: "Customer-facing estimate / bill PDF (share or print for customer)",
+        path: "/app/estimates/{id}/preview · Billing customer PDF",
+        what: "The PDF sent to the customer does not show inventory product or price lines. The customer sees only the custom text written for that document. Staff still see products, quantities, and prices on internal screens.",
+        how: [
+          "Prepare the estimate or bill with internal lines as usual.",
+          "Write the customer-facing custom text for the document.",
+          "Print or share the customer PDF—only custom text appears for the customer."
+        ]
+      },
+      {
+        id: 16,
+        title: "Revision removed from estimate report",
+        category: "Estimates · PDFs",
+        location: "Estimate report → project details block under the ticket",
+        path: "/app/estimates/{id}/preview (and print/PDF)",
+        what: "Revision (for example “Rev 1”) is removed from the project details block. It must not appear on the estimate report.",
+        how: [
+          "Open Print / PDF for an estimate.",
+          "In project details under the ticket, confirm Revision is not shown."
+        ]
+      },
+      {
+        id: 17,
+        title: "Equipment location label",
+        category: "Equipment",
+        location: "Equipment → create / edit",
+        path: "/app/equipment",
+        what: "Label renamed from “Location at site” to “Location”. Field stays optional; only the label changes.",
+        how: [
+          "Open create or edit equipment.",
+          "Use the Location field (optional) as before."
+        ]
+      },
+      {
+        id: 18,
+        title: "Signature upload (draw or image)",
+        category: "Inspection · Estimates · Billing",
+        location: "Inspection capture · Estimate / billing staff signature collection · Inspection report",
+        path: "/app/inspections · Estimates · Billing",
+        what: "Staff can attach a signature by drawing on screen or uploading an image. Signature may belong to the estimate creator, billing staff, or inspector. Saved signature appears on the inspection report. Digital signature upload is available wherever a staff signature is collected for estimate, billing, or inspection.",
+        how: [
+          "At inspection (or estimate / billing signature step), choose Draw or Upload.",
+          "Draw on screen, or upload a signature image file.",
+          "Save—the signature appears on the inspection report and related documents."
+        ]
+      }
+    ];
+
+    const tocBody = document.getElementById("toc-body");
+    const cards = document.getElementById("cards");
+
+    corrections.forEach((c) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="num">${c.id}</td>
+        <td>${c.title}</td>
+        <td>${c.category}</td>
+        <td class="status">Done</td>
+      `;
+      tocBody.appendChild(tr);
+
+      const card = document.createElement("article");
+      card.className = "card";
+      card.innerHTML = `
+        <div class="card-head">
+          <div class="done"><span class="mark">☑</span><span class="lbl">Done</span></div>
+          <div class="title-wrap">
+            <h3>${c.id}. ${c.title}</h3>
+            <p class="cat">Category: ${c.category}</p>
+          </div>
+        </div>
+        <table class="facts">
+          <tr><th>Where (menu)</th><td>${c.location}</td></tr>
+          <tr><th>Page path</th><td><code>${c.path}</code></td></tr>
+          <tr><th>What was added / changed</th><td>${c.what}</td></tr>
+        </table>
+        <div class="howto">
+          <strong>How to use</strong>
+          <ol>${c.how.map((step) => `<li>${step}</li>`).join("")}</ol>
+        </div>
+      `;
+      cards.appendChild(card);
+    });
+  </script>
+</body>
+</html>
