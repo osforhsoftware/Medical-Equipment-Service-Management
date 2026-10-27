@@ -30,6 +30,11 @@ const AUTOMATION_KEYS = [
   { key: "lowStockAlerts" as const, title: "Low-stock alerts", desc: "Alert when items hit reorder level" },
   { key: "autoReserveOnApproval" as const, title: "Auto-reserve on approval", desc: "Reserve inventory when estimate is approved" },
   { key: "autoGenerateReport" as const, title: "Auto-generate service report", desc: "Create PDF report on job completion" },
+  {
+    key: "skipApprovals" as const,
+    title: "Skip approvals (simple mode)",
+    desc: "Tickets skip estimate, change, final-work, and invoice approval queues. Staff with bypass also skip when this is off.",
+  },
 ];
 
 const NONE = "__none__";
@@ -687,7 +692,7 @@ export default function Settings() {
             <div>
               <CardTitle className="text-base">Service auto-assignment</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                After inspection is submitted, tickets move to Estimate and can be routed automatically to a fixed coordinator and estimate staff. After the estimate is sent, approval continues as usual.
+                After inspection is submitted, tickets move to Estimate and can be routed automatically to a fixed coordinator and estimate staff. After the estimate is sent, approval continues unless Skip approvals is on.
               </p>
             </div>
             <Button size="sm" disabled={savingAssignment} onClick={() => void saveAssignment()}>

@@ -26,6 +26,9 @@ import { summarizeLines } from "@/lib/estimates";
 import { PAYMENT_METHOD_OPTIONS } from "@/lib/fixedOptions";
 import { formatCurrency, formatDate, formatDateTime, formatDocumentCurrency, formatServiceStatus } from "@/lib/format";
 import { toast } from "@/lib/toast";
+import { useAuth } from "@/context/AuthContext";
+import { useSettings } from "@/context/SettingsContext";
+import { shouldSkipApprovals } from "@/lib/userPermissions";
 
 const newLine = (): InvoiceLineInput => newBillingLine("product");
 
@@ -97,6 +100,9 @@ const paymentSchema = z.object({
 });
 
 export default function BillingInvoiceDetail() {
+  const { user } = useAuth();
+  const { settings } = useSettings();
+  const skipApprovals = shouldSkipApprovals(settings, user);
   const { invoiceId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [invoice, setInvoice] = useState<BackendInvoice | null>(null);
@@ -513,14 +519,6 @@ export default function BillingInvoiceDetail() {
                       )}
                     </div>
 
-                    <CustomerSummaryField
-                      id="invoice-customer-summary"
-                      value={customerSummary}
-                      lines={lines}
-                      total={editPreviewTotal}
-                      onChange={setCustomerSummary}
-                    />
-
                     <InvoiceLineEditor
                       title="Products & services"
                       lines={editLines}
@@ -534,6 +532,10 @@ export default function BillingInvoiceDetail() {
                         editValidation.handleChange("dueAt", { dueAt: editDueAt, lines: next });
                       }}
                       onBlurField={(field) => editValidation.handleBlur(field, { dueAt: editDueAt, lines: editLines })}
+                      showCustomizeItems
+                      customerSummary={customerSummary}
+                      onCustomerSummaryChange={setCustomerSummary}
+                      total={editPreviewTotal}
                     />
 
                     <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
@@ -601,7 +603,7 @@ export default function BillingInvoiceDetail() {
                   {(invoice.customerSummary ?? "") !== customerSummary ? (
                     <Button className="w-full" variant="outline" disabled={summarySaving} onClick={() => void saveSummary()}>
                       {summarySaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Save customer summary
+                      Save customize items
                     </Button>
                   ) : null}
                   <InfoRow label="Paid" value={formatCurrency(invoice.paidTotal ?? 0)} />
@@ -612,8 +614,11 @@ export default function BillingInvoiceDetail() {
                     </Button>
                   ) : null}
                   <div className="flex flex-col gap-2 pt-2">
-                    {invoice.status === "draft" ? (
+                    {invoice.status === "draft" && !skipApprovals ? (
                       <Button variant="outline" onClick={submitApproval} disabled={saving}>Submit for approval</Button>
+                    ) : null}
+                    {invoice.status === "draft" && skipApprovals ? (
+                      <Button onClick={approveInvoice} disabled={saving}>Approve invoice</Button>
                     ) : null}
                     {invoice.status === "pendingApproval" ? (
                       <Button onClick={approveInvoice} disabled={saving}>Approve invoice</Button>
@@ -821,7 +826,7 @@ export default function BillingInvoiceDetail() {
                 detailRows={invoiceDetailRows}
                 lines={lines}
                 customerView={!isSaleInvoice}
-                customerSummary={isSaleInvoice ? undefined : customerSummary}
+                customerSummary={invoice.customerSummary}
                 totalOverride={Number(invoice.total)}
                 extraTotalRows={Number(invoice.paidTotal ?? 0) > 0 ? [
                   { label: "Paid", value: formatDocumentCurrency(invoice.paidTotal ?? 0) },

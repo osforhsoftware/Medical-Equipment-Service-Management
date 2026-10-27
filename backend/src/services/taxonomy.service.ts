@@ -191,7 +191,7 @@ export class TaxonomyService {
       throw new AppError(this.missingMessage(type), 422);
     }
 
-    const term = await taxonomyRepository.findBySlugOrName(tenantId, asType(type), trimmed);
+    const term = await this.findTerm(tenantId, type, trimmed);
     if (!term) {
       throw new AppError(this.missingMessage(type), 422);
     }
@@ -206,6 +206,74 @@ export class TaxonomyService {
     }
 
     return term.slug;
+  }
+
+  /**
+   * Resolve a taxonomy value to a slug, creating the term when it does not exist.
+   * Used by bulk inventory import so CSV category names become Master Data terms.
+   * For inventory_subcategory, pass `parentSlug` (the row's category) when creating.
+   */
+  async resolveOrCreateSlug(
+    tenantId: string,
+    type: TaxonomyTypeName,
+    value: string,
+    options?: { parentSlug?: string | null },
+  ): Promise<string> {
+    await this.ensureDefaults(tenantId, type);
+    const trimmed = value.trim();
+    if (!trimmed) {
+      throw new AppError(this.missingMessage(type), 422);
+    }
+
+    const existing = await this.findTerm(tenantId, type, trimmed);
+    if (existing) return existing.slug;
+
+    let parentId: string | null = null;
+    if (type === "inventory_subcategory") {
+      const parentRaw = options?.parentSlug?.trim() ?? "";
+      if (!parentRaw) {
+        throw new AppError("Select a parent category for this subcategory.", 422);
+      }
+      const parent =
+        (await this.findTerm(tenantId, "inventory_category", parentRaw)) ??
+        (await this.findTerm(tenantId, "inventory_category", slugifyTerm(parentRaw)));
+      if (!parent) {
+        throw new AppError("Select a valid inventory category.", 422);
+      }
+      parentId = parent.id;
+    }
+
+    try {
+      const created = await this.create(tenantId, {
+        type,
+        name: trimmed,
+        parentId,
+      });
+      return created.slug;
+    } catch (err) {
+      // Concurrent / race: another row may have created the same term.
+      if (err instanceof AppError && err.statusCode === 409) {
+        const again = await this.findTerm(tenantId, type, trimmed);
+        if (again) return again.slug;
+      }
+      throw err;
+    }
+  }
+
+  private async findTerm(
+    tenantId: string,
+    type: TaxonomyTypeName,
+    value: string,
+  ): Promise<TaxonomyTerm | null> {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const byExact = await taxonomyRepository.findBySlugOrName(tenantId, asType(type), trimmed);
+    if (byExact) return byExact;
+    const asSlug = slugifyTerm(trimmed);
+    if (asSlug !== trimmed) {
+      return taxonomyRepository.findBySlug(tenantId, asType(type), asSlug);
+    }
+    return null;
   }
 
   private missingMessage(type: TaxonomyTypeName): string {

@@ -13,6 +13,7 @@ import {
 import { ESTIMATE_STAFF_APPROVER_ROLES } from "@/config/apiAccess";
 import { syncCustomerActiveJobs } from "@/services/serviceRequests.service";
 import { userHasAnyRoleKey } from "@/utils/userRoles";
+import { actorSkipsApprovals } from "@/services/workflow/approvalPolicy";
 
 const ADMIN_ROLES = ["admin", "coordinator"] as const;
 
@@ -21,6 +22,12 @@ export class ServiceTicketWorkflowService {
     if (!(ADMIN_ROLES as readonly string[]).includes(actorRole)) {
       throw new AppError("Only administrators and coordinators can perform this action", 403);
     }
+  }
+
+  private async assertAdminOrSkip(actorId: string, tenantId: string, actorRole: string) {
+    if ((ADMIN_ROLES as readonly string[]).includes(actorRole)) return;
+    if (await actorSkipsApprovals(tenantId, actorId)) return;
+    throw new AppError("Only administrators and coordinators can perform this action", 403);
   }
 
   private async assertEstimateApprover(actorId: string, tenantId: string, actorRole: string) {
@@ -128,6 +135,7 @@ export class ServiceTicketWorkflowService {
       throw new AppError("You are not the assigned engineer for this ticket", 403);
     }
 
+    const skipApprovals = await actorSkipsApprovals(tenantId, actorId);
     const actor = await usersRepository.findById(actorId, tenantId);
     const changeRequest = await prisma.$transaction(async (tx) => {
       const created = await tx.serviceTicketChangeRequest.create({
@@ -138,26 +146,33 @@ export class ServiceTicketWorkflowService {
           requestedBy: actorId,
           description: input.description.trim(),
           items: (input.items ?? []) as import("@prisma/client").Prisma.InputJsonValue,
+          ...(skipApprovals
+            ? { status: "approved", reviewedBy: actorId, reviewedAt: new Date(), reviewNote: "Auto-approved (skip approvals)" }
+            : {}),
         },
       });
-      await tx.serviceRequest.update({
-        where: { id },
-        data: { status: resolveTicketEventStatus("assigned_engineer", "changeRequestSubmitted") as never },
-      });
+      if (!skipApprovals) {
+        await tx.serviceRequest.update({
+          where: { id },
+          data: { status: resolveTicketEventStatus("assigned_engineer", "changeRequestSubmitted") as never },
+        });
+      }
       await tx.timelineEvent.create({
         data: {
           requestId: id,
           actor: actor?.name ?? actorId,
-          action: "Change request submitted",
+          action: skipApprovals ? "Change request recorded" : "Change request submitted",
           note: input.description.trim(),
         },
       });
-      await tx.notification.createMany({
-        data: [
-          { tenantId, type: "approval", title: "Engineer change request", body: `${sr.reference}: ${input.description.slice(0, 120)}`, recipientRole: "admin" },
-          { tenantId, type: "approval", title: "Engineer change request", body: `${sr.reference}: ${input.description.slice(0, 120)}`, recipientRole: "coordinator" },
-        ],
-      });
+      if (!skipApprovals) {
+        await tx.notification.createMany({
+          data: [
+            { tenantId, type: "approval", title: "Engineer change request", body: `${sr.reference}: ${input.description.slice(0, 120)}`, recipientRole: "admin" },
+            { tenantId, type: "approval", title: "Engineer change request", body: `${sr.reference}: ${input.description.slice(0, 120)}`, recipientRole: "coordinator" },
+          ],
+        });
+      }
       return created;
     });
 
@@ -172,7 +187,7 @@ export class ServiceTicketWorkflowService {
     actorRole: string,
     input: { approved: boolean; note?: string },
   ) {
-    this.assertAdmin(actorRole);
+    await this.assertAdminOrSkip(actorId, tenantId, actorRole);
     const sr = await serviceRequestsRepository.findById(id, tenantId);
     if (!sr) throw new AppError("Service ticket not found", 404);
     if (normalizeTicketStatus(sr.status) !== "change_pending_approval") {
@@ -219,7 +234,7 @@ export class ServiceTicketWorkflowService {
     actorRole: string,
     input?: { note?: string; currency?: string; dueAt?: string },
   ) {
-    this.assertAdmin(actorRole);
+    await this.assertAdminOrSkip(actorId, tenantId, actorRole);
     const sr = await serviceRequestsRepository.findById(id, tenantId);
     if (!sr) throw new AppError("Service ticket not found", 404);
     if (normalizeTicketStatus(sr.status) !== "pending_final_approval") {

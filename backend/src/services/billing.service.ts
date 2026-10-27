@@ -4,6 +4,7 @@ import { AppError } from "@/middleware/errorHandler";
 import { serviceRequestsRepository } from "@/repositories/serviceRequests.repository";
 import { extraChargeType, extraLineTotal, summarizeChargeGroups } from "@/utils/invoiceCharges";
 import { hasServiceWarrantyCoverage } from "@/lib/equipmentWarranty";
+import { actorSkipsApprovals } from "@/services/workflow/approvalPolicy";
 
 export const BILLING_CHECKLIST = [
   { key: "engineerReportSubmitted", label: "Engineer Report Submitted" },
@@ -474,6 +475,10 @@ export class BillingService {
     if (!invoice) throw new AppError("Invoice not found", 404);
     if (invoice.status !== "draft") throw new AppError("Only draft invoices can be submitted for approval", 409);
 
+    if (await actorSkipsApprovals(tenantId, actor.userId)) {
+      return this.approveInvoice(tenantId, invoiceId, actor, { fromDraft: true });
+    }
+
     const updated = await prisma.invoice.update({
       where: { id: invoiceId },
       data: { status: "pendingApproval" },
@@ -492,10 +497,12 @@ export class BillingService {
     return updated;
   }
 
-  async approveInvoice(tenantId: string, invoiceId: string, actor: Actor) {
+  async approveInvoice(tenantId: string, invoiceId: string, actor: Actor, options?: { fromDraft?: boolean }) {
     const invoice = await prisma.invoice.findFirst({ where: { id: invoiceId, tenantId } });
     if (!invoice) throw new AppError("Invoice not found", 404);
-    if (invoice.status !== "pendingApproval") throw new AppError("Invoice is not pending approval", 409);
+    const skipApprovals = options?.fromDraft || await actorSkipsApprovals(tenantId, actor.userId);
+    const allowedFrom = skipApprovals ? ["draft", "pendingApproval"] : ["pendingApproval"];
+    if (!allowedFrom.includes(invoice.status)) throw new AppError("Invoice is not pending approval", 409);
 
     const user = await prisma.user.findFirst({ where: { id: actor.userId, tenantId } });
     const actorName = user?.name ?? actor.userId;

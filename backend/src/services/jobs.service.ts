@@ -13,6 +13,7 @@ import {
   isJobWorkComplete,
   resolveTicketEventStatus,
 } from "@/services/workflow/serviceTicketStateMachine";
+import { actorSkipsApprovals } from "@/services/workflow/approvalPolicy";
 import { APPROVED_IMAGE_TYPE_MESSAGE, fileStorageService } from "@/services/fileStorage.service";
 import {
   closeAllOpenWorkLogs,
@@ -715,6 +716,7 @@ export class JobsService {
     const enteringDeliveryWithoutComplete =
       data.status === "delivery" && existing.status !== "delivery" && !(existing as { completedAt?: Date | null }).completedAt;
     if (enteringComplete || enteringDeliveryWithoutComplete) {
+      const skipApprovals = await actorSkipsApprovals(tenantId, actorId);
       const updated = await prisma.$transaction(async (tx) => {
         const job = await tx.serviceJob.findFirst({
           where: { id, tenantId },
@@ -761,7 +763,7 @@ export class JobsService {
             try {
               await tx.serviceRequest.update({
                 where: { id: sr.id },
-                data: { status: resolveTicketEventStatus(sr.status, "jobCompleted") as never },
+                data: { status: resolveTicketEventStatus(sr.status, "jobCompleted", { skipApprovals }) as never },
               });
             } catch {
               // Ticket may already be past job-complete (legacy in-flight jobs).

@@ -8,6 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CustomerSummaryField } from "@/components/shared/CustomerSummaryField";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import type { BackendCatalogItem, BackendInventoryItem, InvoiceLineInput } from "@/lib/api";
 import { inventoryOriginUnitPrice } from "@/components/shared/InventoryHelpers";
@@ -34,6 +35,13 @@ interface InvoiceLineEditorProps {
   minLines?: number;
   title?: string;
   className?: string;
+  customerSummary?: string;
+  onCustomerSummaryChange?: (value: string) => void;
+  customerSummaryDisabled?: boolean;
+  /** Lines used for the customer-copy preview (defaults to editor lines). */
+  customizePreviewLines?: InvoiceLineInput[];
+  total?: number;
+  showCustomizeItems?: boolean;
 }
 
 export function InvoiceLineEditor({
@@ -47,6 +55,12 @@ export function InvoiceLineEditor({
   minLines = 0,
   title = "Invoice items",
   className,
+  customerSummary = "",
+  onCustomerSummaryChange,
+  customerSummaryDisabled,
+  customizePreviewLines,
+  total,
+  showCustomizeItems = false,
 }: InvoiceLineEditorProps) {
   const updateLine = (index: number, patch: Partial<InvoiceLineInput>) => {
     onChange(lines.map((line, i) => (i === index ? { ...line, ...patch } : line)));
@@ -370,6 +384,17 @@ export function InvoiceLineEditor({
           </div>
         </div>
       )}
+      {showCustomizeItems ? (
+        <CustomerSummaryField
+          id="invoice-customize-items"
+          embedded
+          value={customerSummary}
+          disabled={customerSummaryDisabled}
+          lines={customizePreviewLines ?? lines}
+          total={total}
+          onChange={onCustomerSummaryChange}
+        />
+      ) : null}
     </section>
   );
 }

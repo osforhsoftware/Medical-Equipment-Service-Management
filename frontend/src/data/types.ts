@@ -29,6 +29,7 @@ export interface AppUser {
   permissions?: {
     mode: "crud" | "read";
     modules?: Record<string, "none" | "read" | "crud">;
+    bypassApprovals?: boolean;
   };
 }
 

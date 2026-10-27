@@ -39,6 +39,7 @@ export const updateSettingsSchema = z.object({
   autoAssignCoordinatorAfterInspection: z.boolean().optional(),
   autoAssignEstimatorAfterInspection: z.boolean().optional(),
   autoAssignEngineerOnApproval: z.boolean().optional(),
+  skipApprovals: z.boolean().optional(),
   guidedSetupFlow: z.boolean().optional(),
   defaultCoordinatorUserId: optionalStaffId,
   defaultInspectorUserId: optionalStaffId,

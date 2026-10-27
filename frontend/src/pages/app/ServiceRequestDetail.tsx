@@ -40,6 +40,7 @@ import { formatDate, formatDateTime, formatServiceStatus } from "@/lib/format";
 import { roleLabels } from "@/data/mock";
 import type { Role } from "@/data/types";
 import { toast } from "@/lib/toast";
+import { shouldSkipApprovals } from "@/lib/userPermissions";
 
 const WORKFLOW_STEPS = [
   { status: "new", statuses: ["new"], label: "New" },
@@ -85,7 +86,8 @@ export default function ServiceRequestDetail() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasRole, user } = useAuth();
-  const { rbacMatrix } = useSettings();
+  const { rbacMatrix, settings } = useSettings();
+  const skipApprovals = shouldSkipApprovals(settings, user);
   const [request, setRequest] = useState<BackendServiceRequest | null>(null);
   const [customer, setCustomer] = useState<BackendCustomer | null>(null);
   const [timeline, setTimeline] = useState<BackendTimelineEvent[]>([]);
@@ -137,6 +139,7 @@ export default function ServiceRequestDetail() {
   const canBuildEstimate = hasRole(ESTIMATE_WRITE_ROLES);
   const canWriteInspection = hasRole(INSPECTION_WRITE_ROLES);
   const canApproveEstimate = hasRole(["admin", "coordinator"]);
+  const canPushApprovals = canApproveEstimate || skipApprovals;
   const canEdit = hasRole(TICKET_CREATE_ROLES);
   const canDelete = hasRole(TICKET_CREATE_ROLES);
   const canAccessBilling =
@@ -417,8 +420,10 @@ export default function ServiceRequestDetail() {
                       <AlertTitle>Estimate stage</AlertTitle>
                       <AlertDescription>
                         {request.assignedEstimatorName
-                          ? `${request.assignedEstimatorName} should build or revise the quotation, then use Send for Approval to continue to Approval.`
-                          : "Assign Estimate Staff, then build the quotation and send it for approval to continue."}
+                          ? `${request.assignedEstimatorName} should build or revise the quotation, then ${skipApprovals ? "send it to continue." : "use Send for Approval to continue to Approval."}`
+                          : skipApprovals
+                            ? "Assign Estimate Staff, then build the quotation and send it to continue."
+                            : "Assign Estimate Staff, then build the quotation and send it for approval to continue."}
                       </AlertDescription>
                     </Alert>
                   ) : null}
@@ -431,12 +436,14 @@ export default function ServiceRequestDetail() {
                       </AlertDescription>
                     </Alert>
                   ) : null}
-                  {isApprovalStage && canApproveEstimate ? (
+                  {isApprovalStage && canPushApprovals ? (
                     <Alert className="mt-4">
                       <FileText className="h-4 w-4" />
-                      <AlertTitle>Awaiting approval</AlertTitle>
+                      <AlertTitle>{skipApprovals ? "Continue to service" : "Awaiting approval"}</AlertTitle>
                       <AlertDescription>
-                        Review the estimate, assign an engineer, and approve to move this ticket into service.
+                        {skipApprovals
+                          ? "Assign an engineer and continue — this ticket does not need a separate approval step."
+                          : "Review the estimate, assign an engineer, and approve to move this ticket into service."}
                       </AlertDescription>
                     </Alert>
                   ) : null}
@@ -569,18 +576,20 @@ export default function ServiceRequestDetail() {
               {canBuildEstimate && (isEstimateStage || isInspectionStage) ? (
                 <Button asChild variant={isEstimateStage ? "brand" : "outline"} className="w-full">
                   <Link to={`/app/estimates/${request.id}/build`}>
-                    {isEstimateStage ? "Edit estimate & send for approval" : "Open estimate builder"}
+                    {isEstimateStage
+                      ? skipApprovals ? "Edit estimate & send" : "Edit estimate & send for approval"
+                      : "Open estimate builder"}
                   </Link>
                 </Button>
               ) : null}
-              {canApproveEstimate && ["approval", "pending_approval"].includes(request.status) ? (
+              {canPushApprovals && ["approval", "pending_approval"].includes(request.status) ? (
                 <Button asChild variant="outline" className="w-full">
                   <Link to={`/app/estimates?status=pendingAdminApproval&search=${encodeURIComponent(request.reference)}`}>
-                    Review estimate & assign engineer
+                    {skipApprovals ? "Assign engineer & continue" : "Review estimate & assign engineer"}
                   </Link>
                 </Button>
               ) : null}
-              {canApproveEstimate && request.status === "pending_final_approval" ? (
+              {canPushApprovals && request.status === "pending_final_approval" ? (
                 <Button
                   className="w-full"
                   disabled={workflowSaving}

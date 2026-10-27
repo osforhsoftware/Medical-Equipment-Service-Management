@@ -2,12 +2,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { Eye, FilePenLine, MoreHorizontal, PackageX, ShoppingCart } from "lucide-react";
+import {
+  Download,
+  Eye,
+  FilePenLine,
+  Loader2,
+  Mail,
+  MessageCircle,
+  MoreHorizontal,
+  PackageX,
+  Printer,
+  ShoppingCart,
+} from "lucide-react";
 import { EstimateDecisionPanel } from "@/components/estimates/EstimateDecisionPanel";
 import { EstimateItemsTable } from "@/components/estimates/EstimateItemsTable";
 import { ReturnWithoutRepairDialog, type ReturnWithoutRepairData } from "@/components/estimates/ReturnWithoutRepairDialog";
-import { CustomerSummaryField } from "@/components/shared/CustomerSummaryField";
-import { ShareButtons } from "@/components/shared/ShareButtons";
 import {
   ActivityTimeline,
   DetailInfoGrid,
@@ -26,7 +35,15 @@ import {
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { fieldRules, type FieldErrors } from "@/lib/formValidation";
 import { useAuth } from "@/context/AuthContext";
-import { ApiError, api, type BackendEstimate, type BackendUser, type EstimateLineInput } from "@/lib/api";
+import {
+  ApiError,
+  api,
+  type BackendCustomer,
+  type BackendEstimate,
+  type BackendUser,
+  type EstimateLineInput,
+} from "@/lib/api";
+import { shareEstimate, type EstimateShareChannel } from "@/lib/estimateShare";
 import {
   canEditEstimate,
   estimateLevelDiscount,
@@ -49,6 +66,7 @@ export default function EstimateDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasRole } = useAuth();
   const [estimate, setEstimate] = useState<BackendEstimate | null>(null);
+  const [customer, setCustomer] = useState<BackendCustomer | null>(null);
   const [engineers, setEngineers] = useState<BackendUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +75,8 @@ export default function EstimateDetail() {
   const [saving, setSaving] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
   const [returnSaving, setReturnSaving] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [shareBusy, setShareBusy] = useState<EstimateShareChannel | null>(null);
   const tab = searchParams.get("tab") ?? "overview";
   const decisionRef = useRef<HTMLDivElement>(null);
   const {
@@ -87,8 +107,17 @@ export default function EstimateDetail() {
       ]);
       setEstimate(record);
       setEngineers(users);
+      setCustomer(null);
+      if (record.customerId) {
+        try {
+          setCustomer(await api.getCustomer(record.customerId));
+        } catch {
+          setCustomer(null);
+        }
+      }
     } catch (err) {
       setEstimate(null);
+      setCustomer(null);
       setError(err instanceof ApiError && err.status === 404 ? null : "Unable to load this estimate. Please try again.");
       if (!(err instanceof ApiError && err.status === 404)) {
         toast.apiError(err, { fallback: "Failed to load estimate" });
@@ -193,6 +222,43 @@ export default function EstimateDetail() {
   }));
   const financials = estimate ? totalsForEstimate(estimate) : null;
 
+  const downloadPdf = async () => {
+    if (!estimate) return;
+    setPdfBusy(true);
+    try {
+      const doc = await api.generateDocument("estimate", estimate.id);
+      if (doc.file?.id) {
+        window.open(api.fileDownloadUrl(doc.file.id), "_blank");
+        toast({ title: "PDF ready", description: "Estimate PDF opened in a new tab." });
+      }
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to generate PDF" });
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const sendEstimate = async (channel: EstimateShareChannel) => {
+    if (!estimate) return;
+    setShareBusy(channel);
+    try {
+      const result = await shareEstimate({ channel, estimate, customer });
+      if (!result.opened && !result.sharedNatively && !result.downloaded) {
+        return;
+      }
+      toast.success(channel === "whatsapp" ? "WhatsApp opened" : "Gmail/Email opened", {
+        description: result.sharedNatively
+          ? "Native share was used when available. Otherwise attach the downloaded PDF."
+          : "PDF downloaded — attach it in the message window that opened.",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to send estimate";
+      toast.error(message);
+    } finally {
+      setShareBusy(null);
+    }
+  };
+
   return (
     <RoleGuard roles={ESTIMATE_READ_ROLES}>
       <RecordDetailLayout
@@ -216,10 +282,52 @@ export default function EstimateDetail() {
         onRetry={() => void load()}
         actions={estimate ? (
           <div className="flex flex-wrap items-center gap-2">
-            <ShareButtons
-              subject={`Estimate ${estimate.reference} for ${estimate.customerName}`}
-              message={`Estimate Details:\nRef: ${estimate.reference}\nCustomer: ${estimate.customerName}\nEquipment: ${estimate.equipmentName}\nTotal Amount: ${formatCurrency(estimate.total)}\nStatus: ${estimate.status}`}
-            />
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/app/estimates/${estimate.id}/preview?print=1`}>
+                <Printer className="mr-1 h-4 w-4" /> Print
+              </Link>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pdfBusy || Boolean(shareBusy)}
+              onClick={() => void downloadPdf()}
+            >
+              {pdfBusy ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-1 h-4 w-4" />
+              )}
+              PDF
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={Boolean(shareBusy) || pdfBusy}
+              onClick={() => void sendEstimate("whatsapp")}
+              className="gap-1.5 border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+            >
+              {shareBusy === "whatsapp" ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <MessageCircle className="mr-1 h-4 w-4" />
+              )}
+              WhatsApp
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={Boolean(shareBusy) || pdfBusy}
+              onClick={() => void sendEstimate("email")}
+              className="gap-1.5 border-red-500/40 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
+            >
+              {shareBusy === "email" ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <Mail className="mr-1 h-4 w-4" />
+              )}
+              Gmail
+            </Button>
             <Button variant="outline" asChild>
               <Link to={`/app/estimates/${estimate.id}/preview`}>
                 <Eye className="mr-1 h-4 w-4" /> Preview
@@ -312,16 +420,6 @@ export default function EstimateDetail() {
                     <div className="flex justify-between sm:block"><dt className="text-muted-foreground">Total</dt><dd className="text-base font-semibold">{formatCurrency(financials?.total ?? 0)}</dd></div>
                   </dl>
                 </DetailSection>
-                <DetailSection title="Customer copy">
-                  <CustomerSummaryField
-                    id="estimate-customer-summary"
-                    value={estimate.customerSummary ?? ""}
-                    lines={viewLines}
-                    headerDiscount={estimateLevelDiscount(estimate)}
-                    total={financials?.total}
-                    readOnly
-                  />
-                </DetailSection>
                 {estimate.notes ? (
                   <DetailSection title="Notes">
                     <p className="text-sm text-muted-foreground whitespace-pre-line">{estimate.notes}</p>
@@ -338,7 +436,16 @@ export default function EstimateDetail() {
           {
             id: "lines",
             label: "Line items",
-            content: <EstimateItemsTable mode="view" lines={viewLines} />,
+            content: (
+              <EstimateItemsTable
+                mode="view"
+                lines={viewLines}
+                showCustomizeItems
+                customerSummary={estimate.customerSummary ?? ""}
+                headerDiscount={estimateLevelDiscount(estimate)}
+                total={financials?.total}
+              />
+            ),
           },
           {
             id: "activity",

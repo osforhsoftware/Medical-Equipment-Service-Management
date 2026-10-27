@@ -84,6 +84,7 @@ type FormState = {
   isActive: boolean;
   accessMode: PermissionMode;
   moduleLevels: Record<string, PermissionLevel>;
+  bypassApprovals: boolean;
   customerId: string;
 };
 
@@ -98,6 +99,7 @@ const emptyForm: FormState = {
   isActive: true,
   accessMode: "crud",
   moduleLevels: {},
+  bypassApprovals: true,
   customerId: "",
 };
 
@@ -265,6 +267,7 @@ export default function UserFormPage() {
           primaryRole: user.role as Role,
           isActive: user.isActive,
           accessMode,
+          bypassApprovals: parsed.bypassApprovals,
           // Pass same roles as previous so intentional Hidden overrides are preserved on load.
           moduleLevels: defaultModuleLevels(selectedRoles, rbacMatrix, accessMode, parsed.modules, selectedRoles),
         });
@@ -371,6 +374,7 @@ export default function UserFormPage() {
         permissions: {
           mode: form.accessMode,
           modules,
+          bypassApprovals: form.bypassApprovals,
         },
       };
 
@@ -701,6 +705,19 @@ export default function UserFormPage() {
                         Administrator role always keeps full access.
                       </p>
                     ) : null}
+
+                    <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <div>
+                        <p className="text-sm font-medium">Bypass approval steps</p>
+                        <p className="text-xs text-muted-foreground">
+                          User can move service tickets and invoices forward without waiting for approval. Turn off for users who must use the approval queue.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={form.bypassApprovals}
+                        onCheckedChange={(checked) => setForm({ ...form, bypassApprovals: checked })}
+                      />
+                    </div>
 
                     <div className="overflow-x-auto rounded-md border border-border">
                       <table className="w-full min-w-[420px] text-sm">

@@ -18,6 +18,7 @@ import {
   type TicketEvent,
 } from "@/services/workflow/serviceTicketStateMachine";
 import { completedAtForStatusChange } from "@/lib/ticketBoardArchive";
+import { actorSkipsApprovals } from "@/services/workflow/approvalPolicy";
 import { normalizeAdditionalFields } from "@/lib/additionalFields";
 import { equipmentTicketLabel } from "@/lib/equipmentLabel";
 
@@ -596,7 +597,8 @@ export class ServiceRequestsService {
     const actor = await usersRepository.findById(actorId, tenantId);
     const actorName = actor?.name ?? actorId;
 
-    assertTicketAdvance(existing.status, targetStatus, actorRole);
+    const skipApprovals = await actorSkipsApprovals(tenantId, actorId);
+    assertTicketAdvance(existing.status, targetStatus, actorRole, { skipApprovals });
 
     if (targetStatus === "inspection") {
       const assignedInspector = existing.assignedInspectorId ?? existing.assignedTo;

@@ -95,6 +95,8 @@ model TenantSettings {
   autoAssignCoordinatorAfterInspection   Boolean @default(true) @map("auto_assign_coordinator_after_inspection")
   autoAssignEstimatorAfterInspection     Boolean @default(true) @map("auto_assign_estimator_after_inspection")
   autoAssignEngineerOnApproval           Boolean @default(false) @map("auto_assign_engineer_on_approval")
+  /// When true, estimate / change / final-work / invoice approval queues are skipped for everyone.
+  skipApprovals                          Boolean @default(true) @map("skip_approvals")
   guidedSetupFlow                        Boolean @default(true) @map("guided_setup_flow")
   defaultCoordinatorUserId               String? @map("default_coordinator_user_id")
   defaultInspectorUserId                 String? @map("default_inspector_user_id")

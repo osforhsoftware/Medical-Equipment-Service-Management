@@ -10,12 +10,23 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api, type InventoryBulkImportResult } from "@/lib/api";
+import { formatCurrency } from "@/lib/format";
 import {
   downloadInventoryImportTemplate,
   parseInventoryImportFile,
+  splitAmountAcrossProducts,
   type ParsedInventoryImportRow,
 } from "@/lib/inventoryBulkImport";
 import { toast } from "@/lib/toast";
@@ -29,6 +40,14 @@ type Props = {
 
 type Phase = "pick" | "preview" | "uploading" | "done";
 
+type DeliverySplitSummary = {
+  productCount: number;
+  totalCharge: number;
+  perProductAmounts: number[];
+  chargeType: "flat" | "perUnit";
+  createdCount: number;
+};
+
 export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Props) {
   const [phase, setPhase] = useState<Phase>("pick");
   const [busy, setBusy] = useState(false);
@@ -38,6 +57,9 @@ export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Pr
   const [imageCount, setImageCount] = useState(0);
   const [result, setResult] = useState<InventoryBulkImportResult | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [totalDeliveryChargeInput, setTotalDeliveryChargeInput] = useState("");
+  const [deliveryChargeType, setDeliveryChargeType] = useState<"flat" | "perUnit">("flat");
+  const [deliverySplit, setDeliverySplit] = useState<DeliverySplitSummary | null>(null);
 
   const stats = useMemo(() => {
     const valid = rows.filter((r) => r.errors.length === 0);
@@ -46,6 +68,23 @@ export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Pr
     const imageWarnings = rows.filter((r) => r.warnings.some((w) => /image/i.test(w)));
     return { valid: valid.length, invalid: invalid.length, withImage: withImage.length, imageWarnings: imageWarnings.length };
   }, [rows]);
+
+  const totalDeliveryCharge = useMemo(() => {
+    const raw = totalDeliveryChargeInput.trim();
+    if (!raw) return null;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) return null;
+    return value;
+  }, [totalDeliveryChargeInput]);
+
+  const splitPreview = useMemo(() => {
+    if (totalDeliveryCharge == null || stats.valid <= 0) return null;
+    const amounts = splitAmountAcrossProducts(totalDeliveryCharge, stats.valid);
+    if (!amounts.length) return null;
+    const min = amounts[amounts.length - 1] ?? 0;
+    const max = amounts[0] ?? 0;
+    return { amounts, min, max, equal: min === max };
+  }, [totalDeliveryCharge, stats.valid]);
 
   const reset = () => {
     setPhase("pick");
@@ -56,6 +95,9 @@ export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Pr
     setImageCount(0);
     setResult(null);
     setParseError(null);
+    setTotalDeliveryChargeInput("");
+    setDeliveryChargeType("flat");
+    setDeliverySplit(null);
   };
 
   const handleOpenChange = (next: boolean) => {
@@ -76,6 +118,7 @@ export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Pr
       setRows(parsed.rows);
       setSourceLabel(parsed.sourceLabel);
       setImageCount(parsed.imageCount);
+      setDeliverySplit(null);
       setPhase("preview");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to read import file.";
@@ -93,6 +136,20 @@ export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Pr
       return;
     }
 
+    if (totalDeliveryChargeInput.trim() && totalDeliveryCharge == null) {
+      toast({
+        title: "Invalid delivery charge",
+        description: "Enter a valid total delivery charge (0 or greater), or leave it blank.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const splitAmounts =
+      totalDeliveryCharge != null
+        ? splitAmountAcrossProducts(totalDeliveryCharge, validRows.length)
+        : null;
+
     setBusy(true);
     setPhase("uploading");
     setProgress(0);
@@ -101,7 +158,8 @@ export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Pr
       const totalSteps = validRows.length + 1;
       let step = 0;
 
-      for (const row of validRows) {
+      for (let index = 0; index < validRows.length; index += 1) {
+        const row = validRows[index];
         const imageFileIds: string[] = [];
         if (row.imageFile) {
           try {
@@ -129,8 +187,8 @@ export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Pr
           binLocation: row.binLocation,
           unitCost: row.unitCost,
           sellingPrice: row.sellingPrice,
-          deliveryCharge: row.deliveryCharge,
-          deliveryChargeType: row.deliveryChargeType,
+          deliveryCharge: splitAmounts ? splitAmounts[index] : row.deliveryCharge,
+          deliveryChargeType: splitAmounts ? deliveryChargeType : row.deliveryChargeType,
           unitOfMeasure: row.unitOfMeasure,
           supplier: row.supplier,
           trackBatches: row.trackBatches,
@@ -144,6 +202,17 @@ export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Pr
 
       const summary = await api.bulkImportInventoryItems({ items: payloads });
       setResult(summary);
+      if (splitAmounts && totalDeliveryCharge != null) {
+        setDeliverySplit({
+          productCount: validRows.length,
+          totalCharge: totalDeliveryCharge,
+          perProductAmounts: splitAmounts,
+          chargeType: deliveryChargeType,
+          createdCount: summary.created,
+        });
+      } else {
+        setDeliverySplit(null);
+      }
       setProgress(100);
       setPhase("done");
       toast({
@@ -232,6 +301,70 @@ export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Pr
               <Badge variant="outline">{imageCount || stats.withImage} images matched</Badge>
             </div>
 
+            {phase === "preview" ? (
+              <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                <div>
+                  <div className="text-sm font-medium">Delivery charge (optional)</div>
+                  <p className="text-xs text-muted-foreground">
+                    Enter a total delivery charge to split equally across ready products and save on each item.
+                    Leave blank to use each row&apos;s spreadsheet `deliveryCharge`.
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="bulk-total-delivery-charge">Total delivery charge</Label>
+                    <Input
+                      id="bulk-total-delivery-charge"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      inputMode="decimal"
+                      placeholder="e.g. 500"
+                      value={totalDeliveryChargeInput}
+                      disabled={busy}
+                      onChange={(e) => setTotalDeliveryChargeInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Charge type</Label>
+                    <Select
+                      value={deliveryChargeType}
+                      onValueChange={(v) => setDeliveryChargeType(v as "flat" | "perUnit")}
+                      disabled={busy || totalDeliveryCharge == null}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="flat">Flat</SelectItem>
+                        <SelectItem value="perUnit">Per unit</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                {splitPreview ? (
+                  <div className="grid gap-2 sm:grid-cols-3 text-sm">
+                    <div className="rounded-md border bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">Products</div>
+                      <div className="font-semibold tabular-nums">{stats.valid}</div>
+                    </div>
+                    <div className="rounded-md border bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">Total delivery charge</div>
+                      <div className="font-semibold tabular-nums">{formatCurrency(totalDeliveryCharge)}</div>
+                    </div>
+                    <div className="rounded-md border bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">Split per product</div>
+                      <div className="font-semibold tabular-nums">
+                        {splitPreview.equal
+                          ? formatCurrency(splitPreview.min)
+                          : `${formatCurrency(splitPreview.min)} – ${formatCurrency(splitPreview.max)}`}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             {phase === "uploading" ? (
               <div className="space-y-1">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -242,7 +375,7 @@ export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Pr
               </div>
             ) : null}
 
-            <ScrollArea className="h-[340px] rounded-md border">
+            <ScrollArea className="h-[280px] rounded-md border">
               <table className="w-full text-left text-xs">
                 <thead className="sticky top-0 bg-muted/80 backdrop-blur">
                   <tr className="border-b">
@@ -304,7 +437,40 @@ export function InventoryBulkImportDialog({ open, onOpenChange, onImported }: Pr
                 <div className="text-lg font-semibold tabular-nums">{result.failed}</div>
               </div>
             </div>
-            <ScrollArea className="h-[280px] rounded-md border">
+
+            {deliverySplit ? (
+              <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                <div className="text-sm font-medium">Delivery charge split</div>
+                <div className="grid gap-2 sm:grid-cols-3 text-sm">
+                  <div className="rounded-md border bg-background px-3 py-2">
+                    <div className="text-xs text-muted-foreground">Products added</div>
+                    <div className="text-lg font-semibold tabular-nums">{deliverySplit.createdCount}</div>
+                  </div>
+                  <div className="rounded-md border bg-background px-3 py-2">
+                    <div className="text-xs text-muted-foreground">Total delivery charge</div>
+                    <div className="text-lg font-semibold tabular-nums">
+                      {formatCurrency(deliverySplit.totalCharge)}
+                    </div>
+                  </div>
+                  <div className="rounded-md border bg-background px-3 py-2">
+                    <div className="text-xs text-muted-foreground">Split per product</div>
+                    <div className="text-lg font-semibold tabular-nums">
+                      {formatCurrency(deliverySplit.perProductAmounts[0] ?? 0)}
+                      {deliverySplit.perProductAmounts.some(
+                        (amount) => amount !== deliverySplit.perProductAmounts[0],
+                      )
+                        ? "+"
+                        : ""}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {deliverySplit.chargeType === "perUnit" ? "Per unit" : "Flat"} · saved on each product
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            <ScrollArea className="h-[240px] rounded-md border">
               <table className="w-full text-left text-xs">
                 <thead className="sticky top-0 bg-muted/80">
                   <tr className="border-b">

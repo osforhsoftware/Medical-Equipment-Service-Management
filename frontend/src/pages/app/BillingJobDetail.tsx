@@ -55,6 +55,7 @@ export default function BillingJobDetail() {
   const [warrantySaving, setWarrantySaving] = useState(false);
   const [dueAt, setDueAt] = useState(defaultDatePlusDays(30));
   const [additionalLines, setAdditionalLines] = useState<InvoiceLineInput[]>([]);
+  const [customerSummary, setCustomerSummary] = useState("");
   const [inventory, setInventory] = useState<BackendInventoryItem[]>([]);
   const [catalog, setCatalog] = useState<BackendCatalogItem[]>([]);
   const [warrantyForm, setWarrantyForm] = useState({
@@ -69,6 +70,7 @@ export default function BillingJobDetail() {
     try {
       const next = await api.getBillingJobContext(jobId);
       setContext(next);
+      setCustomerSummary(next.job.estimate?.customerSummary ?? "");
       const equipment = next.job.equipment;
       setWarrantyForm({
         serviceWarrantyStart: toDateInput(equipment?.serviceWarrantyStart),
@@ -201,6 +203,7 @@ export default function BillingJobDetail() {
             description: line.description.trim() || (line.type === "service" || line.type === "labor" ? "Service" : "Item"),
           })),
         equipment ? equipmentWarrantyPayload : undefined,
+        customerSummary.trim() || null,
       );
       toast({ title: "Final invoice generated", description: `Amount ${formatCurrency(invoice.total)}` });
       navigate(`/app/billing/invoices/${invoice.id}`);
@@ -370,6 +373,11 @@ export default function BillingJobDetail() {
                       inventory={inventory}
                       catalog={catalog}
                       onChange={setAdditionalLines}
+                      showCustomizeItems
+                      customerSummary={customerSummary}
+                      onCustomerSummaryChange={setCustomerSummary}
+                      customizePreviewLines={billPreview.lines}
+                      total={charges.total}
                     />
                     <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 xl:sticky xl:top-4">
                       <ItemizedChargeLines lines={billPreview.lines} />

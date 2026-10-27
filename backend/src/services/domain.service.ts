@@ -29,6 +29,7 @@ import { serviceRequestsService } from "@/services/serviceRequests.service";
 import { CUSTOMER_PORTAL_ENABLED } from "@/config/features";
 import { assertCustomerCreditAllows, assertLineMargin, loadMarginRule } from "@/lib/commercialRules";
 import { calculateEstimateTotals } from "@/lib/estimateTotals";
+import { actorSkipsApprovals } from "@/services/workflow/approvalPolicy";
 
 type Actor = { userId: string; role: string };
 type JsonObject = Record<string, unknown>;
@@ -178,7 +179,7 @@ export class DomainService {
   }
 
   async createEstimateRevision(tenantId: string, estimateId: string, actor: Actor, input: any) {
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const estimate = await tx.estimate.findFirst({ where: { id: estimateId, tenantId } });
       if (!estimate) throw new AppError("Estimate not found", 404);
       if (estimate.status === "approved" || estimate.status === "converted") throw new AppError("Approved estimates cannot be revised", 409);
@@ -322,6 +323,11 @@ export class DomainService {
         include: { lineItems: true, revisions: { orderBy: { revision: "desc" } } },
       });
     });
+
+    if (result.status === "pendingAdminApproval" && await actorSkipsApprovals(tenantId, actor.userId)) {
+      return this.decideEstimate(tenantId, estimateId, actor, { decision: "approved", skipQueue: true });
+    }
+    return result;
   }
 
   async decideEstimate(tenantId: string, estimateId: string, actor: Actor, input: any) {
@@ -333,13 +339,14 @@ export class DomainService {
       if (!estimate) throw new AppError("Estimate not found", 404);
       assertEstimateDecisionAllowed(estimate.status);
 
+      const skipQueue = input.skipQueue === true;
       const isStaffApprover = await userHasAnyRoleKey(
         actor.userId,
         tenantId,
         actor.role,
         ESTIMATE_STAFF_APPROVER_ROLES,
       );
-      if (actor.role === "customer") {
+      if (!skipQueue && actor.role === "customer") {
         const user = await tx.user.findFirst({ where: { id: actor.userId, tenantId } });
         if (!user?.customerId || user.customerId !== estimate.customerId) {
           throw new AppError("This estimate does not belong to the customer", 403);
@@ -362,14 +369,14 @@ export class DomainService {
           });
         }
       }
-      if (actor.role !== "customer" && !isStaffApprover) {
+      if (!skipQueue && actor.role !== "customer" && !isStaffApprover) {
         throw new AppError("Only administrators and service coordinators can decide estimates", 403);
       }
-      if (input.decision === "approved" && isStaffApprover && !input.engineerId && estimate.serviceRequestId) {
+      if (input.decision === "approved" && !input.engineerId && estimate.serviceRequestId) {
         const defaultEngineer = await ticketAssignmentService.defaultEngineerOnApproval(tenantId);
         if (defaultEngineer) {
           input.engineerId = defaultEngineer.id;
-        } else {
+        } else if (!skipQueue && isStaffApprover) {
           throw new AppError("engineerId is required when approving an estimate", 422);
         }
       }
@@ -1699,7 +1706,10 @@ export class DomainService {
           balanceDue: total,
           currency: input.currency.toUpperCase(),
           dueAt: input.dueAt,
-          customerSummary: job.estimate.customerSummary,
+          customerSummary:
+            input.customerSummary !== undefined
+              ? String(input.customerSummary ?? "").trim() || null
+              : job.estimate.customerSummary,
           lineItems: { create: sourceLines },
         },
         include: { lineItems: true },

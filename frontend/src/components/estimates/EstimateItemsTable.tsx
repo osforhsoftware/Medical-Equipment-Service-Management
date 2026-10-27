@@ -8,6 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CustomerSummaryField } from "@/components/shared/CustomerSummaryField";
 import type { BackendCatalogItem, BackendInventoryItem, EstimateLineInput } from "@/lib/api";
 import { ESTIMATE_LINE_TYPES, formatLineType, lineTotal, newEstimateLine } from "@/lib/estimates";
 import { formatCurrency, parseAmount } from "@/lib/format";
@@ -33,6 +34,13 @@ interface EstimateItemsTableProps {
   invalid?: boolean;
   adjustUnitPrice?: (basePrice: number) => number;
   onChange?: (lines: EstimateLineInput[]) => void;
+  /** Customer-facing item label (defaults to Service on print/PDF). */
+  customerSummary?: string;
+  onCustomerSummaryChange?: (value: string) => void;
+  customerSummaryDisabled?: boolean;
+  headerDiscount?: number;
+  total?: number;
+  showCustomizeItems?: boolean;
 }
 
 export function EstimateItemsTable({
@@ -44,6 +52,12 @@ export function EstimateItemsTable({
   invalid,
   adjustUnitPrice,
   onChange,
+  customerSummary = "",
+  onCustomerSummaryChange,
+  customerSummaryDisabled,
+  headerDiscount = 0,
+  total,
+  showCustomizeItems = false,
 }: EstimateItemsTableProps) {
   const { settings } = useSettings();
   const editable = mode === "edit";
@@ -356,6 +370,19 @@ export function EstimateItemsTable({
           )}
         </div>
       </div>
+      {showCustomizeItems ? (
+        <CustomerSummaryField
+          id="estimate-customize-items"
+          embedded
+          value={customerSummary}
+          disabled={customerSummaryDisabled || !editable}
+          readOnly={!editable && !onCustomerSummaryChange}
+          lines={lines}
+          headerDiscount={headerDiscount}
+          total={total}
+          onChange={onCustomerSummaryChange}
+        />
+      ) : null}
     </section>
   );
 }

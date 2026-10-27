@@ -127,9 +127,16 @@ function NavItemLink({
   );
 }
 
-function navItemForUser(item: NavItem, user: AppUser, rbacMatrix: Record<string, AppUser["role"][]>): NavItem | null {
+function navItemForUser(
+  item: NavItem,
+  user: AppUser,
+  rbacMatrix: Record<string, AppUser["role"][]>,
+  skipApprovals = false,
+): NavItem | null {
   if (!userCanAccessModule(user, item.label, rbacMatrix, item.roles)) return null;
-  const children = item.children?.filter((child) => userCanOpenPage(user, child.to, rbacMatrix));
+  const children = item.children
+    ?.filter((child) => userCanOpenPage(user, child.to, rbacMatrix))
+    .filter((child) => !(skipApprovals && child.label === "Approval"));
   const canOpenSelf = userCanOpenPage(user, item.to, rbacMatrix);
   if (item.children?.length) {
     if (!canOpenSelf && !children?.length) return null;
@@ -149,7 +156,7 @@ export function AppSidebar({ open, onClose }: AppSidebarProps) {
   if (!user) return null;
 
   const visible = navItems
-    .map((item) => navItemForUser(item, user, rbacMatrix))
+    .map((item) => navItemForUser(item, user, rbacMatrix, Boolean(settings?.skipApprovals)))
     .filter((item): item is NavItem => item !== null);
   const closeIfOverlay = () => {
     if (window.matchMedia("(max-width: 1023px)").matches) onClose();

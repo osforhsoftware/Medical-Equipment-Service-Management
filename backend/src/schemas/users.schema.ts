@@ -20,6 +20,7 @@ const userPermissionsSchema = z
   .object({
     mode: z.enum(["crud", "read"]).default("crud"),
     modules: z.record(z.string(), permissionLevelSchema).optional().default({}),
+    bypassApprovals: z.boolean().optional().default(true),
   })
   .optional();
 

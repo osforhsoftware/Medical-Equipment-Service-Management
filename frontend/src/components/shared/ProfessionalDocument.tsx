@@ -238,7 +238,7 @@ export function ProfessionalDocument({
             <thead>
               <tr>
                 <th className="cell-desc">Description</th>
-                <th className="cell-amt">Amount</th>
+                <th className="cell-amt">Price</th>
               </tr>
             </thead>
             <tbody>

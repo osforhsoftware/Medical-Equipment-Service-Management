@@ -249,20 +249,24 @@ export class InventoryService {
 
     const categoryCache = new Map<string, string>();
     const subcategoryCache = new Map<string, string | null>();
+    /** Bulk import: create missing taxonomy terms from CSV values (same as Master Data). */
     const resolveCategoryCached = async (raw?: string | null) => {
       const key = (raw ?? "").trim().toLowerCase();
       if (!key) return "";
       const hit = categoryCache.get(key);
       if (hit !== undefined) return hit;
-      const slug = (await this.resolveOptionalSlug(tenantId, "inventory_category", raw)) ?? "";
+      const slug = await taxonomyService.resolveOrCreateSlug(tenantId, "inventory_category", raw!.trim());
       categoryCache.set(key, slug);
       return slug;
     };
-    const resolveSubcategoryCached = async (raw?: string | null) => {
-      const key = (raw ?? "").trim().toLowerCase();
-      if (!key) return null;
+    const resolveSubcategoryCached = async (raw?: string | null, parentSlug?: string | null) => {
+      const trimmed = (raw ?? "").trim();
+      if (!trimmed) return null;
+      const key = `${trimmed.toLowerCase()}::${(parentSlug ?? "").trim().toLowerCase()}`;
       if (subcategoryCache.has(key)) return subcategoryCache.get(key) ?? null;
-      const slug = await this.resolveOptionalSlug(tenantId, "inventory_subcategory", raw);
+      const slug = await taxonomyService.resolveOrCreateSlug(tenantId, "inventory_subcategory", trimmed, {
+        parentSlug,
+      });
       subcategoryCache.set(key, slug);
       return slug;
     };
@@ -342,7 +346,7 @@ export class InventoryService {
         }
 
         const category = await resolveCategoryCached(data.category);
-        const subcategory = await resolveSubcategoryCached(data.subcategory);
+        const subcategory = await resolveSubcategoryCached(data.subcategory, category);
         const itemClass = resolveItemClass(data.itemClass, category);
         const imageFileIds = data.imageFileIds ?? [];
 

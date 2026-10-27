@@ -27,6 +27,7 @@ type UpdateSettingsData = {
   autoAssignCoordinatorAfterInspection?: boolean;
   autoAssignEstimatorAfterInspection?: boolean;
   autoAssignEngineerOnApproval?: boolean;
+  skipApprovals?: boolean;
   guidedSetupFlow?: boolean;
   defaultCoordinatorUserId?: string | null;
   defaultInspectorUserId?: string | null;
@@ -131,6 +132,7 @@ export class SettingsService {
       autoAssignCoordinatorAfterInspection: settings.autoAssignCoordinatorAfterInspection,
       autoAssignEstimatorAfterInspection: settings.autoAssignEstimatorAfterInspection,
       autoAssignEngineerOnApproval: settings.autoAssignEngineerOnApproval,
+      skipApprovals: await settingsRepository.getSkipApprovals(tenantId),
       guidedSetupFlow: settings.guidedSetupFlow,
       defaultCoordinatorUserId: settings.defaultCoordinatorUserId,
       defaultInspectorUserId: settings.defaultInspectorUserId,
@@ -214,6 +216,9 @@ export class SettingsService {
 
     if (Object.keys(updatePayload).length > 0) {
       await settingsRepository.update(tenantId, updatePayload);
+    }
+    if (data.skipApprovals !== undefined) {
+      await settingsRepository.setSkipApprovals(tenantId, data.skipApprovals);
     }
 
     return this.get(tenantId);

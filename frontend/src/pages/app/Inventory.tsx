@@ -1480,7 +1480,7 @@ export default function Inventory() {
                   />
                 </div>
                 <div className="grid gap-2" data-field="unitCost">
-                  <Label htmlFor="inventory-cost">Cost / selling price (cost)</Label>
+                  <Label htmlFor="inventory-cost">Cost price</Label>
                   <Input
                     id="inventory-cost"
                     type="number"
@@ -1500,7 +1500,7 @@ export default function Inventory() {
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="grid gap-2" data-field="sellingPrice">
-                  <Label htmlFor="inventory-selling">Cost / selling price (selling)</Label>
+                  <Label htmlFor="inventory-selling">Selling price</Label>
                   <Input
                     id="inventory-selling"
                     type="number"

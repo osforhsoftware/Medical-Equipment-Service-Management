@@ -311,7 +311,7 @@ function QueueRow({
 
 export default function Dashboard() {
   const { user, hasRole } = useAuth();
-  const { rbacMatrix } = useSettings();
+  const { rbacMatrix, settings } = useSettings();
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [notifications, setNotifications] = useState<BackendNotification[]>([]);
@@ -360,7 +360,14 @@ export default function Dashboard() {
     return () => window.removeEventListener(NOTIFICATIONS_UPDATED, onUpdated);
   }, [refreshNotifications]);
 
-  const cards = useMemo(() => (data ? overviewCards(role, data) : []), [data, role]);
+  const cards = useMemo(() => {
+    if (!data) return [];
+    const next = overviewCards(role, data);
+    if (settings?.skipApprovals) {
+      return next.filter((card) => card.label !== "Awaiting Approval");
+    }
+    return next;
+  }, [data, role, settings?.skipApprovals]);
   const actions = useMemo(() => {
     if (!user) return [];
     return roleQuickActions(role).filter((action) => userCanAccessPath(user, action.to, rbacMatrix));
@@ -546,7 +553,13 @@ export default function Dashboard() {
                 { label: "Waiting Approval", value: data.roleQueues.waitingApproval, to: "/app/service-tickets?status=approval&view=table" },
                 { label: "Service Pending", value: data.roleQueues.servicePending, to: "/app/service-tickets?status=in-progress&view=table" },
                 { label: "Completed (MTD)", value: data.roleQueues.completed, to: "/app/service-tickets?status=completed&view=table" },
-              ].map((item) => (
+              ]
+                .filter((item) => !(
+                  item.label === "Waiting Approval"
+                  && settings?.skipApprovals
+                  && data.roleQueues.waitingApproval === 0
+                ))
+                .map((item) => (
                 <button
                   key={item.label}
                   type="button"

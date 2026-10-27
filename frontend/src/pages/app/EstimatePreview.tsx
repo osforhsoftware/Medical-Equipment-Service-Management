@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
-import { ArrowLeft, Download, Loader2, Printer } from "lucide-react";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { ArrowLeft, Download, Loader2, Mail, MessageCircle, Printer } from "lucide-react";
 import { ProfessionalDocument } from "@/components/shared/ProfessionalDocument";
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import { ESTIMATE_READ_ROLES } from "@/config/roles";
 import { Button } from "@/components/ui/button";
 import { ApiError, api, type BackendCustomer, type BackendEstimate } from "@/lib/api";
+import { shareEstimate, type EstimateShareChannel } from "@/lib/estimateShare";
 import { estimateLevelDiscount, estimateToDocumentLines } from "@/lib/estimates";
 import { formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
@@ -13,13 +14,14 @@ import { toast } from "@/lib/toast";
 export default function EstimatePreview() {
   const { id = "" } = useParams();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isPortal = location.pathname.startsWith("/portal");
   const [estimate, setEstimate] = useState<BackendEstimate | null>(null);
   const [customer, setCustomer] = useState<BackendCustomer | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [shareBusy, setShareBusy] = useState<EstimateShareChannel | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -59,7 +61,22 @@ export default function EstimatePreview() {
     void load();
   }, [load]);
 
-  const backTo = isPortal ? (estimate ? `/portal/estimates/${estimate.id}` : "/portal/estimates") : (estimate ? `/app/estimates/${estimate.id}` : "/app/estimates");
+  useEffect(() => {
+    if (searchParams.get("print") === "1") {
+      const next = new URLSearchParams(searchParams);
+      next.delete("print");
+      setSearchParams(next, { replace: true });
+      window.setTimeout(() => window.print(), 300);
+    }
+  }, [searchParams, setSearchParams]);
+
+  const backTo = isPortal
+    ? estimate
+      ? `/portal/estimates/${estimate.id}`
+      : "/portal/estimates"
+    : estimate
+      ? `/app/estimates/${estimate.id}`
+      : "/app/estimates";
 
   const downloadPdf = async () => {
     if (!estimate) return;
@@ -70,11 +87,35 @@ export default function EstimatePreview() {
     setPdfBusy(true);
     try {
       const doc = await api.generateDocument("estimate", estimate.id);
-      if (doc.file?.id) window.open(api.fileDownloadUrl(doc.file.id), "_blank");
+      if (doc.file?.id) {
+        window.open(api.fileDownloadUrl(doc.file.id), "_blank");
+        toast({ title: "PDF ready", description: "Estimate PDF opened in a new tab." });
+      }
     } catch (err) {
       toast.apiError(err, { fallback: "Unable to generate PDF" });
     } finally {
       setPdfBusy(false);
+    }
+  };
+
+  const sendEstimate = async (channel: EstimateShareChannel) => {
+    if (!estimate || isPortal) return;
+    setShareBusy(channel);
+    try {
+      const result = await shareEstimate({ channel, estimate, customer });
+      if (!result.opened && !result.sharedNatively && !result.downloaded) {
+        return;
+      }
+      toast.success(channel === "whatsapp" ? "WhatsApp opened" : "Gmail/Email opened", {
+        description: result.sharedNatively
+          ? "Native share was used when available. Otherwise attach the downloaded PDF."
+          : "PDF downloaded — attach it in the message window that opened.",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to send estimate";
+      toast.error(message);
+    } finally {
+      setShareBusy(null);
     }
   };
 
@@ -86,14 +127,52 @@ export default function EstimatePreview() {
             <ArrowLeft className="mr-1 h-4 w-4" /> Back
           </Link>
         </Button>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-lg font-semibold">Estimate Preview</h1>
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="mr-1 h-4 w-4" /> Print
           </Button>
-          <Button variant="outline" size="sm" disabled={!estimate || pdfBusy} onClick={() => void downloadPdf()}>
-            {pdfBusy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Download className="mr-1 h-4 w-4" />} PDF
+          <Button
+            variant="brand"
+            size="sm"
+            disabled={!estimate || pdfBusy || Boolean(shareBusy)}
+            onClick={() => void downloadPdf()}
+          >
+            {pdfBusy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Download className="mr-1 h-4 w-4" />}
+            Download PDF
           </Button>
+          {!isPortal && estimate ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={Boolean(shareBusy) || pdfBusy}
+                onClick={() => void sendEstimate("whatsapp")}
+                className="gap-1.5 border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+              >
+                {shareBusy === "whatsapp" ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <MessageCircle className="mr-1 h-4 w-4" />
+                )}
+                Send via WhatsApp
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={Boolean(shareBusy) || pdfBusy}
+                onClick={() => void sendEstimate("email")}
+                className="gap-1.5 border-red-500/40 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
+              >
+                {shareBusy === "email" ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Mail className="mr-1 h-4 w-4" />
+                )}
+                Send via Gmail/Email
+              </Button>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -105,7 +184,9 @@ export default function EstimatePreview() {
         <div className="rounded-lg border border-border bg-card p-10 text-center">
           <p className="font-medium">Unable to load estimate</p>
           <p className="mt-1 text-sm text-muted-foreground">{error}</p>
-          <Button className="mt-4" variant="outline" onClick={() => void load()}>Retry</Button>
+          <Button className="mt-4" variant="outline" onClick={() => void load()}>
+            Retry
+          </Button>
         </div>
       ) : !estimate ? (
         <div className="rounded-lg border border-border bg-card p-10 text-center">
@@ -146,8 +227,9 @@ export default function EstimatePreview() {
             ]}
             lines={estimateToDocumentLines(estimate)}
             discount={estimateLevelDiscount(estimate)}
-            customerView
+            customerView={Boolean(estimate.serviceRequestId)}
             customerSummary={estimate.customerSummary}
+            totalOverride={Number(estimate.total)}
             notes={estimate.notes ?? undefined}
             terms={estimate.terms ?? undefined}
             hideToolbar

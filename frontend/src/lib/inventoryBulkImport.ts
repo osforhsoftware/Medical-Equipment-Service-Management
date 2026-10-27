@@ -393,8 +393,8 @@ export function downloadInventoryImportTemplate() {
         sku: "SP-ECG-001",
         name: "ECG Cable 3 Lead",
         itemClass: "spare_part",
-        category: "Cables",
-        subcategory: "",
+        category: "Consumables",
+        subcategory: "Cables",
         description: "Compatible with common monitors",
         manufacturer: "Generic",
         compatibleModels: "MX40",
@@ -435,4 +435,23 @@ export function downloadInventoryImportTemplate() {
       },
     ],
   );
+}
+
+/**
+ * Split a total delivery charge across `count` products using whole cents.
+ * Any remainder cent is given to the first products so the parts always sum to `total`.
+ * Example: total 500, count 50 → each product gets 10.
+ */
+export function splitAmountAcrossProducts(total: number, count: number): number[] {
+  if (!Number.isFinite(total) || total < 0 || !Number.isFinite(count) || count <= 0) {
+    return [];
+  }
+  const cents = Math.round(total * 100);
+  const base = Math.floor(cents / count);
+  let remainder = cents - base * count;
+  return Array.from({ length: count }, () => {
+    const extra = remainder > 0 ? 1 : 0;
+    if (remainder > 0) remainder -= 1;
+    return (base + extra) / 100;
+  });
 }

@@ -9,6 +9,7 @@ import {
   normalizeTicketStatus,
   resolveTicketEventStatus,
 } from "@/services/workflow/serviceTicketStateMachine";
+import { shouldSkipApprovals } from "@/lib/userPermissions";
 import { AppError } from "@/middleware/errorHandler";
 
 function expectAppError(fn: () => void, status: number) {
@@ -80,6 +81,39 @@ test("revision request returns ticket to estimate stage", () => {
   assert.equal(resolveTicketEventStatus("pending_approval", "estimateRejected"), "estimate");
   // Same-stage pending approval is a no-op (stays on approval); it must not reverse.
   assert.equal(resolveTicketEventStatus("pending_approval", "estimatePendingApproval"), "pending_approval");
+});
+
+test("shouldSkipApprovals uses tenant flag or per-user bypass", () => {
+  assert.equal(shouldSkipApprovals(true, {}), true);
+  assert.equal(shouldSkipApprovals(false, { bypassApprovals: true }), true);
+  assert.equal(shouldSkipApprovals(false, { mode: "crud", modules: {}, bypassApprovals: false }), false);
+  assert.equal(shouldSkipApprovals(false, {}), true);
+});
+
+test("shouldSkipApprovals tenant flag wins over a user without bypass", () => {
+  assert.equal(shouldSkipApprovals(true, { bypassApprovals: false }), true);
+});
+
+test("skip approvals jumps estimate and job-complete gates", () => {
+  assert.equal(
+    resolveTicketEventStatus("estimate", "estimatePendingApproval", { skipApprovals: true }),
+    "assigned_engineer",
+  );
+  assert.equal(
+    resolveTicketEventStatus("assigned_engineer", "jobCompleted", { skipApprovals: true }),
+    "pending_invoice",
+  );
+  assert.equal(
+    resolveTicketEventStatus("assigned_engineer", "changeRequestSubmitted", { skipApprovals: true }),
+    "assigned_engineer",
+  );
+  assert.equal(resolveTicketEventStatus("estimate", "estimatePendingApproval"), "pending_approval");
+  assert.equal(resolveTicketEventStatus("assigned_engineer", "jobCompleted"), "pending_final_approval");
+});
+
+test("skip approvals does not open arbitrary jumps", () => {
+  expectAppError(() => resolveTicketEventStatus("new", "invoiceGenerated", { skipApprovals: true }), 409);
+  expectAppError(() => resolveTicketEventStatus("inspection", "jobCompleted", { skipApprovals: true }), 409);
 });
 
 test("job transitions require QA then complete before delivery", () => {

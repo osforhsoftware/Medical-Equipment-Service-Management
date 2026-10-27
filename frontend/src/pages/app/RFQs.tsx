@@ -19,9 +19,11 @@ import {
   Receipt,
   Undo2,
   Share2,
+  Printer,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { PurchaseStageNav, purchaseStageFromLocation } from "@/components/purchase/PurchaseStageNav";
+import { RfqPrintDialog } from "@/components/purchase/RfqPrintDialog";
 import { SupplierQuoteShareDialog } from "@/components/purchase/SupplierQuoteShareDialog";
 import { ModuleQuickAction } from "@/components/shared/ModuleFlowStrip";
 import { RoleGuard } from "@/components/auth/RoleGuard";
@@ -150,6 +152,8 @@ export default function RFQs() {
   const [shareTarget, setShareTarget] = useState<{ rfq: SupplierRFQData; quote: SupplierQuoteData } | null>(
     null,
   );
+  const [rfqPrintOpen, setRfqPrintOpen] = useState(false);
+  const [rfqPrintTarget, setRfqPrintTarget] = useState<SupplierRFQData | null>(null);
 
   // New RFQ form state
   const [rfqForm, setRfqForm] = useState({
@@ -335,6 +339,11 @@ export default function RFQs() {
       lines: initialLines,
     });
     setQuoteDialogOpen(true);
+  };
+
+  const openRfqPrint = (rfq: SupplierRFQData) => {
+    setRfqPrintTarget(rfq);
+    setRfqPrintOpen(true);
   };
 
   const openQuoteShare = (rfq: SupplierRFQData, quote: SupplierQuoteData) => {
@@ -655,8 +664,19 @@ export default function RFQs() {
                         <p className="text-sm text-muted-foreground">Supplier: <span className="font-medium text-foreground">{rfq.supplierName}</span></p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <span>Created: {formatDate(rfq.createdAt)}</span>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground sm:gap-4">
+                      <span className="hidden sm:inline">Created: {formatDate(rfq.createdAt)}</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openRfqPrint(rfq);
+                        }}
+                      >
+                        <Printer className="mr-1 h-3.5 w-3.5" />
+                        Print
+                      </Button>
                       {canManage && (
                         <Button
                           size="sm"
@@ -1316,6 +1336,18 @@ export default function RFQs() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <RfqPrintDialog
+          open={rfqPrintOpen}
+          onOpenChange={(open) => {
+            setRfqPrintOpen(open);
+            if (!open) setRfqPrintTarget(null);
+          }}
+          rfq={rfqPrintTarget}
+          supplierEmail={rfqPrintTarget?.supplierRecord?.email}
+          supplierPhone={rfqPrintTarget?.supplierRecord?.phone}
+          supplierAddress={rfqPrintTarget?.supplierRecord?.address}
+        />
 
         <SupplierQuoteShareDialog
           open={shareOpen}

@@ -6,7 +6,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { EstimateItemsTable } from "@/components/estimates/EstimateItemsTable";
 import { EstimateSummary } from "@/components/estimates/EstimateSummary";
 import { EstimateWorkflowSteps } from "@/components/estimates/EstimateWorkflowSteps";
-import { CustomerSummaryField } from "@/components/shared/CustomerSummaryField";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { CreditExposureBanner } from "@/components/shared/CreditExposureBanner";
 import { creditBlocksSave, useCustomerCreditExposure } from "@/hooks/useCustomerCreditExposure";
@@ -45,6 +44,8 @@ import {
 import { splitInspectionFindings } from "@/components/inspections/useInspectionReportEditor";
 import { canEditEstimate, estimateLevelDiscount, estimateStatusLabel, newEstimateLine, summarizeLines, workflowStepIndex } from "@/lib/estimates";
 import { useSettings } from "@/context/SettingsContext";
+import { useAuth } from "@/context/AuthContext";
+import { shouldSkipApprovals } from "@/lib/userPermissions";
 import { defaultDatePlusDays, formatCurrency, formatDate, parseAmount } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
@@ -98,6 +99,8 @@ export default function EstimateBuilder() {
   const equipmentIdParam = searchParams.get("equipmentId") ?? "";
   const navigate = useNavigate();
   const { settings } = useSettings();
+  const { user } = useAuth();
+  const skipApprovals = shouldSkipApprovals(settings, user);
 
   const [ticket, setTicket] = useState<BackendServiceRequest | null>(null);
   const [party, setParty] = useState<BackendCustomer | null>(null);
@@ -356,7 +359,9 @@ export default function EstimateBuilder() {
       });
       setEstimate(revised);
       toast({
-        title: sendForApproval ? "Sent for approval" : thenPreview ? "Estimate saved" : "Draft saved",
+        title: sendForApproval
+          ? skipApprovals ? "Estimate sent" : "Sent for approval"
+          : thenPreview ? "Estimate saved" : "Draft saved",
       });
       resetValidation();
       if (sendForApproval) navigate(`/app/estimates/${revised.id}`);
@@ -501,6 +506,12 @@ export default function EstimateBuilder() {
               setLines(next);
               handleChange("lines", { validUntil, lines: next });
             }}
+            showCustomizeItems
+            customerSummary={customerSummary}
+            onCustomerSummaryChange={setCustomerSummary}
+            customerSummaryDisabled={!editable}
+            headerDiscount={discount}
+            total={totals.total}
           />
         </div>
 
@@ -603,15 +614,6 @@ export default function EstimateBuilder() {
                 <Label htmlFor="terms">Payment terms / Terms & conditions</Label>
                 <Textarea id="terms" value={terms} disabled={!editable} onChange={(e) => setTerms(e.target.value)} rows={3} />
               </div>
-              <CustomerSummaryField
-                id="customer-summary"
-                value={customerSummary}
-                disabled={!editable}
-                lines={lines}
-                headerDiscount={discount}
-                total={totals.total}
-                onChange={setCustomerSummary}
-              />
               <div className="grid gap-2">
                 <Label htmlFor="notes">Internal notes</Label>
                 <Textarea id="notes" value={notes} disabled={!editable} onChange={(e) => setNotes(e.target.value)} rows={3} />
@@ -629,7 +631,7 @@ export default function EstimateBuilder() {
               Save Draft
             </Button>
             <Button className="flex-1" disabled={saving || !editable || creditBlocked || marginBlocked} onClick={() => setConfirmSend(true)}>
-              Send for Approval
+              {skipApprovals ? "Send & continue" : "Send for Approval"}
             </Button>
           </div>
         </div>
@@ -638,9 +640,13 @@ export default function EstimateBuilder() {
       <AlertDialog open={confirmSend} onOpenChange={setConfirmSend}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Send this estimate for approval?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {skipApprovals ? "Send this estimate and continue?" : "Send this estimate for approval?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              The estimate will move to pending approval and can no longer be edited until a decision is made.
+              {skipApprovals
+                ? "The estimate will be sent and the ticket will move to the next working step without an approval queue."
+                : "The estimate will move to pending approval and can no longer be edited until a decision is made."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -651,7 +657,7 @@ export default function EstimateBuilder() {
                 void persist(true);
               }}
             >
-              Send for Approval
+              {skipApprovals ? "Send & continue" : "Send for Approval"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

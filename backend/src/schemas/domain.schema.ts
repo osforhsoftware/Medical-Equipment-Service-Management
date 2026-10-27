@@ -240,6 +240,7 @@ export const invoiceFromJobSchema = z.object({
     jobId: z.string().cuid(),
     dueAt: z.coerce.date(),
     currency: z.string().trim().length(3).default("INR"),
+    customerSummary: z.string().trim().max(200).nullable().optional(),
     additionalLines: z.array(z.object({
       type: z.enum(["product", "equipment", "machine", "service", "custom", "other", "labor", "part"]).default("other"),
       description: z.string().trim().min(1).max(500),

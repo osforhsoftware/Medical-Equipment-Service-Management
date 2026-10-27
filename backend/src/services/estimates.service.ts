@@ -5,6 +5,8 @@ import { AppError } from "@/middleware/errorHandler";
 import { parseCalendarDate } from "@/utils/calendarDate";
 import { generateReference } from "@/utils/reference";
 import { normalizeTicketStatus, resolveTicketEventStatus } from "@/services/workflow/serviceTicketStateMachine";
+import { actorSkipsApprovals } from "@/services/workflow/approvalPolicy";
+import { domainService } from "@/services/domain.service";
 import { prisma } from "@/db/prisma";
 import { assertOwnSalesRecord, isSalesSelfScoped } from "@/lib/salesScope";
 
@@ -157,6 +159,15 @@ export class EstimatesService {
           await prisma.serviceRequest.update({ where: { id: sr.id }, data: { status: next as never } });
         }
       }
+    }
+    if (
+      (updated.status === "pendingAdminApproval" || data.status === "pendingAdminApproval")
+      && await actorSkipsApprovals(tenantId, actorId)
+    ) {
+      return domainService.decideEstimate(tenantId, id, { userId: actorId ?? "system", role: actorRole ?? "admin" }, {
+        decision: "approved",
+        skipQueue: true,
+      });
     }
     return updated;
   }

@@ -538,7 +538,7 @@ export class DocumentsService {
     doc.moveTo(amountX, y).lineTo(amountX, y + headerH).strokeColor(RULE).stroke();
     doc.fillColor(INK).font("Helvetica-Bold").fontSize(8);
     doc.text("Description", LEFT + 8, y + 7, { width: descW - 16 });
-    doc.text("Amount", amountX, y + 7, { width: amountW - 10, align: "right" });
+    doc.text("Price", amountX, y + 7, { width: amountW - 10, align: "right" });
     y += headerH;
 
     for (const row of rows) {
@@ -1406,6 +1406,7 @@ export class DocumentsService {
           { label: "Grand Total", value: money(totals.total), emphasis: true },
         ]);
       } else {
+        // Service estimates: client sees Description + Price only (customizable label, default Service).
         const estimateSummary = customerDocumentSummary(estimate.lineItems, {
           label: estimate.customerSummary,
           headerDiscount,
@@ -1497,6 +1498,7 @@ export class DocumentsService {
             : []),
         ]);
       } else {
+        // Service invoices: client sees Description + Price only (customizable label, default Service).
         const invoiceSummary = customerDocumentSummary(invoice.lineItems, {
           label: invoice.customerSummary,
         });

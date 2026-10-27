@@ -111,6 +111,20 @@ export const TICKET_EVENT_TARGETS = {
 
 export type TicketEvent = keyof typeof TICKET_EVENT_TARGETS;
 
+/** When skip/bypass is on, these events land on the next working status instead of an approval queue. */
+export const SKIP_APPROVAL_EVENT_TARGETS: Partial<Record<TicketEvent, TicketStatus>> = {
+  estimatePendingApproval: "assigned_engineer",
+  changeRequestSubmitted: "assigned_engineer",
+  jobCompleted: "pending_invoice",
+};
+
+const SKIP_APPROVAL_JUMPS: ReadonlyArray<readonly [TicketStatus, TicketStatus]> = [
+  ["estimate", "assigned_engineer"],
+  ["assigned_engineer", "pending_invoice"],
+  ["pending_approval", "pending_invoice"],
+  ["change_pending_approval", "pending_invoice"],
+];
+
 export const JOB_STATUS_ORDER = [
   "scheduled",
   "inProgress",
@@ -154,6 +168,7 @@ export function assertTicketAdvance(
   current: string,
   target: string,
   actorRole: string,
+  options?: { skipApprovals?: boolean },
 ): asserts target is TicketStatus {
   const from = normalizeTicketStatus(current);
   const to = normalizeTicketStatus(target);
@@ -161,7 +176,8 @@ export function assertTicketAdvance(
   if (!TICKET_STATUS_ORDER.includes(to)) throw new AppError("Invalid target status", 400);
 
   const allowedNext = TICKET_TRANSITIONS[from];
-  if (!allowedNext.includes(to)) {
+  const skipJump = Boolean(options?.skipApprovals && SKIP_APPROVAL_JUMPS.some(([a, b]) => a === from && b === to));
+  if (!allowedNext.includes(to) && !skipJump) {
     throw new AppError(
       `Workflow cannot move from ${current} to ${target}. Use reopen or dedicated approval actions to move backward.`,
       409,
@@ -200,9 +216,16 @@ export function assertTicketReopen(
 }
 
 /** Apply a domain event: same status, a legal next transition, or a controlled reverse. */
-export function resolveTicketEventStatus(current: string, event: TicketEvent): TicketStatus {
+export function resolveTicketEventStatus(
+  current: string,
+  event: TicketEvent,
+  options?: { skipApprovals?: boolean },
+): TicketStatus {
   const normalized = normalizeTicketStatus(current);
-  const target = TICKET_EVENT_TARGETS[event];
+  const target =
+    options?.skipApprovals && SKIP_APPROVAL_EVENT_TARGETS[event]
+      ? SKIP_APPROVAL_EVENT_TARGETS[event]!
+      : TICKET_EVENT_TARGETS[event];
   if (!TICKET_STATUS_ORDER.includes(normalized)) {
     throw new AppError("Invalid current ticket status", 400);
   }
@@ -210,6 +233,13 @@ export function resolveTicketEventStatus(current: string, event: TicketEvent): T
 
   const allowedNext = TICKET_TRANSITIONS[normalized] ?? [];
   if (allowedNext.includes(target)) return target;
+
+  if (options?.skipApprovals && SKIP_APPROVAL_EVENT_TARGETS[event] === target) {
+    const fromIdx = TICKET_STATUS_ORDER.indexOf(normalized);
+    const toIdx = TICKET_STATUS_ORDER.indexOf(target);
+    // assigned_engineer → pending_invoice skips change + final-approval (3 steps).
+    if (toIdx > fromIdx && toIdx - fromIdx <= 3) return target;
+  }
 
   const allowReverse: TicketEvent[] = [
     "estimateRejected",

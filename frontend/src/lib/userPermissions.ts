@@ -4,13 +4,15 @@ export type PermissionMode = "crud" | "read";
 export type UserPermissions = {
   mode: PermissionMode;
   modules: Record<string, PermissionLevel>;
+  /** When true, this staff member skips estimate / change / final-work / invoice approval gates. */
+  bypassApprovals: boolean;
 };
 
 const LEVELS = new Set<PermissionLevel>(["none", "read", "crud"]);
 
 export function parseUserPermissions(value: unknown): UserPermissions {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { mode: "crud", modules: {} };
+    return { mode: "crud", modules: {}, bypassApprovals: true };
   }
   const raw = value as Record<string, unknown>;
   const mode: PermissionMode = raw.mode === "read" ? "read" : "crud";
@@ -22,7 +24,7 @@ export function parseUserPermissions(value: unknown): UserPermissions {
       }
     }
   }
-  return { mode, modules };
+  return { mode, modules, bypassApprovals: raw.bypassApprovals !== false };
 }
 
 export function userMayMutate(user: { role: string; roles?: string[]; permissions?: unknown } | null | undefined): boolean {
@@ -45,4 +47,12 @@ export function moduleAccessLevel(
     return override;
   }
   return parsed.mode === "read" ? "read" : "crud";
+}
+
+export function shouldSkipApprovals(
+  settings?: { skipApprovals?: boolean } | null,
+  user?: { permissions?: unknown } | null,
+): boolean {
+  if (settings?.skipApprovals) return true;
+  return parseUserPermissions(user?.permissions).bypassApprovals;
 }

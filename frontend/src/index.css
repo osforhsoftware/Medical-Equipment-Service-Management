@@ -1447,18 +1447,23 @@
     display: block !important;
   }
 
-  /* Supplier quote share: print only the body-level quote sheet */
-  .supplier-quote-print-root {
+  /* Supplier quote / RFQ share: print only the body-level document sheet */
+  .supplier-quote-print-root,
+  .rfq-print-root {
     display: none !important;
   }
 
   body.print-supplier-quote #root,
   body.print-supplier-quote [data-radix-portal],
-  body.print-supplier-quote [data-sonner-toaster] {
+  body.print-supplier-quote [data-sonner-toaster],
+  body.print-rfq #root,
+  body.print-rfq [data-radix-portal],
+  body.print-rfq [data-sonner-toaster] {
     display: none !important;
   }
 
-  body.print-supplier-quote .supplier-quote-print-root {
+  body.print-supplier-quote .supplier-quote-print-root,
+  body.print-rfq .rfq-print-root {
     display: block !important;
     position: static !important;
     width: 100% !important;
@@ -1468,8 +1473,9 @@
   }
 }
 
-/* Screen: keep the supplier-quote print portal out of the layout */
-.supplier-quote-print-root {
+/* Screen: keep document print portals out of the layout */
+.supplier-quote-print-root,
+.rfq-print-root {
   display: none;
 }
 

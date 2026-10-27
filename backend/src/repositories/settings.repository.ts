@@ -33,6 +33,17 @@ export class SettingsRepository {
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } });
     return tenant?.name ?? "";
   }
+
+  /** Tenant-wide simple mode: skip estimate / change / final-work / invoice approval queues. */
+  async getSkipApprovals(tenantId: string): Promise<boolean> {
+    const settings = await this.ensureDefaults(tenantId);
+    return settings.skipApprovals;
+  }
+
+  async setSkipApprovals(tenantId: string, skipApprovals: boolean): Promise<TenantSettings> {
+    await this.ensureDefaults(tenantId);
+    return this.update(tenantId, { skipApprovals });
+  }
 }
 
 export const settingsRepository = new SettingsRepository();

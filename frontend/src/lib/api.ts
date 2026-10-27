@@ -187,6 +187,7 @@ export interface BackendUser {
   permissions?: {
     mode: "crud" | "read";
     modules?: Record<string, "none" | "read" | "crud">;
+    bypassApprovals?: boolean;
   };
   createdAt: string;
   updatedAt: string;
@@ -211,6 +212,7 @@ export interface CreateUserInput {
   permissions?: {
     mode: "crud" | "read";
     modules?: Record<string, "none" | "read" | "crud">;
+    bypassApprovals?: boolean;
   };
 }
 
@@ -229,6 +231,7 @@ export interface UpdateUserInput {
   permissions?: {
     mode: "crud" | "read";
     modules?: Record<string, "none" | "read" | "crud">;
+    bypassApprovals?: boolean;
   };
 }
 
@@ -1406,6 +1409,7 @@ export interface BackendSettings {
   autoAssignCoordinatorAfterInspection: boolean;
   autoAssignEstimatorAfterInspection: boolean;
   autoAssignEngineerOnApproval: boolean;
+  skipApprovals: boolean;
   guidedSetupFlow: boolean;
   defaultCoordinatorUserId: string | null;
   defaultInspectorUserId: string | null;
@@ -1434,6 +1438,7 @@ export interface UpdateSettingsInput {
   autoAssignCoordinatorAfterInspection?: boolean;
   autoAssignEstimatorAfterInspection?: boolean;
   autoAssignEngineerOnApproval?: boolean;
+  skipApprovals?: boolean;
   guidedSetupFlow?: boolean;
   defaultCoordinatorUserId?: string | null;
   defaultInspectorUserId?: string | null;
@@ -2923,10 +2928,11 @@ export const api = {
       noServiceWarranty?: boolean;
       amcStatus?: "active" | "expiring" | "expired" | "none";
     },
+    customerSummary?: string | null,
   ) =>
     request<BackendInvoice>("/api/domain/invoices/from-job", {
       method: "POST",
-      body: JSON.stringify({ jobId, dueAt, currency, additionalLines, equipmentWarranty }),
+      body: JSON.stringify({ jobId, dueAt, currency, additionalLines, equipmentWarranty, customerSummary }),
     }),
 
   recordInvoicePayment: (
