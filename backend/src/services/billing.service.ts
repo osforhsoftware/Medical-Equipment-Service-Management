@@ -68,6 +68,7 @@ type InvoiceLineUpdateInput = {
   unitPrice: number;
   taxRate?: number;
   discount?: number;
+  catalogItemId?: string | null;
 };
 
 function partsCostFromJob(job: {

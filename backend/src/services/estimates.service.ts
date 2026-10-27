@@ -161,6 +161,7 @@ export class EstimatesService {
       }
     }
     if (
+      updated &&
       (updated.status === "pendingAdminApproval" || data.status === "pendingAdminApproval")
       && await actorSkipsApprovals(tenantId, actorId)
     ) {
