@@ -31,7 +31,7 @@ export function normalizeQaChecklistDefaults(raw: unknown): string[] {
   return points.length ? points : [...DEFAULT_QA_CHECKLIST_POINTS];
 }
 
-export function buildQaChecklistFromDefaults(defaults: string[]): QaChecklistItem[] {
+export function buildQaChecklistFromDefaults(defaults: readonly string[]): QaChecklistItem[] {
   return normalizeQaChecklistDefaults(defaults).map((label, index) => ({
     id: `default-${index}`,
     label,
