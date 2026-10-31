@@ -68,10 +68,13 @@ export function ScannedEquipmentDetails({
       </p>
 
       <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+        <Field label="Description" value={equipment.name} />
+        <Field label="Manufacturer" value={equipment.manufacturer} />
+        <Field label="Model" value={equipment.model} />
+        <Field label="Serial Number" value={equipment.serialNumber} />
         <Field label="Customer" value={equipment.customerName} />
         <Field label="Location" value={equipment.location} icon={MapPin} />
         <Field label="Category" value={categoryName} />
-        <Field label="Serial" value={equipment.serialNumber} />
         <Field label="Part number" value={equipment.partNumber || "—"} />
         <Field label="Part description" value={equipment.partDescription || "—"} />
         <Field label="Additional note" value={equipment.additionalNote || "—"} />

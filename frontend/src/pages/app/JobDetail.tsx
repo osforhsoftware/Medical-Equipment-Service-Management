@@ -497,10 +497,14 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
     setCreatingRework(true);
     try {
       const rework = await api.createJobRework(job.id);
-      toast.success("Rework job created", { description: rework.reference });
-      navigate(`/app/jobs/${rework.id}`);
+      setJob(rework);
+      toast.success("Rework started", {
+        description: `Continuing under work order ${rework.reference}`,
+      });
+      setSearchParams({ tab: "overview" });
+      await refreshActivities(job.id);
     } catch (err) {
-      toast.apiError(err, { fallback: "Unable to create rework" });
+      toast.apiError(err, { fallback: "Unable to start rework" });
     } finally {
       setCreatingRework(false);
     }
@@ -1097,7 +1101,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                   ) : (
                     <Wrench className="mr-1.5 h-4 w-4" />
                   )}
-                  {creatingRework ? "Creating…" : "Create rework"}
+                  {creatingRework ? "Starting…" : "Start rework"}
                 </Button>
               ) : null}
               {workComplete && canAccessBilling ? (
@@ -1868,7 +1872,7 @@ export function ServiceJobDetail({ variant = "job" }: ServiceJobDetailProps) {
                         ) : (
                           <Wrench className="mr-1.5 h-4 w-4" />
                         )}
-                        {creatingRework ? "Creating…" : "Create rework"}
+                        {creatingRework ? "Starting…" : "Start rework"}
                       </Button>
                     ) : null}
                     {job.originalJobId ? (

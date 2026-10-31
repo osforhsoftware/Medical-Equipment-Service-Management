@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Eye, FilePenLine, MoreHorizontal, Plus } from "lucide-react";
+import { Eye, FilePenLine, MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { toast } from "@/lib/toast";
 import { EstimateNewSheet } from "@/components/estimates/EstimateNewSheet";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -210,6 +211,24 @@ export default function Estimates() {
           {canBuild && estimate.serviceRequestId && canEditEstimate(estimate.status) ? (
             <Button size="sm" variant="outline" asChild>
               <Link to={`/app/estimates/${estimate.serviceRequestId}/build`}>Edit</Link>
+            </Button>
+          ) : null}
+          {canBuild && canEditEstimate(estimate.status) ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-destructive"
+              onClick={() => {
+                if (!window.confirm(`Delete estimate ${estimate.reference}? This cannot be undone.`)) return;
+                void api.deleteEstimate(estimate.id)
+                  .then(() => {
+                    toast({ title: "Estimate deleted" });
+                    void estimatesQuery.refetch();
+                  })
+                  .catch((err) => toast.apiError(err, { fallback: "Unable to delete estimate" }));
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
             </Button>
           ) : null}
           <DropdownMenu>

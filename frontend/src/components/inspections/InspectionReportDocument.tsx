@@ -176,10 +176,10 @@ function equipmentFields(request: BackendServiceRequest, equipment: BackendEquip
 
   if (equipment.length) {
     for (const item of equipment) {
-      push("SL", item.serialNumber);
-      push("Model", item.model);
-      push("Make", item.manufacturer);
       push("Description", item.name);
+      push("Manufacturer", item.manufacturer);
+      push("Model", item.model);
+      push("Serial Number", item.serialNumber);
     }
     return rows;
   }

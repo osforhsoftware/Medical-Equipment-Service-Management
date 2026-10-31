@@ -706,19 +706,6 @@ export default function UserFormPage() {
                       </p>
                     ) : null}
 
-                    <div className="flex items-center justify-between rounded-lg border border-border p-3">
-                      <div>
-                        <p className="text-sm font-medium">Bypass approval steps</p>
-                        <p className="text-xs text-muted-foreground">
-                          User can move service tickets and invoices forward without waiting for approval. Turn off for users who must use the approval queue.
-                        </p>
-                      </div>
-                      <Switch
-                        checked={form.bypassApprovals}
-                        onCheckedChange={(checked) => setForm({ ...form, bypassApprovals: checked })}
-                      />
-                    </div>
-
                     <div className="overflow-x-auto rounded-md border border-border">
                       <table className="w-full min-w-[420px] text-sm">
                         <thead>

@@ -46,8 +46,9 @@ import { canEditEstimate, estimateLevelDiscount, estimateStatusLabel, newEstimat
 import { useSettings } from "@/context/SettingsContext";
 import { useAuth } from "@/context/AuthContext";
 import { shouldSkipApprovals } from "@/lib/userPermissions";
-import { defaultDatePlusDays, formatCurrency, formatDate, parseAmount } from "@/lib/format";
+import { convertCurrencyAmount, defaultDatePlusDays, formatCurrency, formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const estimateSchema = z.object({
   validUntil: fieldRules.requiredString("Valid until"),
@@ -268,6 +269,12 @@ export default function EstimateBuilder() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!estimate && settings?.masterCurrency) {
+      setCurrency(settings.masterCurrency);
+    }
+  }, [estimate, settings?.masterCurrency]);
 
   const totals = useMemo(() => summarizeLines(lines, discount), [lines, discount]);
   const credit = useCustomerCreditExposure(party?.id || ticket?.customerId);
@@ -583,7 +590,45 @@ export default function EstimateBuilder() {
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label htmlFor="currency">Currency</Label>
-                  <Input id="currency" value={currency} disabled={!editable} onChange={(e) => setCurrency(e.target.value.toUpperCase())} maxLength={10} />
+                  <Select
+                    value={currency}
+                    disabled={!editable}
+                    onValueChange={(next) => {
+                      const from = currency;
+                      const to = next.toUpperCase();
+                      if (from === to) {
+                        setCurrency(to);
+                        return;
+                      }
+                      const master = settings?.masterCurrency || "INR";
+                      const rates = settings?.exchangeRates ?? {};
+                      setLines((prev) =>
+                        prev.map((line) => ({
+                          ...line,
+                          unitPrice: Number(
+                            convertCurrencyAmount(Number(line.unitPrice) || 0, from, to, master, rates).toFixed(2),
+                          ),
+                          discount: Number(
+                            convertCurrencyAmount(Number(line.discount) || 0, from, to, master, rates).toFixed(2),
+                          ),
+                        })),
+                      );
+                      setDiscount((prev) =>
+                        Number(convertCurrencyAmount(prev, from, to, master, rates).toFixed(2)),
+                      );
+                      setCurrency(to);
+                    }}
+                  >
+                    <SelectTrigger id="currency">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="INR">INR (₹)</SelectItem>
+                      <SelectItem value="AED">AED</SelectItem>
+                      <SelectItem value="USD">USD ($)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Changing currency converts line amounts using Settings exchange rates.</p>
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="estimated-completion">Estimated completion</Label>
@@ -607,10 +652,6 @@ export default function EstimateBuilder() {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="discount">Discount</Label>
-                <Input id="discount" type="number" min={0} value={discount} disabled={!editable} onChange={(e) => setDiscount(parseAmount(e.target.value))} />
-              </div>
-              <div className="grid gap-2">
                 <Label htmlFor="terms">Payment terms / Terms & conditions</Label>
                 <Textarea id="terms" value={terms} disabled={!editable} onChange={(e) => setTerms(e.target.value)} rows={3} />
               </div>
@@ -620,7 +661,12 @@ export default function EstimateBuilder() {
               </div>
             </section>
             <div className="lg:sticky lg:top-36">
-              <EstimateSummary {...totals} />
+              <EstimateSummary
+                {...totals}
+                editableDiscount={discount}
+                onDiscountChange={setDiscount}
+                discountDisabled={!editable}
+              />
             </div>
           </div>
         </form>

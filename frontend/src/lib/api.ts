@@ -658,6 +658,7 @@ export interface BackendInvoice {
   balanceDue?: string | number;
   currency?: string;
   customerSummary?: string | null;
+  terms?: string | null;
   status: string;
   issuedAt: string;
   dueAt: string;
@@ -1417,6 +1418,8 @@ export interface BackendSettings {
   defaultEngineerUserId: string | null;
   qaChecklistDefaults: string[];
   rbacMatrix: Record<string, string[]>;
+  masterCurrency?: "INR" | "AED";
+  exchangeRates?: Record<string, number>;
 }
 
 export interface UpdateSettingsInput {
@@ -1446,6 +1449,8 @@ export interface UpdateSettingsInput {
   defaultEngineerUserId?: string | null;
   qaChecklistDefaults?: string[];
   rbacMatrix?: Record<string, string[]>;
+  masterCurrency?: "INR" | "AED";
+  exchangeRates?: Record<string, number>;
 }
 
 export interface DashboardTrend {
@@ -2015,6 +2020,9 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  deleteEquipment: (id: string) =>
+    request<void>(`/api/equipment/${id}`, { method: "DELETE" }),
+
   listTaxonomy: (params: { type: TaxonomyType; activeOnly?: boolean }) =>
     request<BackendTaxonomyTerm[]>(
       `/api/taxonomy${queryString({
@@ -2203,6 +2211,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+
+  deleteEstimate: (id: string) =>
+    request<void>(`/api/estimates/${id}`, { method: "DELETE" }),
 
   listJobs: (params?: JobListParams) =>
     requestPaginated<BackendServiceJob>(`/api/jobs${buildListQuery(params)}`),
@@ -2743,11 +2754,14 @@ export const api = {
 
   getInvoice: (id: string) => request<BackendInvoice>(`/api/billing/${id}`),
 
-  updateInvoice: (id: string, data: { dueAt?: string; customerSummary?: string | null; lineItems?: InvoiceLineInput[] }) =>
+  updateInvoice: (id: string, data: { dueAt?: string; customerSummary?: string | null; terms?: string | null; lineItems?: InvoiceLineInput[] }) =>
     request<BackendInvoice>(`/api/billing/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+
+  deleteInvoice: (id: string) =>
+    request<void>(`/api/billing/${id}`, { method: "DELETE" }),
 
   listServiceCatalog: () =>
     request<BackendCatalogItem[]>("/api/domain/service-catalog"),

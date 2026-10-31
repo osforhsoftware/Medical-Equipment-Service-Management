@@ -107,6 +107,10 @@ model TenantSettings {
   /// Default QA checklist point labels shown on jobs. Job-only extras are stored on the job.
   qaChecklistDefaults   Json     @default("[]") @map("qa_checklist_defaults")
   rbacMatrix            Json     @default("{}") @map("rbac_matrix")
+  /// Master / base currency for the tenant (INR or AED).
+  masterCurrency        String   @default("INR") @map("master_currency") @db.VarChar(10)
+  /// Exchange rates keyed by currency code, relative to masterCurrency (e.g. {"AED":0.044,"USD":0.012}).
+  exchangeRates         Json     @default("{}") @map("exchange_rates")
   createdAt             DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
 
@@ -1583,7 +1587,8 @@ model Invoice {
   paidTotal        Decimal       @default(0) @map("paid_total") @db.Decimal(12, 2)
   balanceDue       Decimal       @default(0) @map("balance_due") @db.Decimal(12, 2)
   customerSummary  String?       @map("customer_summary") @db.VarChar(200)
-  currency         String        @default("USD")
+  terms            String?       @db.Text
+  currency         String        @default("INR")
   status           InvoiceStatus @default(draft)
   approvedAt       DateTime?     @map("approved_at")
   approvedBy       String?       @map("approved_by")

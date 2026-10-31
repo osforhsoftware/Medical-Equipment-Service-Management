@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
-import { ArrowLeft, Loader2, Pencil, Printer, X } from "lucide-react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { ArrowLeft, Loader2, Pencil, Printer, Trash2, X } from "lucide-react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
 import { useFormValidation } from "@/hooks/useFormValidation";
@@ -24,7 +24,7 @@ import { ApiError, api, type BackendCatalogItem, type BackendCustomer, type Back
 import { newBillingLine, summarizeChargeGroups } from "@/lib/billingCharges";
 import { summarizeLines } from "@/lib/estimates";
 import { PAYMENT_METHOD_OPTIONS } from "@/lib/fixedOptions";
-import { formatCurrency, formatDate, formatDateTime, formatDocumentCurrency, formatServiceStatus } from "@/lib/format";
+import { formatCurrency, formatDate, formatDateTime, formatDocumentCurrency } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
@@ -102,6 +102,7 @@ const paymentSchema = z.object({
 export default function BillingInvoiceDetail() {
   const { user } = useAuth();
   const { settings } = useSettings();
+  const navigate = useNavigate();
   const skipApprovals = shouldSkipApprovals(settings, user);
   const { invoiceId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -113,6 +114,7 @@ export default function BillingInvoiceDetail() {
   const [editing, setEditing] = useState(false);
   const [editDueAt, setEditDueAt] = useState("");
   const [editLines, setEditLines] = useState<InvoiceLineInput[]>([]);
+  const [editTerms, setEditTerms] = useState("");
   const [customerSummary, setCustomerSummary] = useState("");
   const [summarySaving, setSummarySaving] = useState(false);
   const [payment, setPayment] = useState({ amount: 0, method: "bank_transfer", methodOther: "", reference: "", note: "" });
@@ -193,6 +195,7 @@ export default function BillingInvoiceDetail() {
     const editable = toEditableLines(invoice);
     setEditDueAt(invoice.dueAt.slice(0, 10));
     setEditLines(editable.length ? editable : [newLine()]);
+    setEditTerms(invoice.terms ?? "");
     editValidation.reset();
     setEditing(true);
     void Promise.all([
@@ -231,6 +234,7 @@ export default function BillingInvoiceDetail() {
     setEditing(false);
     setEditLines([]);
     setEditDueAt("");
+    setEditTerms(invoice?.terms ?? "");
     setCustomerSummary(invoice?.customerSummary ?? "");
     editValidation.reset();
   };
@@ -250,6 +254,7 @@ export default function BillingInvoiceDetail() {
       const updated = await api.updateInvoice(invoiceId, {
         dueAt: new Date(editDueAt).toISOString(),
         customerSummary: customerSummary.trim() || null,
+        terms: editTerms.trim() || null,
         lineItems: editLines.map((line) => ({
           id: line.id,
           type: line.type,
@@ -337,25 +342,33 @@ export default function BillingInvoiceDetail() {
     if (isSaleInvoice) {
       return [
         { label: "Sale", value: invoice.jobRef || "—" },
-        { label: "Status", value: invoice.status },
         { label: "Due date", value: formatDate(invoice.dueAt) },
       ];
     }
     const equipment = context?.job.equipment;
     return [
-      { label: "SL", value: equipment?.serialNumber || "—" },
-      { label: "Model", value: equipment?.model || "—" },
-      { label: "Make", value: equipment?.manufacturer || "—" },
+      { label: "Job Number", value: invoice.jobRef || "—" },
       { label: "Description", value: equipment?.name || context?.job.equipmentName || "—" },
-      { label: "Job", value: invoice.jobRef || "—" },
-      {
-        label: "Status",
-        value: context?.job.status
-          ? formatServiceStatus(context.job.status)
-          : invoice.status,
-      },
+      { label: "Manufacturer", value: equipment?.manufacturer || "—" },
+      { label: "Model", value: equipment?.model || "—" },
+      { label: "Serial Number", value: equipment?.serialNumber || "—" },
     ];
   }, [invoice, isSaleInvoice, context]);
+
+  const deleteInvoice = async () => {
+    if (!invoice || invoice.status !== "draft") return;
+    if (!window.confirm(`Delete draft invoice ${invoice.reference}? This cannot be undone.`)) return;
+    setSaving(true);
+    try {
+      await api.deleteInvoice(invoiceId);
+      toast({ title: "Invoice deleted" });
+      navigate(invoice.jobId ? `/app/billing/jobs/${invoice.jobId}` : "/app/finance");
+    } catch (error) {
+      toast.apiError(error, { fallback: "Unable to delete invoice" });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const printInvoice = () => {
     window.print();
@@ -455,6 +468,11 @@ export default function BillingInvoiceDetail() {
                     <Pencil className="mr-2 h-4 w-4" /> Edit invoice
                   </Button>
                 ) : null}
+                {invoice.status === "draft" && !(invoice.payments?.length) && !editing ? (
+                  <Button variant="outline" className="text-destructive" onClick={() => void deleteInvoice()} disabled={saving}>
+                    <Trash2 className="mr-2 h-4 w-4" /> Delete
+                  </Button>
+                ) : null}
                 {editing ? (
                   <>
                     <Button variant="outline" onClick={cancelEditing} disabled={saving}>
@@ -538,6 +556,17 @@ export default function BillingInvoiceDetail() {
                       total={editPreviewTotal}
                     />
 
+                    <div className="grid gap-2">
+                      <Label htmlFor="invoice-terms">Terms and conditions</Label>
+                      <Textarea
+                        id="invoice-terms"
+                        rows={4}
+                        value={editTerms}
+                        onChange={(e) => setEditTerms(e.target.value)}
+                        placeholder="Payment terms, warranty notes, and other conditions…"
+                      />
+                    </div>
+
                     <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
                       <Card>
                         <CardHeader className="pb-2">
@@ -569,6 +598,7 @@ export default function BillingInvoiceDetail() {
                               detailsHeading={isSaleInvoice ? "Sale details" : "Project details"}
                               detailRows={invoiceDetailRows}
                               lines={lines}
+                              terms={editTerms.trim() || undefined}
                               notes={context?.job.serviceRequest?.description ? `Service: ${context.job.serviceRequest.description}` : undefined}
                               hideToolbar
                               showFooter={false}
@@ -798,6 +828,7 @@ export default function BillingInvoiceDetail() {
                     detailsHeading={isSaleInvoice ? "Sale details" : "Project details"}
                     detailRows={invoiceDetailRows}
                     lines={lines}
+                    terms={invoice.terms || undefined}
                     notes={context?.job.serviceRequest?.description ? `Service: ${context.job.serviceRequest.description}` : undefined}
                     hideToolbar
                     showFooter={false}
@@ -832,6 +863,7 @@ export default function BillingInvoiceDetail() {
                   { label: "Paid", value: formatDocumentCurrency(invoice.paidTotal ?? 0) },
                   { label: "Balance", value: formatDocumentCurrency(invoice.balanceDue ?? invoice.total) },
                 ] : undefined}
+                terms={invoice.terms || undefined}
                 notes={context?.job.serviceRequest?.description ? `Service: ${context.job.serviceRequest.description}` : undefined}
                 hideToolbar
                 showFooter={false}

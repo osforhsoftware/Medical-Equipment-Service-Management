@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Check, X, UserCog } from "lucide-react";
@@ -71,6 +72,10 @@ export default function Settings() {
   const [logoUrl, setLogoUrl] = useState("");
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [defaultTaxRate, setDefaultTaxRate] = useState("0");
+  const [masterCurrency, setMasterCurrency] = useState<"INR" | "AED">("INR");
+  const [rateAed, setRateAed] = useState("0.044");
+  const [rateUsd, setRateUsd] = useState("0.012");
+  const [savingCurrency, setSavingCurrency] = useState(false);
   const [marginMode, setMarginMode] = useState<"on" | "fixed" | "off">("fixed");
   const [minMarginPct, setMinMarginPct] = useState("20");
   const [savingMargin, setSavingMargin] = useState(false);
@@ -121,6 +126,9 @@ export default function Settings() {
     setCompanyWebsite(settings.companyWebsite ?? "");
     setLogoUrl(settings.logoUrl ?? "");
     setDefaultTaxRate(String(settings.defaultTaxRate));
+    setMasterCurrency(settings.masterCurrency === "AED" ? "AED" : "INR");
+    setRateAed(String(settings.exchangeRates?.AED ?? (settings.masterCurrency === "AED" ? 22.7 : 0.044)));
+    setRateUsd(String(settings.exchangeRates?.USD ?? (settings.masterCurrency === "AED" ? 0.27 : 0.012)));
     setMarginMode(settings.marginMode === "on" || settings.marginMode === "off" ? settings.marginMode : "fixed");
     setMinMarginPct(String(settings.minMarginPct ?? 20));
     setRbacMatrix(
@@ -179,6 +187,28 @@ export default function Settings() {
       }
     } finally {
       setSavingOrg(false);
+    }
+  };
+
+  const saveCurrency = async () => {
+    const aed = Number(rateAed);
+    const usd = Number(rateUsd);
+    if (!Number.isFinite(aed) || aed <= 0 || !Number.isFinite(usd) || usd <= 0) {
+      toast.error("Enter positive exchange rates.");
+      return;
+    }
+    setSavingCurrency(true);
+    try {
+      const updated = await api.updateSettings({
+        masterCurrency,
+        exchangeRates: { AED: aed, USD: usd },
+      });
+      updateLocal(updated);
+      toast.success("Currency settings saved");
+    } catch (err) {
+      toast.apiError(err, { fallback: "Unable to save currency settings" });
+    } finally {
+      setSavingCurrency(false);
     }
   };
 
@@ -492,12 +522,16 @@ export default function Settings() {
                 </div>
                 <div className="grid gap-2 sm:col-span-2">
                   <Label htmlFor="company-address">Company address</Label>
-                  <Input
+                  <Textarea
                     id="company-address"
+                    rows={3}
                     value={companyAddress}
                     onChange={(e) => setCompanyAddress(e.target.value)}
-                    placeholder="Shown on invoices and estimates"
+                    placeholder={"Line 1\nCity, State / Emirate\nCountry"}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Use separate lines for street, city, and country. PDFs print each line separately.
+                  </p>
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="company-phone">Company phone</Label>
@@ -520,6 +554,43 @@ export default function Settings() {
                 </div>
               </div>
             </form>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-base">Currency</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Master currency for the organisation. Exchange rates are units of that currency per 1 master unit (used when converting estimates/invoices).
+              </p>
+            </div>
+            <Button size="sm" disabled={savingCurrency} onClick={() => void saveCurrency()}>
+              {savingCurrency ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+              Save
+            </Button>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-2">
+              <Label>Master currency</Label>
+              <Select value={masterCurrency} onValueChange={(v) => setMasterCurrency(v as "INR" | "AED")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="INR">INR (₹)</SelectItem>
+                  <SelectItem value="AED">AED</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="rate-aed">AED rate (vs {masterCurrency})</Label>
+              <Input id="rate-aed" type="number" min={0} step="0.0001" value={rateAed} onChange={(e) => setRateAed(e.target.value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="rate-usd">USD rate (vs {masterCurrency})</Label>
+              <Input id="rate-usd" type="number" min={0} step="0.0001" value={rateUsd} onChange={(e) => setRateUsd(e.target.value)} />
+            </div>
           </CardContent>
         </Card>
 

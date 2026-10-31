@@ -63,6 +63,64 @@ export function formatDateTime(value: string | Date | null | undefined) {
 
 export const CURRENCY_SYMBOL = "₹";
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  INR: "₹",
+  AED: "AED ",
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+};
+
+/** Active display currency for the session (updated from Settings). */
+let activeCurrencyCode = "INR";
+
+export function getActiveCurrency() {
+  return activeCurrencyCode;
+}
+
+export function setActiveCurrency(code: string | null | undefined) {
+  const next = String(code ?? "INR").trim().toUpperCase() || "INR";
+  activeCurrencyCode = next;
+  return next;
+}
+
+export function currencySymbol(code?: string | null) {
+  const key = String(code ?? activeCurrencyCode).trim().toUpperCase() || "INR";
+  return CURRENCY_SYMBOLS[key] ?? `${key} `;
+}
+
+/**
+ * Convert an amount between currencies using rates quoted vs the master currency.
+ * `rates` map: how many units of that currency equal 1 unit of master (e.g. AED: 0.044 means 1 INR = 0.044 AED when master is INR).
+ * When converting master→other: amount * rate[other].
+ * When converting other→master: amount / rate[other].
+ */
+export function convertCurrencyAmount(
+  amount: number,
+  from: string,
+  to: string,
+  master: string,
+  rates: Record<string, number>,
+) {
+  const src = from.toUpperCase();
+  const dst = to.toUpperCase();
+  const base = master.toUpperCase();
+  if (src === dst) return amount;
+  const toMaster = (value: number, code: string) => {
+    if (code === base) return value;
+    const rate = rates[code];
+    if (!rate || rate <= 0) return value;
+    return value / rate;
+  };
+  const fromMaster = (value: number, code: string) => {
+    if (code === base) return value;
+    const rate = rates[code];
+    if (!rate || rate <= 0) return value;
+    return value * rate;
+  };
+  return fromMaster(toMaster(amount, src), dst);
+}
+
 /** Compact Indian grouping once a value would otherwise overflow UI cells. */
 const COMPACT_AMOUNT = 1e12;
 
@@ -113,13 +171,13 @@ export function toMoney(value: unknown) {
   return formatGroupedNumber(value, { min: 0, max: 2 });
 }
 
-export function formatCurrency(value: unknown) {
-  return `${CURRENCY_SYMBOL}${toMoney(value)}`;
+export function formatCurrency(value: unknown, currencyCode?: string | null) {
+  return `${currencySymbol(currencyCode)}${toMoney(value)}`;
 }
 
 /** Invoice/estimate amounts always show two decimal places (₹0.00, ₹1,250.00). */
-export function formatDocumentCurrency(value: unknown) {
-  return `${CURRENCY_SYMBOL}${formatGroupedNumber(value, { min: 2, max: 2 })}`;
+export function formatDocumentCurrency(value: unknown, currencyCode?: string | null) {
+  return `${currencySymbol(currencyCode)}${formatGroupedNumber(value, { min: 2, max: 2 })}`;
 }
 
 /** Integer counts in tables, badges, and stat cards. */
@@ -159,11 +217,12 @@ export function formatAmountInWords(value: unknown) {
   return `${rupeeWords}${paiseWords} Only`;
 }
 
-export function formatCurrencyShort(amount: unknown) {
+export function formatCurrencyShort(amount: unknown, currencyCode?: string | null) {
   const n = parseAmount(amount);
-  if (Math.abs(n) >= 1_000_000) return `${CURRENCY_SYMBOL}${(n / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(n) >= 1_000) return `${CURRENCY_SYMBOL}${(n / 1_000).toFixed(1)}k`;
-  return `${CURRENCY_SYMBOL}${n.toFixed(0)}`;
+  const symbol = currencySymbol(currencyCode);
+  if (Math.abs(n) >= 1_000_000) return `${symbol}${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `${symbol}${(n / 1_000).toFixed(1)}k`;
+  return `${symbol}${n.toFixed(0)}`;
 }
 
 export function defaultDatePlusDays(days: number) {

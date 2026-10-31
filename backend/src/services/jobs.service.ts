@@ -573,6 +573,10 @@ export class JobsService {
     });
   }
 
+  /**
+   * QA / post-delivery rework keeps the same work order (job reference).
+   * Does not create a new JOB- number or change the service type.
+   */
   async createRework(tenantId: string, jobId: string, actorId: string, note?: string) {
     const original = await jobsRepository.findById(jobId, tenantId);
     if (!original) throw new AppError("Original job not found", 404);
@@ -581,48 +585,39 @@ export class JobsService {
     }
     const engineerId = original.engineerId;
     if (!engineerId) throw new AppError("Assign an engineer on the original job before creating rework", 409);
-    const scheduledFor = new Date();
-    scheduledFor.setDate(scheduledFor.getDate() + 1);
+
+    const openInvoice = await prisma.invoice.findFirst({
+      where: { tenantId, jobId, status: { not: "closed" } },
+      select: { id: true, reference: true },
+    });
+    if (openInvoice) {
+      throw new AppError(
+        `Cannot start rework on ${original.reference}: invoice ${openInvoice.reference} already exists. Void/close the invoice first.`,
+        409,
+      );
+    }
+
     return prisma.$transaction(async (tx) => {
-      const reference = await generateReference(tenantId, "JOB", "serviceJob", tx);
-      return tx.serviceJob.create({
+      const updated = await tx.serviceJob.update({
+        where: { id: jobId },
         data: {
-          tenantId,
-          serviceRequestId: original.serviceRequestId,
-          estimateId: null,
-          customerId: original.customerId,
-          equipmentId: original.equipmentId,
-          reference,
-          requestRef: original.requestRef,
-          customerName: original.customerName,
-          equipmentName: original.equipmentName,
-          engineer: original.engineer,
-          engineerId,
-          type: original.type,
-          typeOther: original.typeOther,
-          status: "scheduled",
-          scheduledFor,
-          progress: 0,
-          originalJobId: original.id,
+          status: "inProgress",
+          progress: Math.min(Number(original.progress ?? 100), 80),
           isRework: true,
-          assignments: {
-            create: {
-              tenantId,
-              userId: engineerId,
-              role: "engineer",
-              isLead: true,
-              assignedBy: actorId,
-            },
-          },
+          completedAt: null,
+          billingVerifiedAt: null,
+          billingVerifiedBy: null,
+          // Keep original type / typeOther / reference — do not treat as Additional Work
           activities: {
             create: {
               actor: "System",
               action: "Rework scheduled",
-              note: note?.trim() || `Rework of ${original.reference}`,
+              note: note?.trim() || `Rework under work order ${original.reference}`,
             },
           },
         },
       });
+      return updated;
     });
   }
 

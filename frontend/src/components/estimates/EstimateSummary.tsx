@@ -1,4 +1,5 @@
-import { formatCurrency } from "@/lib/format";
+import { Input } from "@/components/ui/input";
+import { formatCurrency, parseAmount } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 interface EstimateSummaryProps {
@@ -8,6 +9,10 @@ interface EstimateSummaryProps {
   total: number;
   className?: string;
   footer?: string;
+  /** When set, Discount becomes the single editable header-level discount field. */
+  editableDiscount?: number;
+  onDiscountChange?: (value: number) => void;
+  discountDisabled?: boolean;
 }
 
 export function EstimateSummary({
@@ -17,7 +22,11 @@ export function EstimateSummary({
   total,
   className,
   footer = "Final totals are calculated server-side.",
+  editableDiscount,
+  onDiscountChange,
+  discountDisabled,
 }: EstimateSummaryProps) {
+  const showEditable = typeof editableDiscount === "number" && typeof onDiscountChange === "function";
   return (
     <div className={cn("rounded-lg border border-border bg-card p-4", className)}>
       <h2 className="section-title mb-4">Estimate Summary</h2>
@@ -28,7 +37,21 @@ export function EstimateSummary({
         </div>
         <div className="flex min-w-0 items-center justify-between gap-3">
           <dt className="shrink-0 text-muted-foreground">Discount</dt>
-          <dd className="overflow-num text-right" title={`-${formatCurrency(discount)}`}>-{formatCurrency(discount)}</dd>
+          {showEditable ? (
+            <dd className="w-28">
+              <Input
+                type="number"
+                min={0}
+                className="h-8 text-right"
+                value={editableDiscount}
+                disabled={discountDisabled}
+                onChange={(e) => onDiscountChange(parseAmount(e.target.value))}
+                aria-label="Estimate discount"
+              />
+            </dd>
+          ) : (
+            <dd className="overflow-num text-right" title={`-${formatCurrency(discount)}`}>-{formatCurrency(discount)}</dd>
+          )}
         </div>
         <div className="flex min-w-0 items-center justify-between gap-3">
           <dt className="shrink-0 text-muted-foreground">Tax</dt>

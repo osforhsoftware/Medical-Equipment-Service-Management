@@ -6,6 +6,7 @@ import { api, ApiError, type BackendSettings } from "@/lib/api";
 import { buildDefaultRbacMatrix } from "@/config/defaultRbac";
 import { navItems } from "@/config/nav";
 import type { Role } from "@/data/types";
+import { setActiveCurrency } from "@/lib/format";
 
 interface SettingsState {
   settings: BackendSettings | null;
@@ -32,6 +33,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       const data = await api.getSettings();
+      setActiveCurrency(data.masterCurrency || "INR");
       setSettings(data);
     } catch (err) {
       if (!(err instanceof ApiError && err.status === 401)) {
@@ -87,15 +89,20 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return merged;
   }, [settings, defaults]);
 
+  const updateLocal = useCallback((next: BackendSettings) => {
+    setActiveCurrency(next.masterCurrency || "INR");
+    setSettings(next);
+  }, []);
+
   const value = useMemo(
     () => ({
       settings,
       loading,
       rbacMatrix,
       refresh,
-      updateLocal: setSettings,
+      updateLocal,
     }),
-    [settings, loading, rbacMatrix, refresh],
+    [settings, loading, rbacMatrix, refresh, updateLocal],
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

@@ -46,7 +46,7 @@ const noBorder = { style: BorderStyle.NONE, size: 0, color: WHITE };
 const borders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
 const noBorders = { top: noBorder, bottom: noBorder, left: noBorder, right: noBorder };
 
-const DATE_EDITED = "27 October 2026";
+const DATE_EDITED = "30 October 2026";
 
 const corrections = [
   {
@@ -286,6 +286,33 @@ const corrections = [
       "Save—the signature appears on the inspection report and related documents.",
     ],
   },
+  {
+    id: 19,
+    title: "Remove approval control from Users",
+    category: "Users · Administration",
+    location: "Administration → Users → create / edit user",
+    menuPath: "/app/users · /app/users/new · /app/users/{id}/edit",
+    what: "The “Bypass approval steps” switch is removed from the user create and edit form. Staff no longer set a per-user approval bypass on the Users screen. Approval behaviour is controlled by organization Settings (Skip approvals), not by a user-level toggle.",
+    how: [
+      "Open Users → create or edit a staff user.",
+      "Confirm there is no “Bypass approval steps” switch on the form.",
+      "Set roles and module access as usual, then save.",
+      "Use Admin → Settings → Skip approvals if the organization should run without approval queues.",
+    ],
+  },
+  {
+    id: 20,
+    title: "Final service report — remove Service section",
+    category: "Reports / PDFs",
+    location: "Jobs → Download Service Report (Final Service Report PDF)",
+    menuPath: "/app/jobs/{id} · mobile job detail (Download Service Report)",
+    what: "The Final Service Report PDF no longer includes the redundant Service section. Removed fields: Service Type, Ticket Number, Scheduled Date, Service Date, Completed Date, and Ticket Opened Date. Report number, service date, completed date, and ticket remain in the PDF header only.",
+    how: [
+      "Open a completed job and use Download Service Report (or regenerate the report).",
+      "Confirm there is no Service section listing Service Type, Ticket, Scheduled, Service date, Completed, or Ticket opened.",
+      "Confirm those key facts still appear once in the report header where needed.",
+    ],
+  },
 ];
 
 function p(text, opts = {}) {
@@ -516,7 +543,7 @@ const children = [
     columnWidths: [2800, 6560],
     rows: [
       metaRow("Document title", "MEMS Site Corrections & Updates Guide"),
-      metaRow("Subtitle", "Client information pack — 18 corrections completed"),
+      metaRow("Subtitle", "Client information pack — 20 corrections completed"),
       metaRow("Date last edited", DATE_EDITED),
       metaRow("Audience", "Client / operations staff / administrators"),
       metaRow("Status", "All listed corrections updated on the site"),
@@ -529,7 +556,7 @@ const children = [
   sectionBanner("1. Overview"),
   new Paragraph({ spacing: { after: 100 }, children: [] }),
   p(
-    "This guide informs the client that the Medical Equipment Service Management site has been updated with eighteen corrections. Each item below explains what was added or changed, which page or menu location to open, and how to use the new behaviour.",
+    "This guide informs the client that the Medical Equipment Service Management site has been updated with twenty corrections. Each item below explains what was added or changed, which page or menu location to open, and how to use the new behaviour.",
     { size: 20, spaceAfter: 120 },
   ),
   p("Main themes covered:", { bold: true, color: BLUE_DARK, size: 20, spaceAfter: 60 }),
@@ -543,6 +570,8 @@ const children = [
     "Purchase order workflow and configurable QA checklist",
     "Cleaner customer PDFs (no internal status/time; customer estimate/bill text only)",
     "Signature draw or upload for inspection, estimate, and billing",
+    "Approval bypass removed from Users form (use Settings skip-approvals instead)",
+    "Final service report PDF without redundant Service section fields",
   ].map((t) =>
     mixedRuns([
       { text: "•  ", bold: true, color: BLUE, size: 18 },
@@ -638,7 +667,7 @@ const children = [
       new TableRow({
         children: [
           cell("Jobs / QA / Settings", { bold: true, fill: BLUE_SOFT, width: 2800, fontSize: 17 }),
-          cell("1 Default tax (Settings) · 12 QA checklist defaults · 14 Service report PDF", {
+          cell("1 Default tax (Settings) · 12 QA checklist defaults · 14 Service report PDF · 20 Final service report Service section removed", {
             width: 6560,
             fontSize: 17,
           }),
@@ -650,6 +679,15 @@ const children = [
           cell("14 Inspection report PDF · 18 Signature draw / upload", { width: 6560, fontSize: 17 }),
         ],
       }),
+      new TableRow({
+        children: [
+          cell("Users / Settings", { bold: true, fill: BLUE_SOFT, width: 2800, fontSize: 17 }),
+          cell("19 Remove approval control from Users · Skip approvals remains in Settings", {
+            width: 6560,
+            fontSize: 17,
+          }),
+        ],
+      }),
     ],
   }),
 
@@ -658,7 +696,7 @@ const children = [
   sectionBanner("5. Notes for the client"),
   new Paragraph({ spacing: { after: 100 }, children: [] }),
   p(
-    "All eighteen corrections listed in this document are implemented on the live site. Staff should use the Where (menu) and How to use steps when training or verifying each change. If a later review finds any purchase-order step still missing or out of order, that can be listed in a short follow-up note under item 10.",
+    "All twenty corrections listed in this document are implemented on the live site. Staff should use the Where (menu) and How to use steps when training or verifying each change. If a later review finds any purchase-order step still missing or out of order, that can be listed in a short follow-up note under item 10.",
     { size: 19, spaceAfter: 120 },
   ),
   p("— End of Site Corrections & Updates Guide —", { center: true, color: MUTED, size: 16, spaceBefore: 200 }),
@@ -732,7 +770,19 @@ const doc = new Document({
   ],
 });
 
-const outDocx = path.resolve(__dirname, "MEMS_SITE_CORRECTIONS_CLIENT_GUIDE.docx");
+const preferred = path.resolve(__dirname, "MEMS_SITE_CORRECTIONS_CLIENT_GUIDE.docx");
+const fallback = path.resolve(__dirname, "MEMS_SITE_CORRECTIONS_CLIENT_GUIDE_UPDATED.docx");
 const buffer = await Packer.toBuffer(doc);
-fs.writeFileSync(outDocx, buffer);
+let outDocx = preferred;
+try {
+  fs.writeFileSync(outDocx, buffer);
+} catch (err) {
+  if (err && (err.code === "EBUSY" || err.code === "EPERM")) {
+    outDocx = fallback;
+    fs.writeFileSync(outDocx, buffer);
+    console.warn("Preferred DOCX was locked; wrote fallback instead.");
+  } else {
+    throw err;
+  }
+}
 console.log("Wrote", outDocx);

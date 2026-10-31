@@ -50,4 +50,6 @@ export const updateSettingsSchema = z.object({
     .max(30)
     .optional(),
   rbacMatrix: z.record(z.string(), z.array(z.enum(RBAC_ROLES))).optional(),
+  masterCurrency: z.enum(["INR", "AED"]).optional(),
+  exchangeRates: z.record(z.string(), z.coerce.number().positive()).optional(),
 });

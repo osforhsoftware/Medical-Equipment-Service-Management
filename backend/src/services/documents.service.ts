@@ -4,7 +4,6 @@ import { AppError } from "@/middleware/errorHandler";
 import { fileStorageService } from "@/services/fileStorage.service";
 import { BILLING_CHARGE_GROUPS, chargeGroupForType } from "@/utils/invoiceCharges";
 import { normalizeAdditionalFields } from "@/lib/additionalFields";
-import { formatInventoryItemClass } from "@/lib/inventoryItemClass";
 import { parseJobStageDetails } from "@/lib/jobStageDetails";
 import { customerDocumentSummary, SERVICE_CHARGE_LABEL } from "@/lib/customerDocumentSummary";
 import { calculateEstimateTotals, estimateLevelDiscount } from "@/lib/estimateTotals";
@@ -185,11 +184,6 @@ function prettyLabel(value: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function serviceTypeLabel(type: string, typeOther?: string | null) {
-  if (type === "Other" && displayValue(typeOther)) return displayValue(typeOther);
-  return type;
-}
-
 function customerFacingPersonName(value: unknown) {
   const text = displayValue(value);
   if (!text || /^system\s+administrator$/i.test(text)) return "";
@@ -203,11 +197,27 @@ function equipmentIdentityRows(equipment: {
   name?: string | null;
 }) {
   return [
-    { label: "SL", value: orDash(equipment.serialNumber) },
-    { label: "Model", value: orDash(equipment.model) },
-    { label: "Make", value: orDash(equipment.manufacturer) },
     { label: "Description", value: orDash(equipment.name) },
+    { label: "Manufacturer", value: orDash(equipment.manufacturer) },
+    { label: "Model", value: orDash(equipment.model) },
+    { label: "Serial Number", value: orDash(equipment.serialNumber) },
   ];
+}
+
+/** Split a long company address into readable lines for PDF headers. */
+function formatAddressLines(address: string | null | undefined): string[] {
+  const raw = displayValue(address);
+  if (!raw) return [];
+  const fromNewlines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (fromNewlines.length > 1) return fromNewlines;
+  // Split on commas into groups of ~2 segments per line for readability
+  const parts = raw.split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length <= 2) return [raw];
+  const lines: string[] = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    lines.push(parts.slice(i, i + 2).join(", "));
+  }
+  return lines;
 }
 
 function isServiceChargeType(type: string | null | undefined) {
@@ -288,7 +298,7 @@ export class DocumentsService {
     const textX = logoDrawn ? LEFT + 60 : LEFT;
     const name = tenant?.name ?? "MESMS";
     const contactLines = [
-      displayValue(settings?.companyAddress),
+      ...formatAddressLines(settings?.companyAddress),
       settings?.companyPhone ? `Mob: ${settings.companyPhone}` : "",
       displayValue(settings?.supportEmail),
       displayValue(settings?.companyWebsite),
@@ -300,8 +310,9 @@ export class DocumentsService {
     let contactY = headerTop + 18;
     doc.font("Helvetica").fontSize(9).fillColor(MUTED);
     for (const line of contactLines) {
-      doc.text(line, textX, contactY, { width: 260, lineBreak: false });
-      contactY += 12;
+      const h = doc.heightOfString(line, { width: 260 });
+      doc.text(line, textX, contactY, { width: 260 });
+      contactY += Math.max(12, h);
     }
     if (!contactLines.length && settings?.supportEmail) {
       doc.text(settings.supportEmail, textX, contactY, { width: 260, lineBreak: false });
@@ -351,28 +362,31 @@ export class DocumentsService {
     const colW = WIDTH / 2 - 12;
 
     doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text("BILL TO", LEFT, top);
-    doc.fillColor(INK).font("Helvetica-Bold").fontSize(11).text(billTo.name, LEFT, top + 14, {
-      width: colW,
-    });
+    doc.fillColor(INK).font("Helvetica-Bold").fontSize(11);
+    const nameH = doc.heightOfString(billTo.name, { width: colW });
+    doc.text(billTo.name, LEFT, top + 14, { width: colW });
     doc.font("Helvetica").fontSize(9).fillColor(MUTED);
-    let ly = top + 30;
+    let ly = top + 14 + Math.max(14, nameH) + 2;
     for (const line of billTo.lines ?? []) {
+      const h = doc.heightOfString(line, { width: colW });
       doc.text(line, LEFT, ly, { width: colW });
-      ly += 12;
+      ly += Math.max(12, h + 2);
     }
 
     const detailsHeading = (options?.detailsHeading ?? "PROJECT DETAILS").toUpperCase();
     doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text(detailsHeading, midX + 12, top);
     let my = top + 14;
     for (const row of meta) {
+      const labelW = 90;
+      const valueW = colW - labelW;
       doc.fillColor(INK).font("Helvetica-Bold").fontSize(9).text(`${row.label}:`, midX + 12, my, {
-        width: 72,
+        width: labelW,
         lineBreak: false,
       });
-      doc.fillColor(MUTED).font("Helvetica").fontSize(9).text(row.value, midX + 84, my, {
-        width: colW - 72,
-      });
-      my += 14;
+      doc.fillColor(MUTED).font("Helvetica").fontSize(9);
+      const valueH = doc.heightOfString(row.value, { width: valueW });
+      doc.text(row.value, midX + 12 + labelW, my, { width: valueW });
+      my += Math.max(14, valueH + 4);
     }
 
     const bottom = Math.max(ly, my) + 10;
@@ -675,25 +689,29 @@ export class DocumentsService {
     const colW = WIDTH / columns;
     let col = 0;
     let rowY = doc.y;
+    let rowHeight = 30;
     for (const row of rows) {
       if (col === 0) {
         this.ensureSpace(doc, 28);
         rowY = doc.y;
+        rowHeight = 30;
       }
       const x = LEFT + col * colW;
+      const valueWidth = colW - 12;
       doc.fillColor(LABEL).font("Helvetica-Bold").fontSize(7.5).text(row.label.toUpperCase(), x, rowY, {
-        width: colW - 12,
+        width: valueWidth,
       });
-      doc.fillColor(INK).font("Helvetica").fontSize(9).text(row.value, x, rowY + 11, {
-        width: colW - 12,
-      });
+      doc.fillColor(INK).font("Helvetica").fontSize(9);
+      const valueH = doc.heightOfString(row.value || " ", { width: valueWidth });
+      doc.text(row.value, x, rowY + 11, { width: valueWidth });
+      rowHeight = Math.max(rowHeight, 11 + valueH + 8);
       col += 1;
       if (col >= columns) {
         col = 0;
-        doc.y = rowY + 30;
+        doc.y = rowY + rowHeight;
       }
     }
-    if (col !== 0) doc.y = rowY + 30;
+    if (col !== 0) doc.y = rowY + rowHeight;
     doc.moveDown(0.4);
   }
 
@@ -1457,10 +1475,10 @@ export class DocumentsService {
       const detailRows = isSale
         ? [
             { label: "Sale", value: invoice.salesOrder?.reference || invoice.jobRef || "—" },
-            { label: "Status", value: invoice.status },
             { label: "Due date", value: fmtDate(invoice.dueAt) },
           ]
         : [
+            { label: "Job Number", value: invoice.jobRef || "—" },
             ...(invoice.job?.equipment
               ? equipmentIdentityRows({
                   serialNumber: invoice.job.equipment.serialNumber,
@@ -1471,8 +1489,6 @@ export class DocumentsService {
               : invoice.job?.equipmentName
                 ? [{ label: "Description", value: invoice.job.equipmentName }]
                 : []),
-            { label: "Job", value: invoice.jobRef || "—" },
-            { label: "Status", value: invoice.status },
           ];
       this.partyAndMeta(
         doc,
@@ -1516,13 +1532,18 @@ export class DocumentsService {
             : []),
         ]);
       }
+      const invoiceTerms = displayValue((invoice as { terms?: string | null }).terms);
+      if (invoiceTerms) {
+        this.sectionHeading(doc, "Terms and conditions");
+        doc.fillColor(MUTED).font("Helvetica").fontSize(9).text(invoiceTerms, { width: WIDTH });
+        doc.moveDown();
+      }
       kindLabel = "Invoice";
     } else if (kind === "service-report") {
       const job = await prisma.serviceJob.findFirst({
         where: { id: entityId, tenantId },
         include: {
           workLogs: { include: { user: true }, orderBy: { startedAt: "asc" } },
-          assignments: { where: { endedAt: null }, include: { user: true } },
           extras: { include: { inventoryItem: true } },
           stockDeductions: true,
           signature: true,
@@ -1553,11 +1574,6 @@ export class DocumentsService {
       const equipment = job.equipment ?? ticket?.equipment ?? null;
       const serviceStarted = narrativeLogs[0]?.startedAt ?? job.scheduledFor;
       const serviceEnded = job.completedAt ?? narrativeLogs[narrativeLogs.length - 1]?.endedAt ?? null;
-      const team =
-        job.assignments
-          .map((assignment) => customerFacingPersonName(assignment.user.name))
-          .filter(Boolean)
-          .join(", ") || customerFacingPersonName(job.engineer);
       const siteAddress = [
         displayValue(customer?.address),
         displayValue(customer?.city),
@@ -1570,7 +1586,6 @@ export class DocumentsService {
         { label: "Report No", value: reference },
         { label: "Service date", value: fmtDate(serviceStarted) },
         { label: "Completed", value: serviceEnded ? fmtDate(serviceEnded) : "—" },
-        { label: "Ticket", value: job.requestRef || "—" },
       ]);
 
       this.sectionHeading(doc, "Client details");
@@ -1580,7 +1595,9 @@ export class DocumentsService {
         { label: "Phone", value: orDash(customer?.phone) },
         { label: "Email", value: orDash(customer?.email) },
         { label: "City", value: orDash(customer?.city) },
-        { label: "GST / license", value: orDash(customer?.licenseGst) },
+        ...(displayValue(customer?.licenseGst)
+          ? [{ label: "GST / license", value: displayValue(customer?.licenseGst) }]
+          : []),
       ]);
       if (siteAddress || customer?.deliveryAddress) {
         this.keyValueRows(
@@ -1612,16 +1629,6 @@ export class DocumentsService {
       }
       this.keyValueRows(doc, equipmentRows);
 
-      this.sectionHeading(doc, "Service");
-      this.keyValueRows(doc, [
-        { label: "Service type", value: serviceTypeLabel(job.type, job.typeOther) },
-        ...(team ? [{ label: "Engineer / team", value: team }] : []),
-        { label: "Ticket", value: orDash(job.requestRef) },
-        { label: "Scheduled", value: fmtDate(job.scheduledFor) },
-        { label: "Service date", value: fmtDate(serviceStarted) },
-        { label: "Completed", value: serviceEnded ? fmtDate(serviceEnded) : "—" },
-        ...(ticket?.createdAt ? [{ label: "Ticket opened", value: fmtDate(ticket.createdAt) }] : []),
-      ]);
       if (displayValue(ticket?.description)) {
         this.sectionHeading(doc, "Reported problem");
         this.bodyParagraph(doc, displayValue(ticket?.description));
@@ -1654,57 +1661,6 @@ export class DocumentsService {
           this.sectionHeading(doc, "Recommendation");
           this.bodyParagraph(doc, recommendation);
         }
-      }
-
-      const takenRows: Array<{ item: string; sku: string; kind: string; taken: string; used: string }> = [];
-      for (const request of job.partsRequests) {
-        for (const line of request.lines) {
-          const issued = Number(line.qtyIssued);
-          const used = Number(line.qtyConsumed);
-          if (issued <= 0 && used <= 0) continue;
-          const kind = line.inventoryItem
-            ? formatInventoryItemClass(line.inventoryItem.itemClass)
-            : "Spare Parts";
-          takenRows.push({
-            item: line.itemName,
-            sku: line.sku,
-            kind,
-            taken: String(Math.max(issued, used)),
-            used: String(used),
-          });
-        }
-      }
-      for (const item of job.stockDeductions) {
-        const key = `${item.sku}::${item.itemName}`;
-        const existing = takenRows.find((row) => `${row.sku}::${row.item}` === key);
-        if (existing) {
-          existing.used = String(Math.max(Number(existing.used), item.quantity));
-          continue;
-        }
-        takenRows.push({
-          item: item.itemName,
-          sku: item.sku,
-          kind: "Spare Parts",
-          taken: String(item.quantity),
-          used: String(item.quantity),
-        });
-      }
-      for (const extra of job.extras) {
-        if (isServiceChargeType(extra.type)) continue;
-        takenRows.push({
-          item: extra.status === "approved" ? extra.description : `${extra.description} (${prettyLabel(extra.status)})`,
-          sku: extra.inventoryItem?.sku || "",
-          kind: prettyLabel(extra.type || "product"),
-          taken: String(Number(extra.quantity)),
-          used: extra.status === "approved" ? String(Number(extra.quantity)) : "0",
-        });
-      }
-
-      this.sectionHeading(doc, "Parts and products taken");
-      if (takenRows.length) {
-        this.drawUsageTable(doc, takenRows);
-      } else {
-        this.bodyParagraph(doc, "No parts or products were recorded on this job.");
       }
 
       const currentLines = (job.estimate?.lineItems ?? []).filter(
@@ -1748,24 +1704,6 @@ export class DocumentsService {
           );
         }
         if (qa.notes) this.bodyParagraph(doc, qa.notes);
-      }
-      const delivery = stages.delivery;
-      if (delivery?.deliveredAt || delivery?.method || delivery?.receivedBy) {
-        this.sectionHeading(doc, "Delivery");
-        this.keyValueRows(doc, [
-          { label: "Method", value: orDash(delivery.method) },
-          { label: "Received by", value: orDash(delivery.receivedBy) },
-          {
-            label: "Delivered",
-            value:
-              delivery.deliveredAt && !Number.isNaN(new Date(delivery.deliveredAt).getTime())
-                ? fmtDate(new Date(delivery.deliveredAt))
-                : "—",
-          },
-          { label: "Courier", value: orDash(delivery.courier?.name) },
-          { label: "Waybill", value: orDash(delivery.courier?.waybill) },
-        ]);
-        if (delivery.note) this.bodyParagraph(doc, delivery.note);
       }
 
       const jobFields = normalizeAdditionalFields(job.additionalFields);

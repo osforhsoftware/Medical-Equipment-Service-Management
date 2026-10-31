@@ -74,7 +74,7 @@ export default function InspectionReportView() {
   const canEdit =
     hasRole(INSPECTION_WRITE_ROLES) &&
     Boolean(request) &&
-    ["new", "inspection", "estimate"].includes(request!.status);
+    ["new", "inspection", "estimate", "pending_approval", "assigned_engineer"].includes(request!.status);
   const canShare = hasRole([...SHARE_ROLES]) && Boolean(report);
 
   const downloadPdf = async () => {

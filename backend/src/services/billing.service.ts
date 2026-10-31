@@ -19,6 +19,13 @@ export const BILLING_CHECKLIST = [
   { key: "stockAdjusted", label: "Stock Adjusted" },
 ] as const;
 
+/** Clearer label after QA rework: original estimate approval vs re-approval needed. */
+export function customerApprovalChecklistLabel(isRework?: boolean) {
+  return isRework
+    ? "Customer approval on file (original estimate — rework under same work order)"
+    : "Customer Approval Available";
+}
+
 export type BillingQueueKey =
   | "readyForBilling"
   | "waitingVerification"
@@ -93,6 +100,7 @@ function labourFromEstimate(estimate?: { lineItems: { type: string; lineTotal: P
 
 export function computeVerificationChecklist(job: {
   status: string;
+  isRework?: boolean | null;
   workLogs?: unknown[];
   signature: unknown | null;
   stockMovements?: unknown[];
@@ -139,6 +147,7 @@ export function computeVerificationChecklist(job: {
   const checks: Record<string, boolean> = {
     engineerReportSubmitted: workLogs.length > 0,
     inspectionCompleted: !ticketLinked || !!job.serviceRequest?.inspectionReport,
+    // Rework keeps the same work order; original estimate approval still applies unless rejected.
     customerApprovalAvailable: !ticketLinked || estimate?.status === "approved",
     partsConsumptionRecorded: !hasPartsInEstimate || stockMovements.length > 0,
     labourRecorded: !hasLabourInEstimate || workLogs.length > 0,
@@ -157,7 +166,16 @@ export function computeVerificationChecklist(job: {
   ]);
   const requiredKeys = BILLING_CHECKLIST.map((item) => item.key).filter((key) => !optionalKeys.has(key));
   const allPassed = requiredKeys.every((key) => checks[key]);
-  return { checks, allPassed, items: BILLING_CHECKLIST.map((item) => ({ ...item, passed: checks[item.key] })) };
+  const approvalLabel = customerApprovalChecklistLabel(Boolean(job.isRework));
+  return {
+    checks,
+    allPassed,
+    items: BILLING_CHECKLIST.map((item) => ({
+      ...item,
+      label: item.key === "customerApprovalAvailable" ? approvalLabel : item.label,
+      passed: checks[item.key],
+    })),
+  };
 }
 
 function invoicePaymentStatus(invoice: {
@@ -554,10 +572,19 @@ export class BillingService {
     tenantId: string,
     invoiceId: string,
     actor: Actor,
-    input: { dueAt?: Date; lineItems?: InvoiceLineUpdateInput[]; customerSummary?: string | null },
+    input: { dueAt?: Date; lineItems?: InvoiceLineUpdateInput[]; customerSummary?: string | null; terms?: string | null },
   ) {
-    const summaryOnly = input.customerSummary !== undefined && !input.dueAt && !input.lineItems?.length;
-    if (!input.dueAt && !input.lineItems?.length && input.customerSummary === undefined) {
+    const summaryOnly =
+      input.customerSummary !== undefined
+      && input.terms === undefined
+      && !input.dueAt
+      && !input.lineItems?.length;
+    if (
+      !input.dueAt
+      && !input.lineItems?.length
+      && input.customerSummary === undefined
+      && input.terms === undefined
+    ) {
       throw new AppError("Nothing to update", 422);
     }
 
@@ -579,6 +606,9 @@ export class BillingService {
       const updateData: Prisma.InvoiceUpdateInput = {};
       if (input.customerSummary !== undefined) {
         updateData.customerSummary = input.customerSummary?.trim() || null;
+      }
+      if (input.terms !== undefined) {
+        updateData.terms = input.terms?.trim() || null;
       }
       if (input.dueAt) updateData.dueAt = input.dueAt;
 

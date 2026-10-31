@@ -2,7 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { Plus, ChevronDown, CalendarDays, LayoutGrid, List, Loader2, X, FileSpreadsheet } from "lucide-react";
+import { Plus, Check, ChevronsUpDown, ChevronDown, CalendarDays, LayoutGrid, List, Loader2, Search, X, FileSpreadsheet } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { endOfMonth, format, parse, startOfMonth } from "date-fns";
 import { FormFieldError } from "@/components/shared/FormFieldError";
 import { RequiredMark } from "@/components/shared/RequiredMark";
@@ -345,6 +354,9 @@ export default function ServiceRequests() {
     description: "",
   });
   const [selectedEquipIds, setSelectedEquipIds] = useState<string[]>([]);
+  const [customerOpen, setCustomerOpen] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [equipmentSearch, setEquipmentSearch] = useState("");
   const [inspectors, setInspectors] = useState<BackendUser[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<BackendUser | null>(null);
   const [loadingStaff, setLoadingStaff] = useState(false);
@@ -630,10 +642,21 @@ export default function ServiceRequests() {
     });
     setSelectedEquipIds([]);
     setSelectedStaff(null);
+    setCustomerSearch("");
+    setEquipmentSearch("");
+    setCustomerOpen(false);
     resetValidation();
   };
 
-  const filteredEquipment = equipment.filter((e) => !form.customerId || e.customerId === form.customerId);
+  const filteredEquipment = equipment.filter((e) => {
+    if (form.customerId && e.customerId !== form.customerId) return false;
+    const q = equipmentSearch.trim().toLowerCase();
+    if (!q) return true;
+    return [e.name, e.assetTag, e.serialNumber, e.model, e.manufacturer]
+      .filter(Boolean)
+      .some((v) => String(v).toLowerCase().includes(q));
+  });
+  const selectedCustomer = customers.find((c) => c.id === form.customerId);
 
   const tableColumns: Column<BackendServiceRequest>[] = [
     {
@@ -998,27 +1021,60 @@ export default function ServiceRequests() {
                 Customer
                 <RequiredMark />
               </Label>
-              <Select
-                value={form.customerId}
-                onValueChange={(v) => {
-                  setForm({ ...form, customerId: v });
-                  setSelectedEquipIds([]);
-                  clearError("customerId");
-                  clearError("equipment");
-                  handleChange("customerId", { ...form, customerId: v });
-                }}
-              >
-                <SelectTrigger
-                  id="customerId"
-                  className={fieldErrorClass(shouldShow("customerId"))}
-                  {...fieldAria("customerId", shouldShow("customerId") ? errors.customerId : null)}
-                >
-                  <SelectValue placeholder="Select customer" />
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <Popover open={customerOpen} onOpenChange={setCustomerOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={customerOpen}
+                    id="customerId"
+                    className={cn(
+                      "w-full justify-between font-normal",
+                      fieldErrorClass(shouldShow("customerId")),
+                    )}
+                    {...fieldAria("customerId", shouldShow("customerId") ? errors.customerId : null)}
+                  >
+                    <span className="truncate">
+                      {selectedCustomer?.name ?? "Search and select a customer…"}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="z-[80] w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                  <Command>
+                    <CommandInput
+                      placeholder="Search customer by name…"
+                      value={customerSearch}
+                      onValueChange={setCustomerSearch}
+                    />
+                    <CommandList className="max-h-60">
+                      <CommandEmpty>No customer found.</CommandEmpty>
+                      <CommandGroup>
+                        {customers.map((c) => (
+                          <CommandItem
+                            key={c.id}
+                            value={`${c.name} ${c.phone ?? ""} ${c.reference ?? ""}`}
+                            onSelect={() => {
+                              setForm({ ...form, customerId: c.id });
+                              setSelectedEquipIds([]);
+                              setEquipmentSearch("");
+                              clearError("customerId");
+                              clearError("equipment");
+                              handleChange("customerId", { ...form, customerId: c.id });
+                              setCustomerOpen(false);
+                              setCustomerSearch("");
+                            }}
+                          >
+                            <Check className={cn("mr-2 h-4 w-4", form.customerId === c.id ? "opacity-100" : "opacity-0")} />
+                            <span className="truncate">{c.name}</span>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
               {shouldShow("customerId") && <FormFieldError field="customerId" message={errors.customerId} />}
             </div>
 
@@ -1044,6 +1100,17 @@ export default function ServiceRequests() {
                   })}
                 </div>
               )}
+              {form.customerId ? (
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={equipmentSearch}
+                    onChange={(e) => setEquipmentSearch(e.target.value)}
+                    placeholder="Search equipment by name, serial, model…"
+                    className="pl-8"
+                  />
+                </div>
+              ) : null}
               <div
                 className={fieldErrorClass(
                   shouldShow("equipment"),
@@ -1053,7 +1120,11 @@ export default function ServiceRequests() {
               >
                 {filteredEquipment.length === 0 ? (
                   <p className="p-3 text-xs text-muted-foreground">
-                    {form.customerId ? "No equipment for this customer." : "Select a customer first."}
+                    {!form.customerId
+                      ? "Select a customer first."
+                      : equipmentSearch.trim()
+                        ? "No equipment matches your search."
+                        : "No equipment for this customer."}
                   </p>
                 ) : (
                   filteredEquipment.map((e) => {
@@ -1071,7 +1142,12 @@ export default function ServiceRequests() {
                         <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? "border-primary bg-primary" : "border-border"}`}>
                           {checked && <span className="h-2 w-2 rounded-sm bg-white" />}
                         </span>
-                        <span className="font-medium">{e.name}</span>
+                        <span className="min-w-0 flex-1 text-left">
+                          <span className="font-medium">{e.name}</span>
+                          <span className="mt-0.5 block text-xs text-muted-foreground">
+                            {[e.manufacturer, e.model, e.serialNumber].filter(Boolean).join(" · ")}
+                          </span>
+                        </span>
                         <span className="ml-auto text-xs text-muted-foreground">{e.assetTag}</span>
                       </button>
                     );

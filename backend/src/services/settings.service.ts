@@ -35,6 +35,8 @@ type UpdateSettingsData = {
   defaultEngineerUserId?: string | null;
   qaChecklistDefaults?: string[];
   rbacMatrix?: Record<string, string[]>;
+  masterCurrency?: "INR" | "AED";
+  exchangeRates?: Record<string, number>;
 };
 
 function stripRole(matrix: Record<string, string[]>, module: string, role: string) {
@@ -140,6 +142,11 @@ export class SettingsService {
       defaultEngineerUserId: settings.defaultEngineerUserId,
       qaChecklistDefaults: normalizeQaChecklistDefaults(settings.qaChecklistDefaults),
       rbacMatrix: normalizeRbac(settings.rbacMatrix),
+      masterCurrency: settings.masterCurrency === "AED" ? "AED" : "INR",
+      exchangeRates:
+        settings.exchangeRates && typeof settings.exchangeRates === "object" && !Array.isArray(settings.exchangeRates)
+          ? (settings.exchangeRates as Record<string, number>)
+          : {},
     };
   }
 
@@ -213,6 +220,10 @@ export class SettingsService {
       updatePayload.qaChecklistDefaults = normalizeQaChecklistDefaults(data.qaChecklistDefaults) as Prisma.InputJsonValue;
     }
     if (data.rbacMatrix !== undefined) updatePayload.rbacMatrix = data.rbacMatrix as Prisma.InputJsonValue;
+    if (data.masterCurrency !== undefined) updatePayload.masterCurrency = data.masterCurrency;
+    if (data.exchangeRates !== undefined) {
+      updatePayload.exchangeRates = data.exchangeRates as Prisma.InputJsonValue;
+    }
 
     if (Object.keys(updatePayload).length > 0) {
       await settingsRepository.update(tenantId, updatePayload);

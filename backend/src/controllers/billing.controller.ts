@@ -124,6 +124,7 @@ export class BillingController {
         dueAt,
         lineItems: req.body.lineItems,
         customerSummary: req.body.customerSummary,
+        terms: req.body.terms,
       });
       res.json(success("Invoice updated successfully", result));
     } catch (err) { next(err); }

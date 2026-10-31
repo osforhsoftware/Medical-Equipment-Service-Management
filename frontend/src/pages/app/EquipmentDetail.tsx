@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Pencil, ShieldAlert } from "lucide-react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Pencil, ShieldAlert, Trash2 } from "lucide-react";
 import { EquipmentFormDialog } from "@/components/equipment/EquipmentFormDialog";
 import {
   ActivityTimeline,
@@ -22,10 +22,13 @@ import { useQuery } from "@tanstack/react-query";
 
 export default function EquipmentDetail() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const { hasRole } = useAuth();
   const canManage = hasRole(["admin", "coordinator", "inventory"]);
+  const canDelete = hasRole(["admin"]);
   const [searchParams, setSearchParams] = useSearchParams();
   const [editOpen, setEditOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [equipment, setEquipment] = useState<BackendEquipment | null>(null);
   const [history, setHistory] = useState<BackendEquipmentHistory | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,12 +95,32 @@ export default function EquipmentDetail() {
               <Pencil className="mr-1 h-4 w-4" /> Edit
             </Button>
           )}
+          {canDelete ? (
+            <Button
+              variant="outline"
+              className="text-destructive"
+              disabled={deleting}
+              onClick={() => {
+                if (!window.confirm(`Delete equipment ${equipment.name} (${equipment.assetTag})? This cannot be undone.`)) return;
+                setDeleting(true);
+                void api.deleteEquipment(equipment.id)
+                  .then(() => {
+                    toast({ title: "Equipment deleted" });
+                    navigate("/app/equipment");
+                  })
+                  .catch((err) => toast.apiError(err, { fallback: "Unable to delete equipment" }))
+                  .finally(() => setDeleting(false));
+              }}
+            >
+              <Trash2 className="mr-1 h-4 w-4" /> Delete
+            </Button>
+          ) : null}
         </div>
       ) : undefined}
       meta={equipment ? [
         { label: "Category", value: categoryName },
         { label: "Location", value: equipment.location || "—" },
-        { label: "Serial", value: equipment.serialNumber || "—" },
+        { label: "Serial Number", value: equipment.serialNumber || "—" },
       ] : undefined}
       loading={loading}
       error={error}
@@ -115,11 +138,12 @@ export default function EquipmentDetail() {
             <DetailSection title="Equipment details">
               <DetailInfoGrid
                 items={[
+                  { label: "Description", value: equipment.name },
                   { label: "Manufacturer", value: equipment.manufacturer },
                   { label: "Model", value: equipment.model },
+                  { label: "Serial Number", value: equipment.serialNumber },
                   { label: "Part number", value: equipment.partNumber || "—" },
                   { label: "Category", value: categoryName },
-                  { label: "Serial no.", value: equipment.serialNumber },
                   { label: "Location", value: equipment.location || "—" },
                   { label: "Customer", value: equipment.customerId ? (
                     <Link className="text-primary hover:underline normal-case" to={`/app/customers/${equipment.customerId}`}>

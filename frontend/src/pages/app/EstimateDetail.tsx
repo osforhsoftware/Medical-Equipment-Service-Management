@@ -13,6 +13,7 @@ import {
   PackageX,
   Printer,
   ShoppingCart,
+  Trash2,
 } from "lucide-react";
 import { EstimateDecisionPanel } from "@/components/estimates/EstimateDecisionPanel";
 import { EstimateItemsTable } from "@/components/estimates/EstimateItemsTable";
@@ -359,6 +360,26 @@ export default function EstimateDetail() {
                 <Link to={`/app/estimates/${estimate.serviceRequestId}/build`}>
                   <FilePenLine className="mr-1 h-4 w-4" /> Edit Estimate
                 </Link>
+              </Button>
+            ) : null}
+            {canBuild && canEditEstimate(estimate.status) ? (
+              <Button
+                variant="outline"
+                className="text-destructive"
+                disabled={saving}
+                onClick={() => {
+                  if (!window.confirm(`Delete estimate ${estimate.reference}? This cannot be undone.`)) return;
+                  setSaving(true);
+                  void api.deleteEstimate(estimate.id)
+                    .then(() => {
+                      toast({ title: "Estimate deleted" });
+                      navigate("/app/estimates");
+                    })
+                    .catch((err) => toast.apiError(err, { fallback: "Unable to delete estimate" }))
+                    .finally(() => setSaving(false));
+                }}
+              >
+                <Trash2 className="mr-1 h-4 w-4" /> Delete
               </Button>
             ) : null}
             <DropdownMenu>

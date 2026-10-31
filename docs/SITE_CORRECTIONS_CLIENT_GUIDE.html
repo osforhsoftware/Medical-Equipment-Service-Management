@@ -273,15 +273,15 @@
 
     <table class="meta">
       <tr><th>Document title</th><td>MEMS Site Corrections &amp; Updates Guide</td></tr>
-      <tr><th>Subtitle</th><td>Client information pack — 18 corrections completed</td></tr>
-      <tr><th>Date last edited</th><td>27 October 2026</td></tr>
+      <tr><th>Subtitle</th><td>Client information pack — 20 corrections completed</td></tr>
+      <tr><th>Date last edited</th><td>30 October 2026</td></tr>
       <tr><th>Audience</th><td>Client / operations staff / administrators</td></tr>
       <tr><th>Status</th><td>All listed corrections updated on the site</td></tr>
     </table>
 
     <h2 class="section">1. Overview</h2>
     <div class="overview">
-      <p>This guide informs the client that the Medical Equipment Service Management site has been updated with <strong>eighteen corrections</strong>. Each item explains what was added or changed, which page or menu to open, and how to use the new behaviour.</p>
+      <p>This guide informs the client that the Medical Equipment Service Management site has been updated with <strong>twenty corrections</strong>. Each item explains what was added or changed, which page or menu to open, and how to use the new behaviour.</p>
       <p><strong>Main themes covered:</strong></p>
       <ul>
         <li>Tax defaults and line tax entry on estimates and billing</li>
@@ -293,6 +293,8 @@
         <li>Purchase order workflow and configurable QA checklist</li>
         <li>Cleaner customer PDFs (no internal status/time; customer text only)</li>
         <li>Signature draw or upload for inspection, estimate, and billing</li>
+        <li>Approval bypass removed from Users form (use Settings skip-approvals instead)</li>
+        <li>Final service report PDF without redundant Service section fields</li>
       </ul>
     </div>
 
@@ -325,14 +327,15 @@
         <tr><td>Customers / Suppliers</td><td>6 Address · 8 Removed payment terms / rating / lead time</td></tr>
         <tr><td>Inventory / Reserve</td><td>7 No max stock · 9 QR code · 13 Optional purpose</td></tr>
         <tr><td>Purchase / RFQ / PO</td><td>10 PO workflow · 11 RFQ quote print &amp; share</td></tr>
-        <tr><td>Jobs / QA / Settings</td><td>1 Default tax (Settings) · 12 QA checklist defaults · 14 Service report PDF</td></tr>
+        <tr><td>Jobs / QA / Settings</td><td>1 Default tax (Settings) · 12 QA checklist defaults · 14 Service report PDF · 20 Final service report Service section removed</td></tr>
         <tr><td>Inspections</td><td>14 Inspection report PDF · 18 Signature draw / upload</td></tr>
+        <tr><td>Users / Settings</td><td>19 Remove approval control from Users · Skip approvals remains in Settings</td></tr>
       </tbody>
     </table>
 
     <h2 class="section">5. Notes for the client</h2>
     <p style="font-size:14px;margin:0 0 8px;">
-      All eighteen corrections listed in this document are implemented on the live site. Staff should use the <strong>Where (menu)</strong> and <strong>How to use</strong> steps when training or verifying each change. If a later review finds any purchase-order step still missing or out of order, that can be listed in a short follow-up note under item 10.
+      All twenty corrections listed in this document are implemented on the live site. Staff should use the <strong>Where (menu)</strong> and <strong>How to use</strong> steps when training or verifying each change. If a later review finds any purchase-order step still missing or out of order, that can be listed in a short follow-up note under item 10.
     </p>
     <p class="footer-note">— End of Site Corrections &amp; Updates Guide —</p>
   </main>
@@ -574,6 +577,33 @@
           "At inspection (or estimate / billing signature step), choose Draw or Upload.",
           "Draw on screen, or upload a signature image file.",
           "Save—the signature appears on the inspection report and related documents."
+        ]
+      },
+      {
+        id: 19,
+        title: "Remove approval control from Users",
+        category: "Users · Administration",
+        location: "Administration → Users → create / edit user",
+        path: "/app/users · /app/users/new · /app/users/{id}/edit",
+        what: "The “Bypass approval steps” switch is removed from the user create and edit form. Staff no longer set a per-user approval bypass on the Users screen. Approval behaviour is controlled by organization Settings (Skip approvals), not by a user-level toggle.",
+        how: [
+          "Open Users → create or edit a staff user.",
+          "Confirm there is no “Bypass approval steps” switch on the form.",
+          "Set roles and module access as usual, then save.",
+          "Use Admin → Settings → Skip approvals if the organization should run without approval queues."
+        ]
+      },
+      {
+        id: 20,
+        title: "Final service report — remove Service section",
+        category: "Reports / PDFs",
+        location: "Jobs → Download Service Report (Final Service Report PDF)",
+        path: "/app/jobs/{id} · mobile job detail (Download Service Report)",
+        what: "The Final Service Report PDF no longer includes the redundant Service section. Removed fields: Service Type, Ticket Number, Scheduled Date, Service Date, Completed Date, and Ticket Opened Date. Report number, service date, completed date, and ticket remain in the PDF header only.",
+        how: [
+          "Open a completed job and use Download Service Report (or regenerate the report).",
+          "Confirm there is no Service section listing Service Type, Ticket, Scheduled, Service date, Completed, or Ticket opened.",
+          "Confirm those key facts still appear once in the report header where needed."
         ]
       }
     ];
